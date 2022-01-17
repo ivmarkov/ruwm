@@ -1,0 +1,22 @@
+[package]
+name = "ruwm"
+version = "0.1.0"
+authors = ["ivmarkov <ivan.markov@gmail.com>"]
+edition = "2018"
+resolver = "2"
+categories = ["embedded", "hardware-support"]
+keywords = ["hal", "embedded"]
+description = "A library of subsystems for a water meter controller."
+repository = "https://github.com/ivmarkov/esp32-water-meter"
+readme = "README.md"
+
+[features]
+default = ["experimental"]
+
+experimental = ["embedded-svc/experimental"]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+embedded-hal = { version = "0.2" }
+embedded-svc = { version = "0.16", default-features = false }

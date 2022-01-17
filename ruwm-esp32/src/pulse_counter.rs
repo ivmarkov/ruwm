@@ -1,25 +1,10 @@
 use esp_idf_hal::ulp;
 use esp_idf_sys::EspError;
 
+use ruwm::pulse_counter;
+
 mod ulp_code_vars {
     include!(env!("ULP_FSM_RS"));
-}
-
-#[derive(Clone, Debug)]
-pub struct Data {
-    pub debounce_edges: u16,
-    pub wakeup_edges: u16,
-    pub edges_count: u16,
-}
-
-impl Default for Data {
-    fn default() -> Self {
-        Self {
-            debounce_edges: 5,
-            wakeup_edges: 0,
-            edges_count: 0,
-        }
-    }
 }
 
 pub struct PulseCounter(ulp::ULP);
@@ -31,7 +16,19 @@ impl PulseCounter {
         Self(ulp)
     }
 
-    pub fn initialize(&mut self) -> Result<(), EspError> {
+    pub fn ulp(&self) -> &ulp::ULP {
+        &self.0
+    }
+
+    pub fn ulp_mut(&mut self) -> &mut ulp::ULP {
+        &mut self.0
+    }
+}
+
+impl pulse_counter::PulseCounter for PulseCounter {
+    type Error = EspError;
+
+    fn initialize(&mut self) -> Result<(), Self::Error> {
         unsafe {
             self.ulp_mut().load(Self::ULP_CODE)?;
         }
@@ -40,17 +37,9 @@ impl PulseCounter {
         Ok(())
     }
 
-    pub fn ulp(&self) -> &ulp::ULP {
-        &self.0
-    }
-
-    pub fn ulp_mut(&mut self) -> &mut ulp::ULP {
-        &mut self.0
-    }
-
-    pub fn get_data(&self) -> Result<Data, EspError> {
+    fn get_data(&self) -> Result<pulse_counter::Data, Self::Error> {
         unsafe {
-            Ok(Data {
+            Ok(pulse_counter::Data {
                 edges_count: self
                     .ulp()
                     .read_word(ulp_code_vars::edge_count as *const _)?
@@ -67,8 +56,11 @@ impl PulseCounter {
         }
     }
 
-    pub fn swap_data(&mut self, data: &Data) -> Result<Data, EspError> {
-        let mut out_data: Data = Default::default();
+    fn swap_data(
+        &mut self,
+        data: &pulse_counter::Data,
+    ) -> Result<pulse_counter::Data, Self::Error> {
+        let mut out_data: pulse_counter::Data = Default::default();
 
         unsafe {
             out_data.edges_count = self

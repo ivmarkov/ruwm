@@ -27,7 +27,7 @@ const DURATIONS: [Duration; FLOW_STATS_INSTANCES] = [
     Duration::from_secs(60 * 60 * 24 * 30),
 ];
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FlowSnapshot {
     time: Duration,
     edges_count: u32,
@@ -39,6 +39,16 @@ impl FlowSnapshot {
             time: current_time,
             edges_count: current_edges_count,
         }
+    }
+
+    /// Get a reference to the flow snapshot's time.
+    pub fn time(&self) -> Duration {
+        self.time
+    }
+
+    /// Get a reference to the flow snapshot's edges count.
+    pub fn edges_count(&self) -> u32 {
+        self.edges_count
     }
 
     pub fn is_measurement_due(
@@ -78,15 +88,23 @@ impl FlowSnapshot {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FlowMeasurement {
     start: FlowSnapshot,
     end: FlowSnapshot,
 }
 
 impl FlowMeasurement {
-    pub fn new(start: FlowSnapshot, end: FlowSnapshot) -> Self {
+    pub const fn new(start: FlowSnapshot, end: FlowSnapshot) -> Self {
         Self { start, end }
+    }
+
+    pub fn start(&self) -> &FlowSnapshot {
+        &self.start
+    }
+
+    pub fn end(&self) -> &FlowSnapshot {
+        &self.end
     }
 }
 
@@ -101,11 +119,41 @@ pub struct WaterMeterStats {
 }
 
 impl WaterMeterStats {
-    fn update(&mut self, pulse_counter: &mut PulseCounter, now: Duration) -> anyhow::Result<bool> {
-        let ps_data = pulse_counter.swap_data(&super::pulse_counter::Data {
-            wakeup_edges: self.watch_start.as_ref().map(|_| 2).unwrap_or(0),
-            ..Default::default()
-        })?;
+    /// Get a reference to the water meter stats's installation.
+    pub fn installation(&self) -> &FlowSnapshot {
+        &self.installation
+    }
+
+    /// Get a reference to the water meter stats's watch start.
+    pub fn watch_start(&self) -> Option<&FlowSnapshot> {
+        self.watch_start.as_ref()
+    }
+
+    /// Get a reference to the water meter stats's most recent.
+    pub fn most_recent(&self) -> &FlowSnapshot {
+        &self.most_recent
+    }
+
+    /// Get a reference to the water meter stats's snapshots.
+    pub fn snapshots(&self) -> &[FlowSnapshot; FLOW_STATS_INSTANCES] {
+        &self.snapshots
+    }
+
+    /// Get a reference to the water meter stats's measurements.
+    pub fn measurements(&self) -> &[Option<FlowMeasurement>; FLOW_STATS_INSTANCES] {
+        &self.measurements
+    }
+
+    fn update<P>(&mut self, pulse_counter: &mut P, now: Duration) -> anyhow::Result<bool>
+    where
+        P: PulseCounter,
+    {
+        let ps_data = pulse_counter
+            .swap_data(&super::pulse_counter::Data {
+                wakeup_edges: self.watch_start.as_ref().map(|_| 2).unwrap_or(0),
+                ..Default::default()
+            })
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         self.most_recent = FlowSnapshot::new(
             now,
@@ -136,27 +184,28 @@ impl WaterMeterStats {
     }
 }
 
-pub struct WaterMeter<S, E, T, N> {
+pub struct WaterMeter<S, E, T, N, P> {
     event_bus: E,
     sys_time: N,
-    pulse_counter: PulseCounter,
+    pulse_counter: P,
     storage: S,
     stats: WaterMeterStats,
     timer: T,
 }
 
-impl<'a, S, E, N> WaterMeter<S, E, E::Timer<'a>, N>
+impl<'a, S, E, N, P> WaterMeter<S, E, E::Timer<'a>, N, P>
 where
     S: Storage<WaterMeterStats> + 'a,
     E: event_bus::EventBus<'a>,
     N: sys_time::SystemTime + 'a,
+    P: PulseCounter + 'a,
 {
     pub const EVENT_SOURCE: event_bus::Source<()> = event_bus::Source::new("WATER_METER");
 
     pub fn new(
         event_bus: E,
         sys_time: N,
-        pulse_counter: PulseCounter,
+        pulse_counter: P,
         storage: S,
     ) -> Result<Rc<RefCell<Self>>, anyhow::Error> {
         let state = Self {
@@ -192,6 +241,19 @@ where
         Ok(state)
     }
 
+    /// Get a reference to the water meter's stats.
+    pub fn stats(&self) -> &WaterMeterStats {
+        &self.stats
+    }
+
+    pub fn set_watch(&mut self, enabled: bool) {
+        if enabled {
+            self.stats.watch_start = Some(self.stats.most_recent().clone());
+        } else {
+            self.stats.watch_start = None;
+        }
+    }
+
     fn poll(&mut self) -> anyhow::Result<()> {
         if self
             .stats
@@ -199,10 +261,13 @@ where
             .unwrap()
         {
             self.event_bus
-                .post(event_bus::Priority::VeryHigh, &Self::EVENT_SOURCE, &());
+                .post(event_bus::Priority::VeryHigh, &Self::EVENT_SOURCE, &())
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
-        self.timer.schedule(Duration::from_millis(500));
+        self.timer
+            .schedule(Duration::from_millis(500))
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(())
     }

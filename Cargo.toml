@@ -1,9 +1,10 @@
-[package]
-name = "esp32-water-meter"
-version = "0.1.0"
-authors = ["ivmarkov <ivan.markov@gmail.com>"]
-edition = "2018"
+[workspace]
 resolver = "2"
+
+members = [
+    "ruwm",
+    "ruwm-esp32",
+]
 
 [patch.crates-io]
 esp-idf-svc = { path = "../esp-idf-svc" }
@@ -17,22 +18,3 @@ opt-level = "s"
 [profile.dev]
 debug = true # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
-
-[features]
-default = ["experimental"]
-
-native = ["esp-idf-sys/native"]
-experimental = ["esp-idf-hal/experimental", "esp-idf-svc/experimental", "embedded-svc/experimental"]
-
-[dependencies]
-anyhow = "1"
-log = "0.4"
-embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.16" }
-esp-idf-sys = { version = "0.30", features = ["binstart"] }
-esp-idf-svc = { version = "0.36" }
-esp-idf-hal = { version = "0.32" }
-
-[build-dependencies]
-embuild = { version = "0.28", features = ["espidf"] }
-anyhow = "1"

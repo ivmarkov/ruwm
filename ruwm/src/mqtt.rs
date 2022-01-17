@@ -1,4 +1,5 @@
 use core::fmt::{Debug, Display};
+use core::str;
 use core::time::Duration;
 
 extern crate alloc;
@@ -79,27 +80,28 @@ impl MessageParser {
     }
 
     fn parse_valve_command(data: &[u8]) -> Option<MqttCommand> {
-        Self::parse_flag(data).map(|flag| MqttCommand::Valve(flag))
+        Self::parse::<bool>(data).map(|flag| MqttCommand::Valve(flag))
     }
 
     fn parse_flow_watch_command(data: &[u8]) -> Option<MqttCommand> {
-        Self::parse_flag(data).map(|flag| MqttCommand::FlowWatch(flag))
+        Self::parse::<bool>(data).map(|flag| MqttCommand::FlowWatch(flag))
     }
 
     fn parse_keep_alive_command(data: &[u8]) -> Option<MqttCommand> {
-        Self::parse_number(data).map(|secs| MqttCommand::KeepAlive(Duration::from_secs(secs as _)))
+        Self::parse::<u32>(data).map(|secs| MqttCommand::KeepAlive(Duration::from_secs(secs as _)))
     }
 
     fn parse_system_update_command(data: &[u8]) -> Option<MqttCommand> {
         Self::parse_empty(data).map(|_| MqttCommand::SystemUpdate)
     }
 
-    fn parse_flag(data: &[u8]) -> Option<bool> {
-        todo!()
-    }
-
-    fn parse_number(data: &[u8]) -> Option<u32> {
-        todo!()
+    fn parse<T>(data: &[u8]) -> Option<T>
+    where
+        T: str::FromStr,
+    {
+        str::from_utf8(data)
+            .ok()
+            .and_then(|s| str::parse::<T>(s).ok())
     }
 
     fn parse_empty(data: &[u8]) -> Option<()> {
@@ -146,8 +148,6 @@ where
         client
             .subscribe("topic_todo", mqtt::client::QoS::AtMostOnce)
             .map_err(|e| anyhow::anyhow!(e))?;
-
-        //impl Fn(&mqtt::client::Event<M>)
 
         let state = Self {
             poster,

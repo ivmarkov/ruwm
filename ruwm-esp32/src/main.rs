@@ -1,11 +1,8 @@
 use esp_idf_sys as _;
 
-mod battery;
-mod mqtt;
+use ruwm as _;
+
 mod pulse_counter;
-mod storage;
-mod valve;
-mod water_meter;
 
 fn main() {
     // Temporary. Will disappear once ESP-IDF 4.4 is released, but for now it is necessary to call this function once,

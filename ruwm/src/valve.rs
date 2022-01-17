@@ -71,7 +71,9 @@ where
         if self.state != Some(ValveState::Open) || force {
             self.set_state(Some(ValveState::Opening))?;
 
-            self.timer.schedule(Duration::from_secs(20));
+            self.timer
+                .schedule(Duration::from_secs(20))
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         Ok(())
@@ -81,7 +83,9 @@ where
         if self.state != Some(ValveState::Closed) || force {
             self.set_state(Some(ValveState::Closing))?;
 
-            self.timer.schedule(Duration::from_secs(20));
+            self.timer
+                .schedule(Duration::from_secs(20))
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         Ok(())
@@ -100,11 +104,14 @@ where
     fn set_state(&mut self, state: Option<ValveState>) -> anyhow::Result<()> {
         if self.state != state {
             self.state = state;
-            self.event_bus.post(
-                event_bus::Priority::VeryHigh,
-                &Self::EVENT_SOURCE,
-                &self.state,
-            );
+
+            self.event_bus
+                .post(
+                    event_bus::Priority::VeryHigh,
+                    &Self::EVENT_SOURCE,
+                    &self.state,
+                )
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         Ok(())

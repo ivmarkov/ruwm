@@ -101,11 +101,15 @@ where
 
         if self.state != state {
             self.state = state;
+
             self.event_bus
-                .post(Default::default(), &Self::EVENT_SOURCE, &self.state);
+                .post(Default::default(), &Self::EVENT_SOURCE, &self.state)
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
-        self.timer.schedule(Duration::from_secs(2));
+        self.timer
+            .schedule(Duration::from_secs(2))
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(())
     }
