@@ -9,7 +9,7 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::event_bus;
-use embedded_svc::event_bus::Timer;
+use embedded_svc::timer::{self, Timer};
 
 use crate::storage::*;
 
@@ -19,98 +19,111 @@ pub struct BatteryState {
     powered: Option<bool>,
 }
 
-pub struct Battery<S, E, T, A, BP, PP> {
-    event_bus: E,
+pub struct Poller<A, BP, PP, P> {
     one_shot: A,
     battery_pin: BP,
     power_pin: PP,
-    timer: T,
-    storage: S,
-    state: BatteryState,
+    postbox: P,
 }
 
-impl<'a, S, E, A, BP, PP> Battery<S, E, E::Timer<'a>, A, BP, PP>
-where
-    S: Storage<BatteryState> + 'a,
-    E: event_bus::EventBus<'a>,
-{
-    pub const EVENT_SOURCE: event_bus::Source<BatteryState> = event_bus::Source::new("BATTERY");
+const EVENT_SOURCE: event_bus::Source<BatteryState> = event_bus::Source::new(b"BATTERY\0");
 
-    pub fn new<ADC, EE>(
-        event_bus: E,
-        storage: S,
-        one_shot: A,
-        battery_pin: BP,
-        power_pin: PP,
-    ) -> anyhow::Result<Rc<RefCell<Self>>>
-    where
-        A: adc::OneShot<ADC, u16, BP> + 'a,
-        BP: adc::Channel<ADC> + 'a,
-        PP: InputPin<Error = EE> + 'a,
-        EE: Display + Debug + Send + Sync + 'static,
-    {
-        let state = Self {
-            timer: event_bus
-                .timer(Default::default(), Self::EVENT_SOURCE.id())
-                .map_err(|e| anyhow::anyhow!(e))?,
-            event_bus,
-            one_shot,
-            battery_pin,
-            power_pin,
-            state: storage.get(),
-            storage,
-        };
-
-        let state = Rc::new(RefCell::new(state));
-        let weak = Rc::downgrade(&state);
-
-        {
-            let timer = &mut state.borrow_mut().timer;
-
-            timer
-                .callback(Some(move || {
-                    weak.upgrade()
-                        .map(|state| state.borrow_mut().poll())
-                        .unwrap_or(Ok(()))
-                }))
-                .map_err(|e| anyhow::anyhow!(e))?;
-
-            timer
-                .schedule(Duration::from_secs(0))
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
-
-        Ok(state)
-    }
-
-    pub fn state(&self) -> &BatteryState {
-        &self.state
-    }
-
-    fn poll<ADC, EE>(&mut self) -> anyhow::Result<()>
+impl<A, BP, PP, P> Poller<A, BP, PP, P> {
+    fn poll<ADC, EE>(&mut self, ss: &mut BatteryState, post: bool) -> anyhow::Result<()>
     where
         A: adc::OneShot<ADC, u16, BP>,
         BP: adc::Channel<ADC>,
         PP: InputPin<Error = EE>,
         EE: Display + Debug + Send + Sync + 'static,
+        P: event_bus::Postbox,
     {
         let state = BatteryState {
             voltage: self.one_shot.read(&mut self.battery_pin).ok(),
             powered: Some(self.power_pin.is_high().map_err(|e| anyhow::anyhow!(e))?),
         };
 
-        if self.state != state {
-            self.state = state;
+        if *ss != state {
+            *ss = state;
 
-            self.event_bus
-                .post(Default::default(), &Self::EVENT_SOURCE, &self.state)
-                .map_err(|e| anyhow::anyhow!(e))?;
+            if post {
+                self.postbox
+                    .post(&EVENT_SOURCE, ss)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+            }
         }
 
-        self.timer
-            .schedule(Duration::from_secs(2))
+        Ok(())
+    }
+}
+
+pub struct Battery<S, T>
+where
+    T: timer::PinnedTimerService,
+{
+    _timer: T::Timer,
+    storage: S,
+    state: Rc<RefCell<BatteryState>>,
+}
+
+impl<S, T> Battery<S, T>
+where
+    S: Storage<BatteryState>,
+    T: timer::PinnedTimerService,
+{
+    pub const EVENT_SOURCE: event_bus::Source<BatteryState> = EVENT_SOURCE;
+
+    pub fn new<ADC, B, EE, A, BP, PP>(
+        timer_service: &T,
+        postbox: B,
+        storage: S,
+        one_shot: A,
+        battery_pin: BP,
+        power_pin: PP,
+    ) -> anyhow::Result<Self>
+    where
+        B: event_bus::Postbox + 'static,
+        A: adc::OneShot<ADC, u16, BP> + 'static,
+        BP: adc::Channel<ADC> + 'static,
+        PP: InputPin<Error = EE> + 'static,
+        EE: Display + Debug + Send + Sync + 'static,
+    {
+        let mut poller = Poller {
+            one_shot,
+            battery_pin,
+            power_pin,
+            postbox,
+        };
+
+        let mut state = storage.get();
+
+        poller
+            .poll(&mut state, false)
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        Ok(())
+        let state = Rc::new(RefCell::new(state));
+        let state_timer = Rc::downgrade(&state);
+
+        let mut timer = timer_service
+            .timer(&Default::default(), move || {
+                state_timer
+                    .upgrade()
+                    .map(|s| poller.poll(&mut s.borrow_mut(), true))
+                    .unwrap_or(Ok(()))
+            })
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        timer
+            .periodic(Duration::from_secs(2))
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(Battery {
+            _timer: timer,
+            storage,
+            state,
+        })
+    }
+
+    pub fn state(&self) -> BatteryState {
+        *self.state.borrow()
     }
 }

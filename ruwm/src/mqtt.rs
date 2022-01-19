@@ -114,32 +114,32 @@ impl MessageParser {
 }
 
 pub struct MqttCommands<P> {
-    poster: P,
+    postbox: P,
     message_parser: MessageParser,
 }
 
 impl<P> MqttCommands<P>
 where
-    P: event_bus::Poster,
+    P: event_bus::Postbox,
 {
     pub const EVENT_SOURCE: event_bus::Source<MqttCommand> =
-        event_bus::Source::new("MQTT_COMMANDS");
+        event_bus::Source::new(b"MQTT_COMMANDS\0");
 
     pub fn callback<'a, C, M>(
         client: &mut C,
-        poster: P,
+        postbox: P,
     ) -> anyhow::Result<impl FnMut(&'a mqtt::client::Event<M>) -> anyhow::Result<()>>
     where
         C: mqtt::client::Client,
         M: mqtt::client::Message,
         C::Error: Debug + Display + Send + Sync + 'static,
     {
-        let mut this = Self::new::<_, M>(client, poster)?;
+        let mut this = Self::new::<_, M>(client, postbox)?;
 
         Ok(move |event| this.process(event))
     }
 
-    fn new<C, M>(client: &mut C, poster: P) -> anyhow::Result<Self>
+    fn new<C, M>(client: &mut C, postbox: P) -> anyhow::Result<Self>
     where
         C: mqtt::client::Client,
         M: mqtt::client::Message,
@@ -150,7 +150,7 @@ where
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let state = Self {
-            poster,
+            postbox,
             message_parser: Default::default(),
         };
 
@@ -163,8 +163,8 @@ where
     {
         if let mqtt::client::Event::Received(ref message) = mqtt_event {
             if let Some(command) = self.message_parser.process(message) {
-                self.poster
-                    .post(Default::default(), &Self::EVENT_SOURCE, &command)
+                self.postbox
+                    .post(&Self::EVENT_SOURCE, &command)
                     .map_err(|e| anyhow::anyhow!(e))?;
             }
         }

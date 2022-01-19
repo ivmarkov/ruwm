@@ -20,12 +20,12 @@ experimental = ["esp-idf-hal/experimental", "esp-idf-svc/experimental", "embedde
 anyhow = "1"
 log = "0.4"
 embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.16" }
+embedded-svc = { version = "0.16.3" }
 esp-idf-sys = { version = "0.30", features = ["binstart"] }
-esp-idf-svc = { version = "0.36" }
-esp-idf-hal = { version = "0.32" }
+esp-idf-svc = { version = "0.36.3" }
+esp-idf-hal = { version = "0.32.4" }
 ruwm = { version = "0.1", path = "../ruwm" }
 
 [build-dependencies]
-embuild = { version = "0.28", features = ["espidf"] }
+embuild = { version = "0.28.2", features = ["espidf"] }
 anyhow = "1"

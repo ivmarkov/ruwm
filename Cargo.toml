@@ -6,11 +6,8 @@ members = [
     "ruwm-esp32",
 ]
 
-[patch.crates-io]
-esp-idf-svc = { path = "../esp-idf-svc" }
-esp-idf-hal = { path = "../esp-idf-hal" }
-embedded-svc = { path = "../embedded-svc" }
-embuild = { git = "https://github.com/ivmarkov/embuild", branch = "ulp-fsm" }
+#[patch.crates-io]
+#esp-idf-svc = { path = "../esp-idf-svc" }
 
 [profile.release]
 opt-level = "s"

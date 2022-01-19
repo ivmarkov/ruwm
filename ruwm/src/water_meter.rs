@@ -6,8 +6,9 @@ extern crate alloc;
 use alloc::rc::Rc;
 
 use embedded_svc::event_bus;
-use embedded_svc::event_bus::Timer;
 use embedded_svc::sys_time;
+use embedded_svc::timer;
+use embedded_svc::timer::Timer;
 
 use crate::pulse_counter::*;
 use crate::storage::*;
@@ -129,6 +130,14 @@ impl WaterMeterStats {
         self.watch_start.as_ref()
     }
 
+    pub fn set_watch(&mut self, enabled: bool) {
+        if enabled {
+            self.watch_start = Some(self.most_recent().clone());
+        } else {
+            self.watch_start = None;
+        }
+    }
+
     /// Get a reference to the water meter stats's most recent.
     pub fn most_recent(&self) -> &FlowSnapshot {
         &self.most_recent
@@ -184,91 +193,96 @@ impl WaterMeterStats {
     }
 }
 
-pub struct WaterMeter<S, E, T, N, P> {
-    event_bus: E,
+const EVENT_SOURCE: event_bus::Source<()> = event_bus::Source::new(b"WATER_METER\0");
+
+pub struct Poller<C, N, P> {
+    pulse_counter: C,
     sys_time: N,
-    pulse_counter: P,
-    storage: S,
-    stats: WaterMeterStats,
-    timer: T,
+    postbox: P,
 }
 
-impl<'a, S, E, N, P> WaterMeter<S, E, E::Timer<'a>, N, P>
+impl<C, N, P> Poller<C, N, P>
 where
-    S: Storage<WaterMeterStats> + 'a,
-    E: event_bus::EventBus<'a>,
-    N: sys_time::SystemTime + 'a,
-    P: PulseCounter + 'a,
+    C: PulseCounter,
+    N: sys_time::SystemTime,
+    P: event_bus::Postbox,
 {
-    pub const EVENT_SOURCE: event_bus::Source<()> = event_bus::Source::new("WATER_METER");
+    fn poll(&mut self, state: &mut WaterMeterStats, post: bool) -> anyhow::Result<()> {
+        if state.update(&mut self.pulse_counter, self.sys_time.now())? && post {
+            self.postbox
+                .post(&EVENT_SOURCE, &())
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
 
-    pub fn new(
-        event_bus: E,
+        Ok(())
+    }
+}
+
+pub struct WaterMeter<S, T>
+where
+    T: timer::PinnedTimerService,
+{
+    storage: S,
+    stats: Rc<RefCell<WaterMeterStats>>,
+    _timer: T::Timer,
+}
+
+impl<S, T> WaterMeter<S, T>
+where
+    S: Storage<WaterMeterStats>,
+    T: timer::PinnedTimerService,
+{
+    pub const EVENT_SOURCE: event_bus::Source<()> = EVENT_SOURCE;
+
+    pub fn new<B, N, P>(
+        timer_service: &T,
+        postbox: B,
         sys_time: N,
         pulse_counter: P,
         storage: S,
-    ) -> Result<Rc<RefCell<Self>>, anyhow::Error> {
-        let state = Self {
-            timer: event_bus
-                .timer(event_bus::Priority::VeryHigh, Self::EVENT_SOURCE.id())
-                .map_err(|e| anyhow::anyhow!(e))?,
-            event_bus,
-            sys_time,
+    ) -> Result<Self, anyhow::Error>
+    where
+        B: event_bus::Postbox + 'static,
+        N: sys_time::SystemTime + 'static,
+        P: PulseCounter + 'static,
+    {
+        let mut poller = Poller {
             pulse_counter,
-            stats: storage.get(),
-            storage,
+            sys_time,
+            postbox,
         };
 
-        let state = Rc::new(RefCell::new(state));
-        let weak = Rc::downgrade(&state);
+        let mut stats = storage.get();
 
-        {
-            let timer = &mut state.borrow_mut().timer;
+        poller
+            .poll(&mut stats, false)
+            .map_err(|e| anyhow::anyhow!(e))?;
 
-            timer
-                .callback(Some(move || {
-                    weak.upgrade()
-                        .map(|state| state.borrow_mut().poll())
-                        .unwrap_or(Ok(()))
-                }))
-                .map_err(|e| anyhow::anyhow!(e))?;
+        let stats = Rc::new(RefCell::new(stats));
+        let stats_timer = Rc::downgrade(&stats);
 
-            timer
-                .schedule(Duration::from_secs(0))
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
+        let mut timer = timer_service
+            .timer(&Default::default(), move || {
+                stats_timer
+                    .upgrade()
+                    .map(|s| poller.poll(&mut *s.borrow_mut(), true))
+                    .unwrap_or(Ok(()))
+            })
+            .map_err(|e| anyhow::anyhow!(e))?;
 
-        Ok(state)
+        timer
+            .periodic(Duration::from_millis(500))
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(WaterMeter {
+            _timer: timer,
+            stats,
+            storage,
+        })
     }
 
     /// Get a reference to the water meter's stats.
-    pub fn stats(&self) -> &WaterMeterStats {
-        &self.stats
-    }
-
-    pub fn set_watch(&mut self, enabled: bool) {
-        if enabled {
-            self.stats.watch_start = Some(self.stats.most_recent().clone());
-        } else {
-            self.stats.watch_start = None;
-        }
-    }
-
-    fn poll(&mut self) -> anyhow::Result<()> {
-        if self
-            .stats
-            .update(&mut self.pulse_counter, self.sys_time.now())
-            .unwrap()
-        {
-            self.event_bus
-                .post(event_bus::Priority::VeryHigh, &Self::EVENT_SOURCE, &())
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
-
-        self.timer
-            .schedule(Duration::from_millis(500))
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        Ok(())
+    pub fn stats(&self) -> Rc<RefCell<WaterMeterStats>> {
+        self.stats.clone()
     }
 }
