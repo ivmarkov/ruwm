@@ -1,5 +1,3 @@
-use core::fmt::Debug;
-
 use futures::future::{select, Either};
 use futures::pin_mut;
 
@@ -7,22 +5,7 @@ use embedded_svc::channel::nonblocking::{Receiver, Sender};
 
 use crate::battery::BatteryState;
 use crate::valve::ValveCommand;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub struct WaterMeterState {
-    pub prev_edges_count: u64,
-    pub prev_armed: bool,
-    pub prev_leaking: bool,
-    pub edges_count: u64,
-    pub armed: bool,
-    pub leaking: bool,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum WaterMeterCommand {
-    Arm,
-    Disarm,
-}
+use crate::water_meter::WaterMeterState;
 
 pub async fn run<N, W, B>(mut notif: N, mut wm_status: W, mut battery_status: B)
 where

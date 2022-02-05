@@ -1,60 +1,32 @@
-use core::cell::RefCell;
+use esp_idf_hal::{mutex::Mutex, prelude::Peripherals};
+use esp_idf_svc::eventloop::EspExplicitEventLoop;
+use ruwm::{
+    state_snapshot::StateSnapshot,
+    valve::{self, ValveState},
+};
 
-extern crate alloc;
-use alloc::rc::Rc;
+mod event;
 
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 
-// pub struct WaterMeterStorage;
-
-// impl Storage<WaterMeterStats> for WaterMeterStorage {
-//     fn get(&self) -> WaterMeterStats {
-//         todo!()
-//     }
-
-//     fn set(&mut self, data: WaterMeterStats) {
-//         todo!()
-//     }
-// }
-
-// pub struct ValveStateStorage;
-
-// impl Storage<Option<ValveState>> for ValveStateStorage {
-//     fn get(&self) -> Option<ValveState> {
-//         todo!()
-//     }
-
-//     fn set(&mut self, data: Option<ValveState>) {
-//         todo!()
-//     }
-// }
-
-// pub struct BatteryStateStorage;
-
-// impl Storage<BatteryState> for BatteryStateStorage {
-//     fn get(&self) -> BatteryState {
-//         todo!()
-//     }
-
-//     fn set(&mut self, data: BatteryState) {
-//         todo!()
-//     }
-// }
-
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
 
-    // let peripherals = Peripherals::take().unwrap();
+    let peripherals = Peripherals::take().unwrap();
 
-    // let event_loop = EspPinnedEventLoop::new(&Default::default())?;
-    // let bus_timer_service = utils::pinned_timer::PinnedTimerService::new(
-    //     EspTimerService::new()?,
-    //     &event_bus,
+    let event_loop = EspExplicitEventLoop::new(&Default::default())?;
+
+    let valve_state = StateSnapshot::<Mutex<Option<ValveState>>>::new();
+
+    // let valve = valve::run(
+
+    //     Rc::new(RefCell::new(Valve::new(
+    //     &bus_timer_service,
     //     event_bus.postbox()?,
-    // )?;
-
-    // let sys_time = EspSystemTime;
+    //     event_bus.postbox()?,
+    //     ValveStateStorage,
+    // )?));
 
     // let water_meter = Rc::new(RefCell::new(WaterMeter::new(
     //     &bus_timer_service,
@@ -63,13 +35,6 @@ fn main() -> anyhow::Result<()> {
     //     EspSystemTime,
     //     pulse_counter::PulseCounter::new(peripherals.ulp),
     //     WaterMeterStorage,
-    // )?));
-
-    // let valve = Rc::new(RefCell::new(Valve::new(
-    //     &bus_timer_service,
-    //     event_bus.postbox()?,
-    //     event_bus.postbox()?,
-    //     ValveStateStorage,
     // )?));
 
     // let powered_adc1 = adc::PoweredAdc::new(

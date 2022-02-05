@@ -20,7 +20,7 @@ pub enum MqttCommand {
     SystemUpdate,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum MqttClientNotification {
     BeforeConnect,
     Connected(bool),
