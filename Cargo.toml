@@ -6,8 +6,13 @@ members = [
     "ruwm-esp32",
 ]
 
-#[patch.crates-io]
-#esp-idf-svc = { path = "../esp-idf-svc" }
+[patch.crates-io]
+embedded-svc = { path = "../embedded-svc" }
+esp-idf-hal = { path = "../esp-idf-hal" }
+esp-idf-svc = { path = "../esp-idf-svc" }
+atomic-polyfill = { git = "https://github.com/ivmarkov/atomic-polyfill" }
+critical-section = { git = "https://github.com/ivmarkov/critical-section" }
+embassy = { git = "https://github.com/embassy-rs/embassy" }
 
 [profile.release]
 opt-level = "s"

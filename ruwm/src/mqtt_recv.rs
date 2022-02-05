@@ -1,11 +1,16 @@
 use core::fmt::{Debug, Display};
+use core::ops::Deref;
+use core::result::Result;
 use core::str;
 use core::time::Duration;
 
 extern crate alloc;
+use alloc::format;
 
-use embedded_svc::event_bus;
+use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mqtt;
+use embedded_svc::mqtt::client::nonblocking::Connection;
+use embedded_svc::mqtt::client::{Client, Event, Message, MessageId, QoS};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum MqttCommand {
@@ -15,6 +20,80 @@ pub enum MqttCommand {
     SystemUpdate,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum MqttClientNotification {
+    BeforeConnect,
+    Connected(bool),
+    Disconnected,
+    Subscribed(MessageId),
+    Unsubscribed(MessageId),
+    Published(MessageId),
+    Deleted(MessageId),
+    Received(MessageId),
+    Error, // TODO
+}
+
+impl<M, E> From<&Result<Event<M>, E>> for MqttClientNotification
+where
+    M: Message,
+    E: Display,
+{
+    fn from(value: &Result<Event<M>, E>) -> Self {
+        match value {
+            Ok(event) => match event {
+                Event::BeforeConnect => MqttClientNotification::BeforeConnect,
+                Event::Connected(connected) => MqttClientNotification::Connected(*connected),
+                Event::Disconnected => MqttClientNotification::Disconnected,
+                Event::Subscribed(id) => MqttClientNotification::Subscribed(*id),
+                Event::Unsubscribed(id) => MqttClientNotification::Unsubscribed(*id),
+                Event::Published(id) => MqttClientNotification::Published(*id),
+                Event::Received(message) => MqttClientNotification::Received(message.id()),
+                Event::Deleted(id) => MqttClientNotification::Deleted(*id),
+            },
+            Err(_) => MqttClientNotification::Error,
+        }
+    }
+}
+
+pub async fn run<C, M, Q, S>(
+    mqttc: &mut C,
+    topic_prefix: impl AsRef<str>,
+    mut mqtt: M,
+    mut state: Q,
+    mut command: S,
+) where
+    C: Client,
+    M: Connection,
+    M::Error: Display,
+    Q: Sender<Data = MqttClientNotification>,
+    S: Sender<Data = MqttCommand>,
+{
+    mqttc
+        .subscribe(
+            format!("{}/commands/#", topic_prefix.as_ref()),
+            QoS::AtLeastOnce,
+        )
+        .unwrap();
+
+    let mut message_parser = MessageParser::new();
+
+    loop {
+        let incoming_ref = mqtt.next().await;
+        let incoming = incoming_ref.deref();
+
+        if let Some(incoming) = incoming {
+            let notification = MqttClientNotification::from(incoming);
+            state.send(notification).await.unwrap();
+
+            if let Ok(Event::Received(message)) = incoming {
+                if let Some(cmd) = message_parser.process(message) {
+                    command.send(cmd).await.unwrap();
+                }
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct MessageParser {
     command_parser: Option<fn(&[u8]) -> Option<MqttCommand>>,
@@ -22,6 +101,10 @@ struct MessageParser {
 }
 
 impl MessageParser {
+    fn new() -> Self {
+        Default::default()
+    }
+
     fn process<M>(&mut self, message: &M) -> Option<MqttCommand>
     where
         M: mqtt::client::Message,
@@ -112,100 +195,3 @@ impl MessageParser {
         }
     }
 }
-
-pub struct MqttCommands<P> {
-    postbox: P,
-    message_parser: MessageParser,
-}
-
-impl<P> MqttCommands<P>
-where
-    P: event_bus::Postbox,
-{
-    pub const EVENT_SOURCE: event_bus::Source<MqttCommand> =
-        event_bus::Source::new(b"MQTT_COMMANDS\0");
-
-    pub fn callback<'a, C, M>(
-        client: &mut C,
-        postbox: P,
-    ) -> anyhow::Result<impl FnMut(&'a mqtt::client::Event<M>) -> anyhow::Result<()>>
-    where
-        C: mqtt::client::Client,
-        M: mqtt::client::Message,
-        C::Error: Debug + Display + Send + Sync + 'static,
-    {
-        let mut this = Self::new::<_, M>(client, postbox)?;
-
-        Ok(move |event| this.process(event))
-    }
-
-    fn new<C, M>(client: &mut C, postbox: P) -> anyhow::Result<Self>
-    where
-        C: mqtt::client::Client,
-        M: mqtt::client::Message,
-        C::Error: Debug + Display + Send + Sync + 'static,
-    {
-        client
-            .subscribe("topic_todo", mqtt::client::QoS::AtMostOnce)
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        let state = Self {
-            postbox,
-            message_parser: Default::default(),
-        };
-
-        Ok(state)
-    }
-
-    fn process<M>(&mut self, mqtt_event: &mqtt::client::Event<M>) -> anyhow::Result<()>
-    where
-        M: mqtt::client::Message,
-    {
-        if let mqtt::client::Event::Received(ref message) = mqtt_event {
-            if let Some(command) = self.message_parser.process(message) {
-                self.postbox
-                    .post(&Self::EVENT_SOURCE, &command)
-                    .map_err(|e| anyhow::anyhow!(e))?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-// pub struct MqttStatusUpdates<M, C, SV, SW> {
-//     client: Rc<RefCell<M>>,
-//     connection: C,
-//     valve: Rc<RefCell<Valve<SV>>>,
-//     water_meter: Rc<RefCell<WaterMeter<SW>>>,
-// }
-
-// impl<Q, C, SV, SW> MqttStatusUpdates<Q, C, SV, SW> {
-//     pub const ID: &'static str = "MQTT_COMMANDS";
-
-//     pub fn new<E>(
-//         client: Rc<RefCell<Q>>,
-//         connection: C,
-//         valve: Rc<RefCell<Valve<SV>>>,
-//         water_meter: Rc<RefCell<WaterMeter<SW>>>,
-//     ) -> anyhow::Result<Rc<RefCell<Self>>>
-//     where
-//         Q: mqtt::client::Client<Error = E>,
-//         C: mqtt::client::Connection,
-//         E: Debug + Display + Send + Sync + 'static,
-//     {
-//         client
-//             .borrow_mut()
-//             .subscribe("topic_todo", mqtt::client::QoS::AtMostOnce)
-//             .map_err(|e| anyhow::anyhow!(e))?;
-
-//         let state = Self {
-//             client,
-//             connection,
-//             valve,
-//             water_meter,
-//         };
-
-//         Ok(Rc::new(RefCell::new(state)))
-//     }
-// }

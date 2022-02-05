@@ -5,9 +5,13 @@ use embuild::utils::OsStrExt;
 use embuild::*;
 
 fn main() -> anyhow::Result<()> {
-    build_ulp()?;
+    let cfg = build::CfgArgs::try_from_env("ESP_IDF")?;
 
-    build::CfgArgs::output_propagated("ESP_IDF")?;
+    if cfg.get("esp32").is_some() || cfg.get("esp32s2").is_some() {
+        build_ulp()?;
+    }
+
+    cfg.output();
     build::LinkArgs::output_propagated("ESP_IDF")?;
 
     Ok(())

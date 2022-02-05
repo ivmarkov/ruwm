@@ -40,17 +40,14 @@ impl pulse_counter::PulseCounter for PulseCounter {
     fn get_data(&self) -> Result<pulse_counter::Data, Self::Error> {
         unsafe {
             Ok(pulse_counter::Data {
-                edges_count: self
-                    .ulp()
-                    .read_word(ulp_code_vars::edge_count as *const _)?
-                    .value(),
+                edges_count: self.ulp().read_word(ulp_code_vars::edge_count)?.value(),
                 wakeup_edges: self
                     .ulp()
-                    .read_word(ulp_code_vars::edge_count_to_wake_up as *const _)?
+                    .read_word(ulp_code_vars::edge_count_to_wake_up)?
                     .value(),
                 debounce_edges: self
                     .ulp()
-                    .read_word(ulp_code_vars::debounce_max_count as *const _)?
+                    .read_word(ulp_code_vars::debounce_max_count)?
                     .value(),
             })
         }
@@ -63,26 +60,23 @@ impl pulse_counter::PulseCounter for PulseCounter {
         let mut out_data: pulse_counter::Data = Default::default();
 
         unsafe {
-            out_data.edges_count = self
-                .ulp()
-                .read_word(ulp_code_vars::edge_count as *const _)?
-                .value();
+            out_data.edges_count = self.ulp().read_word(ulp_code_vars::edge_count)?.value();
             self.ulp_mut()
-                .write_word(ulp_code_vars::edge_count as _, data.edges_count)?;
+                .write_word(ulp_code_vars::edge_count, data.edges_count)?;
 
             out_data.wakeup_edges = self
                 .ulp()
-                .read_word(ulp_code_vars::edge_count_to_wake_up as *const _)?
+                .read_word(ulp_code_vars::edge_count_to_wake_up)?
                 .value();
             self.ulp_mut()
-                .write_word(ulp_code_vars::edge_count_to_wake_up as _, data.wakeup_edges)?;
+                .write_word(ulp_code_vars::edge_count_to_wake_up, data.wakeup_edges)?;
 
             out_data.debounce_edges = self
                 .ulp()
-                .read_word(ulp_code_vars::debounce_max_count as *const _)?
+                .read_word(ulp_code_vars::debounce_max_count)?
                 .value();
             self.ulp_mut()
-                .write_word(ulp_code_vars::debounce_max_count as _, data.debounce_edges)?;
+                .write_word(ulp_code_vars::debounce_max_count, data.debounce_edges)?;
         }
 
         Ok(out_data)

@@ -18,5 +18,10 @@ experimental = ["embedded-svc/experimental"]
 [dependencies]
 anyhow = "1"
 log = "0.4"
+futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.16.3", default-features = false }
+embedded-svc = { version = "0.16.5" }
+#drogue-device = { version = "0.1", git = "https://github.com/drogue-iot/drogue-device" }
+drogue-device = { version = "0.1", path = "../../drogue-device/device" }
+pin-project = "1"
+embassy = { version = "0.1", git = "https://github.com/embassy-rs/embassy", features = ["time"] }
