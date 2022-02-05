@@ -16,6 +16,7 @@ use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::timer::nonblocking::Once;
 
 use crate::state_snapshot::StateSnapshot;
+use crate::storage::Storage;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ValveState {

@@ -3,22 +3,6 @@ use core::cell::RefCell;
 extern crate alloc;
 use alloc::rc::Rc;
 
-// use embedded_svc::{event_bus::Spin, utils};
-
-// use esp_idf_hal::{prelude::Peripherals, adc};
-
-// use esp_idf_svc::{
-//     eventloop::{EspPinnedEventBus, EspPostbox},
-//     systime::EspSystemTime,
-//     timer::EspTimerService, mqtt::client::{EspMqttClient, EspMqttMessage},
-// };
-
-// use ruwm::{
-//     storage::Storage,
-//     valve::{Valve, ValveState},
-//     water_meter::{WaterMeter, WaterMeterStats}, battery::{Battery, BatteryState}, mqtt::{MqttCommands, MqttStatusUpdates, MqttClientNotifications},
-// };
-
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 
@@ -59,8 +43,6 @@ mod pulse_counter;
 // }
 
 fn main() -> anyhow::Result<()> {
-    // Temporary. Will disappear once ESP-IDF 4.4 is released, but for now it is necessary to call this function once,
-    // or else some patches to the runtime implemented by esp-idf-sys might not link properly.
     esp_idf_sys::link_patches();
 
     // let peripherals = Peripherals::take().unwrap();

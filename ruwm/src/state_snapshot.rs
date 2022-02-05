@@ -4,6 +4,8 @@ use alloc::sync::Arc;
 use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mutex::Mutex;
 
+use crate::storage::Storage;
+
 #[derive(Clone)]
 pub struct StateSnapshot<M>(Arc<M>);
 
@@ -16,15 +18,6 @@ where
         S: Default,
     {
         Self(Arc::new(M::new(Default::default())))
-    }
-
-    pub fn get(&self) -> S
-    where
-        S: Clone,
-    {
-        let guard = self.0.lock();
-
-        guard.clone()
     }
 
     pub async fn update_with<N>(&self, updater: impl Fn(&S) -> S, notif: &mut N)
@@ -62,5 +55,23 @@ where
         if updated {
             notif.send(state).await.unwrap();
         }
+    }
+}
+
+impl<M, S> Storage<S> for StateSnapshot<M>
+where
+    M: Mutex<Data = S>,
+    S: Clone,
+{
+    fn get(&self) -> S {
+        let guard = self.0.lock();
+
+        guard.clone()
+    }
+
+    fn set(&mut self, data: S) {
+        let mut guard = self.0.lock();
+
+        *guard = data;
     }
 }
