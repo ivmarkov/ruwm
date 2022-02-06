@@ -27,21 +27,23 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub async fn run<M, C, N, P, PC>(
+pub fn timer<P: Periodic>(periodic: &mut P) -> impl Receiver<Data = ()> {
+    periodic.every(Duration::from_millis(200)).unwrap()
+}
+
+pub async fn run<M, C, N, T, PC>(
     state: StateSnapshot<M>,
     mut command: C,
     mut notif: N,
-    periodic: &mut P,
+    mut timer: T,
     mut pulse_counter: PC,
 ) where
     M: Mutex<Data = WaterMeterState>,
     C: Receiver<Data = WaterMeterCommand>,
     N: Sender<Data = WaterMeterState>,
-    P: Periodic,
+    T: Receiver<Data = ()>,
     PC: PulseCounter,
 {
-    let mut timer = periodic.every(Duration::from_millis(200)).unwrap();
-
     loop {
         let command = command.recv();
         let tick = timer.recv();

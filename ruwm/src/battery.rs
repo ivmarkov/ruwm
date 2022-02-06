@@ -23,24 +23,26 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub async fn run<M, N, P, ADC, A, BP, PP>(
+pub fn timer<P: Periodic>(periodic: &mut P) -> impl Receiver<Data = ()> {
+    periodic.every(Duration::from_secs(2)).unwrap()
+}
+
+pub async fn run<M, N, T, ADC, A, BP, PP>(
     state: StateSnapshot<M>,
     mut notif: N,
-    periodic: &mut P,
+    mut timer: T,
     mut one_shot: A,
     mut battery_pin: BP,
     power_pin: PP,
 ) where
     M: Mutex<Data = BatteryState>,
     N: Sender<Data = BatteryState>,
-    P: Periodic,
+    T: Receiver<Data = ()>,
     A: adc::OneShot<ADC, u16, BP>,
     BP: adc::Channel<ADC>,
     PP: InputPin,
     PP::Error: Debug,
 {
-    let mut timer = periodic.every(Duration::from_secs(2)).unwrap();
-
     loop {
         timer.recv().await.unwrap();
 
