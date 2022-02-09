@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     let mut mqtt_publish_bus = event_loop.clone().into_async::<MqttPublishEvent, _>();
 
     let mut periodic = EspPeriodic::new()?.into_async();
-    let mut once = EspOnce::new()?.into_async();
+    let once = EspOnce::new()?.into_async();
 
     let valve_state = state::<Option<ValveState>>();
     let battery_state = state::<BatteryState>();
@@ -151,7 +151,7 @@ fn main() -> anyhow::Result<()> {
     smol::block_on(async move {
         join(
             join(join(battery, water_meter), join(mqtt_sender, mqtt_receiver)),
-            emergency,
+            join(valve, emergency),
         )
         .await
     });
