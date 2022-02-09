@@ -6,7 +6,6 @@ use embedded_svc::mutex::Mutex;
 
 use crate::storage::Storage;
 
-#[derive(Clone)]
 pub struct StateSnapshot<M>(Arc<M>);
 
 impl<M, S> StateSnapshot<M>
@@ -55,6 +54,15 @@ where
         if updated {
             notif.send(state).await.unwrap();
         }
+    }
+}
+
+impl<M> Clone for StateSnapshot<M>
+where
+    M: Send + Sync,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 

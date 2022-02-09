@@ -19,11 +19,13 @@ experimental = ["esp-idf-hal/experimental", "esp-idf-svc/experimental", "embedde
 [dependencies]
 anyhow = "1"
 log = "0.4"
+smol = "1.2"
+futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.16.7" }
 esp-idf-sys = { version = "0.30", features = ["binstart"] }
 esp-idf-svc = { version = "0.36.9" }
-esp-idf-hal = { version = "0.32.9" }
+esp-idf-hal = { version = "0.32.10" }
 ruwm = { version = "0.1", path = "../ruwm" }
 
 [build-dependencies]

@@ -1,3 +1,5 @@
+use embedded_svc::mqtt::client::MessageId;
+
 use esp_idf_svc::eventloop::{EspEventFetchData, EspEventPostData, EspTypedEventSerDe};
 
 use ruwm::battery::BatteryState;
@@ -12,6 +14,9 @@ pub type WaterMeterStateEvent = SpecificEvent<WaterMeterState, 4>;
 pub type BatteryStateEvent = SpecificEvent<BatteryState, 5>;
 pub type MqttCommandEvent = SpecificEvent<MqttCommand, 6>;
 pub type MqttClientNotificationEvent = SpecificEvent<MqttClientNotification, 7>;
+pub type MqttPublishEvent = SpecificEvent<MessageId, 8>;
+pub type ValveSpinCommandEvent = SpecificEvent<ValveCommand, 9>;
+pub type ValveSpinNotifEvent = SpecificEvent<(), 10>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Event {

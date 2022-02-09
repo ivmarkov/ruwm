@@ -1,14 +1,23 @@
 use alloc::format;
+
 use futures::future::{select, Either};
 use futures::pin_mut;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::mqtt::client::nonblocking::Publish;
-use embedded_svc::mqtt::client::QoS;
+use embedded_svc::mqtt::client::nonblocking::{Client, MessageId, Publish, QoS};
 
 use crate::battery::BatteryState;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
+
+pub fn subscribe<C>(mqttc: &mut C, topic_prefix: impl AsRef<str>)
+where
+    C: Client,
+{
+    mqttc
+        .subscribe(format!("{}/#", topic_prefix.as_ref()), QoS::AtLeastOnce)
+        .unwrap();
+}
 
 pub async fn run<M, Q, V, W, B>(
     mut mqtt: M,
@@ -19,7 +28,7 @@ pub async fn run<M, Q, V, W, B>(
     mut battery_status: B,
 ) where
     M: Publish,
-    Q: Sender<Data = u32>,
+    Q: Sender<Data = MessageId>,
     V: Receiver<Data = Option<ValveState>>,
     W: Receiver<Data = WaterMeterState>,
     B: Receiver<Data = BatteryState>,

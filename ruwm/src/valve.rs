@@ -1,5 +1,6 @@
 use core::fmt::Debug;
-use core::future::*;
+use core::future::pending;
+use core::future::Pending;
 use core::time::Duration;
 
 use futures::future::join;
@@ -7,13 +8,11 @@ use futures::future::select;
 use futures::future::Either;
 use futures::pin_mut;
 
-use embedded_svc::channel::nonblocking::Channel;
+use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
+use embedded_svc::timer::nonblocking::Once;
 
 use embedded_hal::digital::v2::OutputPin;
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
-
-use embedded_svc::timer::nonblocking::Once;
 
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
@@ -32,13 +31,15 @@ pub enum ValveCommand {
     Close,
 }
 
-pub async fn run<M, C, N, SC, SN, O, PP, PO, PC>(
+pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
     state_snapshot: StateSnapshot<M>,
     command: C,
     notif: N,
     once: O,
-    spin_command: SC,
-    spin_notif: SN,
+    spin_command_sender: SCS,
+    spin_command_receiver: SCR,
+    spin_notif_sender: SNS,
+    spin_notif_receiver: SNR,
     power_pin: PP,
     open_pin: PO,
     close_pin: PC,
@@ -46,8 +47,10 @@ pub async fn run<M, C, N, SC, SN, O, PP, PO, PC>(
     M: Mutex<Data = Option<ValveState>>,
     C: Receiver<Data = ValveCommand>,
     N: Sender<Data = Option<ValveState>>,
-    SC: Channel<Data = ValveCommand>,
-    SN: Channel<Data = ()>,
+    SCS: Sender<Data = ValveCommand>,
+    SCR: Receiver<Data = ValveCommand>,
+    SNS: Sender<Data = ()>,
+    SNR: Receiver<Data = ()>,
     O: Once,
     PP: OutputPin,
     PO: OutputPin,
@@ -56,9 +59,6 @@ pub async fn run<M, C, N, SC, SN, O, PP, PO, PC>(
     PO::Error: Debug,
     PC::Error: Debug,
 {
-    let (spin_command_sender, spin_command_receiver) = spin_command.split();
-    let (spin_notif_sender, spin_notif_receiver) = spin_notif.split();
-
     join(
         run_events(
             state_snapshot,

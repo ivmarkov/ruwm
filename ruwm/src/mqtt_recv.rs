@@ -5,12 +5,11 @@ use core::str;
 use core::time::Duration;
 
 extern crate alloc;
-use alloc::format;
 
 use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mqtt;
 use embedded_svc::mqtt::client::nonblocking::Connection;
-use embedded_svc::mqtt::client::{Client, Event, Message, MessageId, QoS};
+use embedded_svc::mqtt::client::{Event, Message, MessageId};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum MqttCommand {
@@ -55,26 +54,13 @@ where
     }
 }
 
-pub async fn run<C, M, Q, S>(
-    mqttc: &mut C,
-    topic_prefix: impl AsRef<str>,
-    mut mqtt: M,
-    mut state: Q,
-    mut command: S,
-) where
-    C: Client,
+pub async fn run<M, Q, S>(mut mqtt: M, mut state: Q, mut command: S)
+where
     M: Connection,
     M::Error: Display,
     Q: Sender<Data = MqttClientNotification>,
     S: Sender<Data = MqttCommand>,
 {
-    mqttc
-        .subscribe(
-            format!("{}/commands/#", topic_prefix.as_ref()),
-            QoS::AtLeastOnce,
-        )
-        .unwrap();
-
     let mut message_parser = MessageParser::new();
 
     loop {
