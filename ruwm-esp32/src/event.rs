@@ -1,6 +1,9 @@
 use embedded_svc::mqtt::client::MessageId;
 
-use esp_idf_svc::eventloop::{EspEventFetchData, EspEventPostData, EspTypedEventSerDe};
+use esp_idf_svc::eventloop::{
+    EspEventFetchData, EspEventPostData, EspTypedEventDeserializer, EspTypedEventSerializer,
+    EspTypedEventSource,
+};
 
 use ruwm::battery::BatteryState;
 use ruwm::mqtt_recv::{MqttClientNotification, MqttCommand};
@@ -17,6 +20,7 @@ pub type MqttClientNotificationEvent = SpecificEvent<MqttClientNotification, 7>;
 pub type MqttPublishEvent = SpecificEvent<MessageId, 8>;
 pub type ValveSpinCommandEvent = SpecificEvent<ValveCommand, 9>;
 pub type ValveSpinNotifEvent = SpecificEvent<(), 10>;
+pub type WifiStatusNotifEvent = SpecificEvent<(), 11>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Event {
@@ -30,13 +34,17 @@ pub enum Event {
 
     MqttCommand(MqttCommand),
     MqttClientNotification(MqttClientNotification),
+
+    WifiStatus,
 }
 
-impl EspTypedEventSerDe<Event> for Event {
+impl EspTypedEventSource for Event {
     fn source() -> *const esp_idf_sys::c_types::c_char {
         b"WATER_METER\0".as_ptr() as *const _
     }
+}
 
+impl EspTypedEventSerializer<Event> for Event {
     fn serialize<R>(event: &Event, f: impl for<'a> FnOnce(&'a EspEventPostData) -> R) -> R {
         match event {
             Self::ValveCommand(payload) => ValveCommandEvent::serialize(payload, f),
@@ -48,9 +56,12 @@ impl EspTypedEventSerDe<Event> for Event {
             Self::MqttClientNotification(payload) => {
                 MqttClientNotificationEvent::serialize(payload, f)
             }
+            Self::WifiStatus => WifiStatusNotifEvent::serialize(&(), f),
         }
     }
+}
 
+impl EspTypedEventDeserializer<Event> for Event {
     fn deserialize<R>(data: &EspEventFetchData, f: &mut impl for<'a> FnMut(&'a Event) -> R) -> R {
         let id = Some(data.event_id);
 
@@ -69,6 +80,8 @@ impl EspTypedEventSerDe<Event> for Event {
                 Self::MqttCommand(*data.as_payload())
             } else if id == MqttClientNotificationEvent::event_id() {
                 Self::MqttClientNotification(*data.as_payload())
+            } else if id == WifiStatusNotifEvent::event_id() {
+                Self::WifiStatus
             } else {
                 panic!("Unknown event ID: {:?}", id);
             }
@@ -80,10 +93,7 @@ impl EspTypedEventSerDe<Event> for Event {
 
 pub struct SpecificEvent<P, const N: i32>(P);
 
-impl<P, const N: i32> EspTypedEventSerDe<P> for SpecificEvent<P, N>
-where
-    P: Copy,
-{
+impl<P, const N: i32> EspTypedEventSource for SpecificEvent<P, N> {
     fn source() -> *const esp_idf_sys::c_types::c_char {
         Event::source()
     }
@@ -91,11 +101,21 @@ where
     fn event_id() -> Option<i32> {
         Some(N)
     }
+}
 
+impl<P, const N: i32> EspTypedEventSerializer<P> for SpecificEvent<P, N>
+where
+    P: Copy,
+{
     fn serialize<R>(event: &P, f: impl for<'a> FnOnce(&'a EspEventPostData) -> R) -> R {
         f(&unsafe { EspEventPostData::new(Self::source(), Self::event_id(), event) })
     }
+}
 
+impl<P, const N: i32> EspTypedEventDeserializer<P> for SpecificEvent<P, N>
+where
+    P: Copy,
+{
     fn deserialize<R>(data: &EspEventFetchData, f: &mut impl for<'a> FnMut(&'a P) -> R) -> R {
         f(unsafe { data.as_payload() })
     }

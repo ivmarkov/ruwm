@@ -1,29 +1,40 @@
 use core::time::Duration;
+use std::sync::Arc;
 
-use event::{ValveSpinCommandEvent, ValveSpinNotifEvent};
+use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::utils::nonblocking::Asyncify;
+use esp_idf_svc::netif::EspNetifStack;
+use esp_idf_svc::nvs::EspDefaultNvs;
+use esp_idf_svc::sysloop::EspSysLoopStack;
+use esp_idf_svc::wifi::EspWifi;
+use esp_idf_sys::EspError;
+use event::{ValveSpinCommandEvent, ValveSpinNotifEvent, WifiStatusNotifEvent};
 use futures::future::join;
 
-use embedded_svc::event_bus::nonblocking::EventBus as _;
+use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
 use embedded_svc::event_bus::Spin;
 
 use esp_idf_hal::adc;
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_hal::prelude::Peripherals;
 
-use esp_idf_svc::eventloop::EspExplicitEventLoop;
+use esp_idf_svc::eventloop::{
+    EspEventLoop, EspEventLoopType, EspExplicitEventLoop, EspTypedEventDeserializer,
+    EspTypedEventSerializer,
+};
 use esp_idf_svc::mqtt::client::EspMqttClient;
 use esp_idf_svc::timer::{EspOnce, EspPeriodic};
 
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
-use ruwm::emergency;
 use ruwm::mqtt_recv;
 use ruwm::mqtt_send;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::valve::{self, ValveState};
 use ruwm::water_meter::{self, WaterMeterState};
+use ruwm::{emergency, pipe};
 
 use crate::event::{
     BatteryStateEvent, MqttClientNotificationEvent, MqttCommandEvent, MqttPublishEvent,
@@ -42,6 +53,24 @@ where
     StateSnapshot::<Mutex<S>>::new()
 }
 
+fn receiver<D, P, T>(event_loop: &mut EspEventLoop<T>) -> Result<impl Receiver<Data = P>, EspError>
+where
+    T: EspEventLoopType + Send + 'static,
+    D: EspTypedEventDeserializer<P>,
+    P: Clone + Send + Sync + 'static,
+{
+    event_loop.as_typed::<D, _>().as_async().subscribe()
+}
+
+fn sender<D, P, T>(event_loop: &mut EspEventLoop<T>) -> Result<impl Sender<Data = P>, EspError>
+where
+    T: EspEventLoopType + Send + 'static,
+    D: EspTypedEventSerializer<P>,
+    P: Clone + Send + Sync + 'static,
+{
+    event_loop.as_typed::<D, _>().as_async().postbox()
+}
+
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
 
@@ -49,25 +78,19 @@ fn main() -> anyhow::Result<()> {
 
     let mut event_loop = EspExplicitEventLoop::new(&Default::default())?;
 
-    let mut valve_command_bus = event_loop.clone().into_async::<ValveCommandEvent, _>();
-    let mut valve_state_bus = event_loop.clone().into_async::<ValveStateEvent, _>();
-
-    let mut valve_spin_command_bus = event_loop.clone().into_async::<ValveSpinCommandEvent, _>();
-    let mut valve_spin_notif_bus = event_loop.clone().into_async::<ValveSpinNotifEvent, _>();
-
-    let mut battery_state_bus = event_loop.clone().into_async::<BatteryStateEvent, _>();
-
-    let mut wm_command_bus = event_loop.clone().into_async::<WaterMeterCommandEvent, _>();
-    let mut wm_state_bus = event_loop.clone().into_async::<WaterMeterStateEvent, _>();
-
-    let mut mqtt_command_bus = event_loop.clone().into_async::<MqttCommandEvent, _>();
-    let mut mqtt_notif_bus = event_loop
-        .clone()
-        .into_async::<MqttClientNotificationEvent, _>();
-    let mut mqtt_publish_bus = event_loop.clone().into_async::<MqttPublishEvent, _>();
-
     let mut periodic = EspPeriodic::new()?.into_async();
     let once = EspOnce::new()?.into_async();
+
+    let netif_stack = Arc::new(EspNetifStack::new()?);
+    let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
+    let nvs_stack = Arc::new(EspDefaultNvs::new()?);
+
+    let mut wifi = EspWifi::new(netif_stack, sysloop_stack, nvs_stack)?;
+
+    let wifi_notif = pipe::run(
+        wifi.as_async().subscribe()?,
+        sender::<WifiStatusNotifEvent, _, _>(&mut event_loop)?,
+    );
 
     let valve_state = state::<Option<ValveState>>();
     let battery_state = state::<BatteryState>();
@@ -79,13 +102,13 @@ fn main() -> anyhow::Result<()> {
 
     let valve = valve::run(
         valve_state.clone(),
-        valve_command_bus.subscribe()?,
-        valve_state_bus.postbox()?,
+        receiver::<ValveCommandEvent, _, _>(&mut event_loop)?,
+        sender::<ValveStateEvent, _, _>(&mut event_loop)?,
         once,
-        valve_spin_command_bus.postbox()?,
-        valve_spin_command_bus.subscribe()?,
-        valve_spin_notif_bus.postbox()?,
-        valve_spin_notif_bus.subscribe()?,
+        sender::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
+        receiver::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
+        sender::<ValveSpinNotifEvent, _, _>(&mut event_loop)?,
+        receiver::<ValveSpinNotifEvent, _, _>(&mut event_loop)?,
         valve_power_pin,
         valve_open_pin,
         valve_close_pin,
@@ -101,7 +124,7 @@ fn main() -> anyhow::Result<()> {
 
     let battery = battery::run(
         battery_state.clone(),
-        battery_state_bus.postbox()?,
+        sender::<BatteryStateEvent, _, _>(&mut event_loop)?,
         battery::timer(&mut periodic),
         powered_adc1,
         battery_pin,
@@ -114,8 +137,8 @@ fn main() -> anyhow::Result<()> {
 
     let water_meter = water_meter::run(
         water_meter_state.clone(),
-        wm_command_bus.subscribe()?,
-        wm_state_bus.postbox()?,
+        receiver::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
+        sender::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
         water_meter::timer(&mut periodic),
         pulse_counter,
     );
@@ -129,29 +152,29 @@ fn main() -> anyhow::Result<()> {
 
     let mqtt_sender = mqtt_send::run(
         mqttc,
-        mqtt_publish_bus.postbox()?,
+        sender::<MqttPublishEvent, _, _>(&mut event_loop)?,
         topic_prefix,
-        valve_state_bus.subscribe()?,
-        wm_state_bus.subscribe()?,
-        battery_state_bus.subscribe()?,
+        receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
+        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
+        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
     );
 
     let mqtt_receiver = mqtt_recv::run(
         mqttconn,
-        mqtt_notif_bus.postbox()?,
-        mqtt_command_bus.postbox()?,
+        sender::<MqttClientNotificationEvent, _, _>(&mut event_loop)?,
+        sender::<MqttCommandEvent, _, _>(&mut event_loop)?,
     );
 
     let emergency = emergency::run(
-        valve_command_bus.postbox()?,
-        wm_state_bus.subscribe()?,
-        battery_state_bus.subscribe()?,
+        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
+        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
+        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
     );
 
     smol::block_on(async move {
         join(
             join(join(battery, water_meter), join(mqtt_sender, mqtt_receiver)),
-            join(valve, emergency),
+            join(join(valve, emergency), wifi_notif),
         )
         .await
     });

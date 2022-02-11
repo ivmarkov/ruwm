@@ -9,6 +9,7 @@ pub mod battery;
 pub mod emergency;
 pub mod mqtt_recv;
 pub mod mqtt_send;
+pub mod pipe;
 pub mod pulse_counter;
 pub mod state_snapshot;
 pub mod storage;
