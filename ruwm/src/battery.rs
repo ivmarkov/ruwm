@@ -6,7 +6,7 @@ use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::nonblocking::Periodic;
+use embedded_svc::timer::nonblocking::PeriodicTimer;
 
 use crate::state_snapshot::StateSnapshot;
 
@@ -23,10 +23,6 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub fn timer<P: Periodic>(periodic: &mut P) -> impl Receiver<Data = ()> {
-    periodic.every(Duration::from_secs(2)).unwrap()
-}
-
 pub async fn run<M, N, T, ADC, A, BP, PP>(
     state: StateSnapshot<M>,
     mut notif: N,
@@ -37,14 +33,16 @@ pub async fn run<M, N, T, ADC, A, BP, PP>(
 ) where
     M: Mutex<Data = BatteryState>,
     N: Sender<Data = BatteryState>,
-    T: Receiver<Data = ()>,
+    T: PeriodicTimer,
     A: adc::OneShot<ADC, u16, BP>,
     BP: adc::Channel<ADC>,
     PP: InputPin,
     PP::Error: Debug,
 {
+    let mut tick = timer.every(Duration::from_secs(2)).unwrap();
+
     loop {
-        timer.recv().await.unwrap();
+        tick.recv().await.unwrap();
 
         let voltage = one_shot.read(&mut battery_pin).ok();
 

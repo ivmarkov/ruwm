@@ -2,10 +2,12 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::timer::nonblocking::TimerService;
 use embedded_svc::utils::nonblocking::Asyncify;
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
+use esp_idf_svc::timer::EspTimerService;
 use esp_idf_svc::wifi::EspWifi;
 use esp_idf_sys::EspError;
 use event::{ValveSpinCommandEvent, ValveSpinNotifEvent, WifiStatusNotifEvent};
@@ -23,7 +25,6 @@ use esp_idf_svc::eventloop::{
     EspTypedEventSerializer,
 };
 use esp_idf_svc::mqtt::client::EspMqttClient;
-use esp_idf_svc::timer::{EspOnce, EspPeriodic};
 
 use pulse_counter::PulseCounter;
 
@@ -78,8 +79,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut event_loop = EspExplicitEventLoop::new(&Default::default())?;
 
-    let mut periodic = EspPeriodic::new()?.into_async();
-    let once = EspOnce::new()?.into_async();
+    let mut timer_service = EspTimerService::new()?.into_async();
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -104,7 +104,7 @@ fn main() -> anyhow::Result<()> {
         valve_state.clone(),
         receiver::<ValveCommandEvent, _, _>(&mut event_loop)?,
         sender::<ValveStateEvent, _, _>(&mut event_loop)?,
-        once,
+        timer_service.timer()?,
         sender::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
         receiver::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
         sender::<ValveSpinNotifEvent, _, _>(&mut event_loop)?,
@@ -125,7 +125,7 @@ fn main() -> anyhow::Result<()> {
     let battery = battery::run(
         battery_state.clone(),
         sender::<BatteryStateEvent, _, _>(&mut event_loop)?,
-        battery::timer(&mut periodic),
+        timer_service.timer()?,
         powered_adc1,
         battery_pin,
         power_pin,
@@ -139,7 +139,7 @@ fn main() -> anyhow::Result<()> {
         water_meter_state.clone(),
         receiver::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
         sender::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
-        water_meter::timer(&mut periodic),
+        timer_service.timer()?,
         pulse_counter,
     );
 

@@ -1,12 +1,12 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embedded_svc::timer::nonblocking::PeriodicTimer;
 use futures::future::{select, Either};
 use futures::pin_mut;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::nonblocking::Periodic;
 
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
@@ -27,10 +27,6 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub fn timer<P: Periodic>(periodic: &mut P) -> impl Receiver<Data = ()> {
-    periodic.every(Duration::from_millis(200)).unwrap()
-}
-
 pub async fn run<M, C, N, T, PC>(
     state: StateSnapshot<M>,
     mut command: C,
@@ -41,12 +37,14 @@ pub async fn run<M, C, N, T, PC>(
     M: Mutex<Data = WaterMeterState>,
     C: Receiver<Data = WaterMeterCommand>,
     N: Sender<Data = WaterMeterState>,
-    T: Receiver<Data = ()>,
+    T: PeriodicTimer,
     PC: PulseCounter,
 {
+    let mut clock = timer.every(Duration::from_millis(200)).unwrap();
+
     loop {
         let command = command.recv();
-        let tick = timer.recv();
+        let tick = clock.recv();
 
         pin_mut!(command);
         pin_mut!(tick);

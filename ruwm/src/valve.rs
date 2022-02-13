@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 use core::future::pending;
-use core::future::Pending;
 use core::time::Duration;
 
 use futures::future::join;
@@ -10,7 +9,7 @@ use futures::pin_mut;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::nonblocking::Once;
+use embedded_svc::timer::nonblocking::OnceTimer;
 
 use embedded_hal::digital::v2::OutputPin;
 
@@ -51,7 +50,7 @@ pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
     SCR: Receiver<Data = ValveCommand>,
     SNS: Sender<Data = ()>,
     SNR: Receiver<Data = ()>,
-    O: Once,
+    O: OnceTimer,
     PP: OutputPin,
     PO: OutputPin,
     PC: OutputPin,
@@ -149,7 +148,7 @@ async fn run_spin<T, R, C, PP, PO, PC>(
     mut open_pin: PO,
     mut close_pin: PC,
 ) where
-    T: Once,
+    T: OnceTimer,
     R: Receiver<Data = ValveCommand>,
     C: Sender<Data = ()>,
     PP: OutputPin,
@@ -182,12 +181,11 @@ async fn run_spin<T, R, C, PP, PO, PC>(
 
         let command = command.recv();
 
-        let timer: Either<T::AfterFuture, Pending<Result<(), T::Error>>> =
-            if current_command.is_some() {
-                Either::Left(once.after(Duration::from_secs(20)).unwrap())
-            } else {
-                Either::Right(pending())
-            };
+        let timer = if current_command.is_some() {
+            Either::Left(once.after(Duration::from_secs(20)).unwrap())
+        } else {
+            Either::Right(pending())
+        };
 
         pin_mut!(command);
         pin_mut!(timer);
