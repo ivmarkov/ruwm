@@ -37,6 +37,14 @@ impl pulse_counter::PulseCounter for PulseCounter {
         Ok(())
     }
 
+    fn start(&mut self) -> Result<(), Self::Error> {
+        unsafe { self.ulp_mut().start(ulp_code_vars::entry) }
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        self.ulp_mut().stop()
+    }
+
     fn get_data(&self) -> Result<pulse_counter::Data, Self::Error> {
         unsafe {
             Ok(pulse_counter::Data {
@@ -49,6 +57,7 @@ impl pulse_counter::PulseCounter for PulseCounter {
                     .ulp()
                     .read_word(ulp_code_vars::debounce_max_count)?
                     .value(),
+                pin_no: self.ulp().read_word(ulp_code_vars::io_number)?.value(),
             })
         }
     }
@@ -77,6 +86,10 @@ impl pulse_counter::PulseCounter for PulseCounter {
                 .value();
             self.ulp_mut()
                 .write_word(ulp_code_vars::debounce_max_count, data.debounce_edges)?;
+
+            out_data.pin_no = self.ulp().read_word(ulp_code_vars::io_number)?.value();
+            self.ulp_mut()
+                .write_word(ulp_code_vars::io_number, data.pin_no)?;
         }
 
         Ok(out_data)

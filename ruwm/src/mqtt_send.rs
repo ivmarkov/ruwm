@@ -1,23 +1,16 @@
+extern crate alloc;
 use alloc::format;
 
 use futures::future::{select, Either};
 use futures::pin_mut;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::mqtt::client::nonblocking::{Client, MessageId, Publish, QoS};
+use embedded_svc::mqtt::client::nonblocking::{MessageId, Publish, QoS};
+use log::info;
 
 use crate::battery::BatteryState;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
-
-pub fn subscribe<C>(mqttc: &mut C, topic_prefix: impl AsRef<str>)
-where
-    C: Client,
-{
-    mqttc
-        .subscribe(format!("{}/#", topic_prefix.as_ref()), QoS::AtLeastOnce)
-        .unwrap();
-}
 
 pub async fn run<M, Q, V, W, B>(
     mut mqtt: M,
@@ -68,10 +61,14 @@ pub async fn run<M, Q, V, W, B>(
                     None => "unknown",
                 };
 
+                info!("About to publish valve status {}", status);
+
                 let msg_id = mqtt
                     .publish(&topic_valve, QoS::AtLeastOnce, false, status.as_bytes())
                     .await
                     .unwrap();
+
+                info!("Published valve status {}", status);
 
                 pubq.send(msg_id).await.unwrap();
             }
@@ -126,28 +123,41 @@ pub async fn run<M, Q, V, W, B>(
                         let num = voltage.to_le_bytes();
                         let num_slice: &[u8] = &num;
 
-                        mqtt.publish(&topic_battery_voltage, QoS::AtMostOnce, false, num_slice)
+                        info!("About to publish battery voltage");
+
+                        let msg_id = mqtt
+                            .publish(&topic_battery_voltage, QoS::AtMostOnce, false, num_slice)
                             .await
                             .unwrap();
+
+                        info!("Published battery voltage");
+
+                        // TODO: Remove, as the QoS is AtMostOnce
+                        pubq.send(msg_id).await.unwrap();
 
                         if let Some(prev_voltage) = battery_state.prev_voltage {
                             if (prev_voltage > BatteryState::LOW_VOLTAGE)
                                 != (voltage > BatteryState::LOW_VOLTAGE)
                             {
+                                let status = if voltage > BatteryState::LOW_VOLTAGE {
+                                    "false"
+                                } else {
+                                    "true"
+                                };
+
+                                info!("About to publish battery status {}", status);
+
                                 let msg_id = mqtt
                                     .publish(
                                         &topic_battery_low,
                                         QoS::AtLeastOnce,
                                         false,
-                                        if voltage > BatteryState::LOW_VOLTAGE {
-                                            "false"
-                                        } else {
-                                            "true"
-                                        }
-                                        .as_bytes(),
+                                        status.as_bytes(),
                                     )
                                     .await
                                     .unwrap();
+
+                                info!("Published battery status {}", status);
 
                                 pubq.send(msg_id).await.unwrap();
                             }

@@ -17,7 +17,7 @@ pub type WaterMeterStateEvent = SpecificEvent<WaterMeterState, 4>;
 pub type BatteryStateEvent = SpecificEvent<BatteryState, 5>;
 pub type MqttCommandEvent = SpecificEvent<MqttCommand, 6>;
 pub type MqttClientNotificationEvent = SpecificEvent<MqttClientNotification, 7>;
-pub type MqttPublishEvent = SpecificEvent<MessageId, 8>;
+pub type MqttPublishNotificationEvent = SpecificEvent<MessageId, 8>;
 pub type ValveSpinCommandEvent = SpecificEvent<ValveCommand, 9>;
 pub type ValveSpinNotifEvent = SpecificEvent<(), 10>;
 pub type WifiStatusNotifEvent = SpecificEvent<(), 11>;
@@ -34,6 +34,7 @@ pub enum Event {
 
     MqttCommand(MqttCommand),
     MqttClientNotification(MqttClientNotification),
+    MqttPublishNotification(MessageId),
 
     WifiStatus,
 }
@@ -55,6 +56,9 @@ impl EspTypedEventSerializer<Event> for Event {
             Self::MqttCommand(payload) => MqttCommandEvent::serialize(payload, f),
             Self::MqttClientNotification(payload) => {
                 MqttClientNotificationEvent::serialize(payload, f)
+            }
+            Self::MqttPublishNotification(payload) => {
+                MqttPublishNotificationEvent::serialize(payload, f)
             }
             Self::WifiStatus => WifiStatusNotifEvent::serialize(&(), f),
         }
@@ -80,6 +84,8 @@ impl EspTypedEventDeserializer<Event> for Event {
                 Self::MqttCommand(*data.as_payload())
             } else if id == MqttClientNotificationEvent::event_id() {
                 Self::MqttClientNotification(*data.as_payload())
+            } else if id == MqttPublishNotificationEvent::event_id() {
+                Self::MqttPublishNotification(*data.as_payload())
             } else if id == WifiStatusNotifEvent::event_id() {
                 Self::WifiStatus
             } else {

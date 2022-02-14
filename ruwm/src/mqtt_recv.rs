@@ -5,11 +5,11 @@ use core::str;
 use core::time::Duration;
 
 extern crate alloc;
+use alloc::format;
 
 use embedded_svc::channel::nonblocking::Sender;
-use embedded_svc::mqtt;
 use embedded_svc::mqtt::client::nonblocking::Connection;
-use embedded_svc::mqtt::client::{Event, Message, MessageId};
+use embedded_svc::mqtt::client::nonblocking::{Client, Details, Event, Message, MessageId, QoS};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum MqttCommand {
@@ -54,13 +54,24 @@ where
     }
 }
 
-pub async fn run<M, Q, S>(mut mqtt: M, mut state: Q, mut command: S)
-where
+pub async fn run<C, M, Q, S>(
+    mut mqttc: C,
+    topic_prefix: &str,
+    mut mqtt: M,
+    mut state: Q,
+    mut command: S,
+) where
+    C: Client,
     M: Connection,
     M::Error: Display,
     Q: Sender<Data = MqttClientNotification>,
     S: Sender<Data = MqttCommand>,
 {
+    mqttc
+        .subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+
     let mut message_parser = MessageParser::new();
 
     loop {
@@ -93,14 +104,14 @@ impl MessageParser {
 
     fn process<M>(&mut self, message: &M) -> Option<MqttCommand>
     where
-        M: mqtt::client::Message,
+        M: Message,
     {
         match message.details() {
-            mqtt::client::Details::Complete(topic_token) => {
+            Details::Complete(topic_token) => {
                 Self::parse_command(message.topic(topic_token).as_ref())
                     .and_then(|parser| parser(message.data().as_ref()))
             }
-            mqtt::client::Details::InitialChunk(initial_chunk_data) => {
+            Details::InitialChunk(initial_chunk_data) => {
                 if initial_chunk_data.total_data_size > self.payload_buf.len() {
                     self.command_parser = None;
                 } else {
@@ -114,7 +125,7 @@ impl MessageParser {
 
                 None
             }
-            mqtt::client::Details::SubsequentChunk(subsequent_chunk_data) => {
+            Details::SubsequentChunk(subsequent_chunk_data) => {
                 if let Some(command_parser) = self.command_parser.as_ref() {
                     self.payload_buf
                         [subsequent_chunk_data.current_data_offset..message.data().len()]

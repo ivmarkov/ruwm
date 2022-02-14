@@ -40,7 +40,11 @@ pub async fn run<M, C, N, T, PC>(
     T: PeriodicTimer,
     PC: PulseCounter,
 {
-    let mut clock = timer.every(Duration::from_millis(200)).unwrap();
+    pulse_counter.start().unwrap();
+
+    let mut clock = timer
+        .every(Duration::from_secs(2) /*Duration::from_millis(200)*/)
+        .unwrap();
 
     loop {
         let command = command.recv();
