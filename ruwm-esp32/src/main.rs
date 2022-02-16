@@ -1,9 +1,14 @@
+#![feature(type_alias_impl_trait)]
+#![feature(generic_associated_types)]
+
 extern crate alloc;
+use std::env;
+
 use alloc::sync::Arc;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::timer::nonblocking::TimerService;
-use embedded_svc::utils::nonblocking::Asyncify;
+use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
@@ -36,14 +41,16 @@ use ruwm::state_snapshot::StateSnapshot;
 use ruwm::valve::{self, ValveState};
 use ruwm::water_meter::{self, WaterMeterState};
 use ruwm::{emergency, pipe};
+use unblocker::SmolUnblocker;
 
 use crate::event::{
-    BatteryStateEvent, MqttClientNotificationEvent, MqttCommandEvent, MqttPublishNotificationEvent,
+    BatteryStateEvent, MqttClientNotificationEvent, MqttPublishNotificationEvent,
     ValveCommandEvent, ValveStateEvent, WaterMeterCommandEvent, WaterMeterStateEvent,
 };
 
 mod event;
 mod event_logger;
+mod unblocker;
 
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
@@ -70,13 +77,18 @@ where
 fn sender<D, P, T>(event_loop: &mut EspEventLoop<T>) -> Result<impl Sender<Data = P>, EspError>
 where
     T: EspEventLoopType + Send + 'static,
-    D: EspTypedEventSerializer<P>,
+    D: EspTypedEventSerializer<P> + 'static,
     P: Clone + Send + Sync + 'static,
 {
-    event_loop.as_typed::<D, _>().as_async().postbox()
+    event_loop
+        .as_typed::<D, _>()
+        .as_async_with_unblocker::<SmolUnblocker>()
+        .postbox()
 }
 
 fn main() -> anyhow::Result<()> {
+    env::set_var("BLOCKING_MAX_THREADS", "2");
+
     esp_idf_sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities
@@ -163,22 +175,21 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let (mut mqttc, mqttconn) = EspMqttClient::new_async("mqtt://broker.emqx.io:1883", &mqttconf)?;
+    let (mqttc, mqttconn) =
+        EspMqttClient::new_async::<SmolUnblocker, _>("mqtt://broker.emqx.io:1883", &mqttconf)?;
 
     let topic_prefix = "water-meter-demo";
-
-    mqtt_recv::subscribe(&mut mqttc, topic_prefix);
 
     let mqtt_receiver = mqtt_recv::run(
         mqttconn,
         sender::<MqttClientNotificationEvent, _, _>(&mut event_loop)?,
-        sender::<MqttCommandEvent, _, _>(&mut event_loop)?,
+        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
+        sender::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
     );
 
-    let mqtt_sender = mqtt_send::run(
+    let mut mqtt_sender = mqtt_send::MqttSender::new(
         mqttc,
         sender::<MqttPublishNotificationEvent, _, _>(&mut event_loop)?,
-        topic_prefix,
         receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
         receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
         receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
@@ -199,7 +210,7 @@ fn main() -> anyhow::Result<()> {
 
     smol::block_on(async move {
         join(
-            join(join(battery, water_meter), join(mqtt_sender, mqtt_receiver)),
+            join(join(battery, water_meter), join(mqtt_sender.run(topic_prefix), mqtt_receiver)),
             join(join(valve, emergency), join(wifi_notif, event_logger)),
         )
         .await

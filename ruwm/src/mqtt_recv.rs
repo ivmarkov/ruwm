@@ -1,15 +1,14 @@
 use core::fmt::{Debug, Display};
-use core::ops::Deref;
 use core::result::Result;
 use core::str;
 use core::time::Duration;
 
-extern crate alloc;
-use alloc::format;
-
 use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mqtt::client::nonblocking::Connection;
-use embedded_svc::mqtt::client::nonblocking::{Client, Details, Event, Message, MessageId, QoS};
+use embedded_svc::mqtt::client::nonblocking::{Details, Event, Message};
+
+use crate::valve::ValveCommand;
+use crate::water_meter::WaterMeterCommand;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum MqttCommand {
@@ -19,72 +18,32 @@ pub enum MqttCommand {
     SystemUpdate,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum MqttClientNotification {
-    BeforeConnect,
-    Connected(bool),
-    Disconnected,
-    Subscribed(MessageId),
-    Unsubscribed(MessageId),
-    Published(MessageId),
-    Deleted(MessageId),
-    Received(MessageId),
-    Error, // TODO
-}
+pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-impl<M, E> From<&Result<Event<M>, E>> for MqttClientNotification
+pub async fn run<M, Q, SV, SW>(mut mqtt: M, mut state: Q, mut valve_command: SV, mut wm_command: SW)
 where
-    M: Message,
-    E: Display,
-{
-    fn from(value: &Result<Event<M>, E>) -> Self {
-        match value {
-            Ok(event) => match event {
-                Event::BeforeConnect => MqttClientNotification::BeforeConnect,
-                Event::Connected(connected) => MqttClientNotification::Connected(*connected),
-                Event::Disconnected => MqttClientNotification::Disconnected,
-                Event::Subscribed(id) => MqttClientNotification::Subscribed(*id),
-                Event::Unsubscribed(id) => MqttClientNotification::Unsubscribed(*id),
-                Event::Published(id) => MqttClientNotification::Published(*id),
-                Event::Received(message) => MqttClientNotification::Received(message.id()),
-                Event::Deleted(id) => MqttClientNotification::Deleted(*id),
-            },
-            Err(_) => MqttClientNotification::Error,
-        }
-    }
-}
-
-pub async fn run<C, M, Q, S>(
-    mut mqttc: C,
-    topic_prefix: &str,
-    mut mqtt: M,
-    mut state: Q,
-    mut command: S,
-) where
-    C: Client,
     M: Connection,
     M::Error: Display,
     Q: Sender<Data = MqttClientNotification>,
-    S: Sender<Data = MqttCommand>,
+    SV: Sender<Data = ValveCommand>,
+    SW: Sender<Data = WaterMeterCommand>,
 {
-    mqttc
-        .subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
-        .await
-        .unwrap();
-
     let mut message_parser = MessageParser::new();
 
     loop {
-        let incoming_ref = mqtt.next().await;
-        let incoming = incoming_ref.deref();
-
+        let incoming = mqtt.next(
+            |message| message_parser.process(message),
+                |error| (),
+        ).await;
+        
         if let Some(incoming) = incoming {
-            let notification = MqttClientNotification::from(incoming);
-            state.send(notification).await.unwrap();
+            state.send(incoming.clone()).await.unwrap();
 
-            if let Ok(Event::Received(message)) = incoming {
-                if let Some(cmd) = message_parser.process(message) {
-                    command.send(cmd).await.unwrap();
+            if let Ok(Event::Received(Some(cmd))) = incoming {
+                match cmd {
+                    MqttCommand::Valve(open) => valve_command.send(if open { ValveCommand::Open} else { ValveCommand::Close }).await.unwrap(),
+                    MqttCommand::FlowWatch(enable) => wm_command.send(if enable { WaterMeterCommand::Arm } else { WaterMeterCommand::Disarm }).await.unwrap(),
+                    _ => (),
                 }
             }
         }

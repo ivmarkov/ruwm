@@ -102,25 +102,29 @@ async fn run_events<M, C, N, SC, SN>(
             match select(command, spin_notif).await {
                 Either::Left((command, _)) => match command.unwrap() {
                     ValveCommand::Open => {
+                        let state = state_snapshot.get();
+
                         if !matches!(
-                            state_snapshot.get(),
+                            state,
                             Some(ValveState::Open) | Some(ValveState::Opening)
                         ) {
                             spin_command.send(ValveCommand::Open).await.unwrap();
                             Some(ValveState::Opening)
                         } else {
-                            None
+                            state
                         }
                     }
                     ValveCommand::Close => {
+                        let state = state_snapshot.get();
+
                         if !matches!(
-                            state_snapshot.get(),
+                            state,
                             Some(ValveState::Closed) | Some(ValveState::Closing)
                         ) {
                             spin_command.send(ValveCommand::Close).await.unwrap();
                             Some(ValveState::Closing)
                         } else {
-                            None
+                            state
                         }
                     }
                 },
