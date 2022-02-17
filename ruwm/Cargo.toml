@@ -19,5 +19,7 @@ experimental = ["embedded-svc/experimental"]
 anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
-embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.16.8" }
+embedded-hal = "0.2"
+embedded-svc = "0.16.8"
+embedded-graphics = "0.7"
+profont = "0.5"
