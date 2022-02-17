@@ -36,12 +36,12 @@ use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
 use ruwm::button::{Button, PressedLevel};
-use ruwm::mqtt;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::valve::{self, ValveState};
 use ruwm::water_meter::{self, WaterMeterState};
 use ruwm::{emergency, pipe};
+use ruwm::{event_logger, mqtt};
 use unblocker::SmolUnblocker;
 
 use crate::event::{
@@ -50,7 +50,6 @@ use crate::event::{
 };
 
 mod event;
-mod event_logger;
 mod unblocker;
 
 #[cfg(any(esp32, esp32s2))]

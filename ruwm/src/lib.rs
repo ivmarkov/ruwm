@@ -8,6 +8,7 @@ extern crate alloc;
 pub mod battery;
 pub mod button;
 pub mod emergency;
+pub mod event_logger;
 pub mod mqtt;
 pub mod pipe;
 pub mod pulse_counter;

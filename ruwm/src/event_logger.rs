@@ -1,12 +1,13 @@
+use core::fmt::Debug;
+
 use log::info;
 
 use embedded_svc::channel::nonblocking::Receiver;
 
-use crate::event::Event;
-
-pub async fn run<R>(mut receiver: R)
+pub async fn run<R, E>(mut receiver: R)
 where
-    R: Receiver<Data = Event>,
+    R: Receiver<Data = E>,
+    E: Debug,
 {
     loop {
         let event = receiver.recv().await;
