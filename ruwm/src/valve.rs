@@ -104,10 +104,7 @@ async fn run_events<M, C, N, SC, SN>(
                     ValveCommand::Open => {
                         let state = state_snapshot.get();
 
-                        if !matches!(
-                            state,
-                            Some(ValveState::Open) | Some(ValveState::Opening)
-                        ) {
+                        if !matches!(state, Some(ValveState::Open) | Some(ValveState::Opening)) {
                             spin_command.send(ValveCommand::Open).await.unwrap();
                             Some(ValveState::Opening)
                         } else {
@@ -117,10 +114,7 @@ async fn run_events<M, C, N, SC, SN>(
                     ValveCommand::Close => {
                         let state = state_snapshot.get();
 
-                        if !matches!(
-                            state,
-                            Some(ValveState::Closed) | Some(ValveState::Closing)
-                        ) {
+                        if !matches!(state, Some(ValveState::Closed) | Some(ValveState::Closing)) {
                             spin_command.send(ValveCommand::Close).await.unwrap();
                             Some(ValveState::Closing)
                         } else {

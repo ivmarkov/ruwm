@@ -6,9 +6,9 @@
 extern crate alloc;
 
 pub mod battery;
+pub mod button;
 pub mod emergency;
-pub mod mqtt_recv;
-pub mod mqtt_send;
+pub mod mqtt;
 pub mod pipe;
 pub mod pulse_counter;
 pub mod state_snapshot;

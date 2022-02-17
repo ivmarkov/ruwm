@@ -10,13 +10,14 @@ use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::timer::nonblocking::TimerService;
 use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use esp_idf_hal::gpio::Pull;
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::timer::EspTimerService;
 use esp_idf_svc::wifi::EspWifi;
 use esp_idf_sys::EspError;
-use event::{ValveSpinCommandEvent, ValveSpinNotifEvent, WifiStatusNotifEvent};
+use event::{ButtonCommandEvent, ValveSpinCommandEvent, ValveSpinNotifEvent, WifiStatusNotifEvent};
 use futures::future::join;
 
 use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
@@ -34,8 +35,8 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
-use ruwm::mqtt_recv;
-use ruwm::mqtt_send;
+use ruwm::button::{Button, PressedLevel};
+use ruwm::mqtt;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::valve::{self, ValveState};
@@ -170,29 +171,50 @@ fn main() -> anyhow::Result<()> {
         pulse_counter,
     );
 
-    let mqttconf = MqttClientConfiguration {
+    let mut button1 = Button::new(
+        1,
+        peripherals.pins.gpio25.into_input()?.into_pull_up()?,
+        timer_service.timer()?,
+        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        PressedLevel::Low,
+    );
+
+    let mut button2 = Button::new(
+        2,
+        peripherals.pins.gpio26.into_input()?.into_pull_up()?,
+        timer_service.timer()?,
+        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        PressedLevel::Low,
+    );
+
+    let mut button3 = Button::new(
+        3,
+        peripherals.pins.gpio27.into_input()?.into_pull_up()?,
+        timer_service.timer()?,
+        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        PressedLevel::Low,
+    );
+
+    let mqtt_conf = MqttClientConfiguration {
         client_id: Some("water-meter-demo"),
         ..Default::default()
     };
 
-    let (mqttc, mqttconn) =
-        EspMqttClient::new_async::<SmolUnblocker, _>("mqtt://broker.emqx.io:1883", &mqttconf)?;
+    let (mqtt_client, mqtt_connection) =
+        EspMqttClient::new_async::<SmolUnblocker, _>("mqtt://broker.emqx.io:1883", &mqtt_conf)?;
 
     let topic_prefix = "water-meter-demo";
 
-    let mqtt_receiver = mqtt_recv::run(
-        mqttconn,
-        sender::<MqttClientNotificationEvent, _, _>(&mut event_loop)?,
-        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
-        sender::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
-    );
-
-    let mut mqtt_sender = mqtt_send::MqttSender::new(
-        mqttc,
+    let mut mqtt = mqtt::Mqtt::new(
+        mqtt_client,
+        mqtt_connection,
         sender::<MqttPublishNotificationEvent, _, _>(&mut event_loop)?,
         receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
         receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
         receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
+        sender::<MqttClientNotificationEvent, _, _>(&mut event_loop)?,
+        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
+        sender::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
     );
 
     let emergency = emergency::run(
@@ -210,8 +232,17 @@ fn main() -> anyhow::Result<()> {
 
     smol::block_on(async move {
         join(
-            join(join(battery, water_meter), join(mqtt_sender.run(topic_prefix), mqtt_receiver)),
-            join(join(valve, emergency), join(wifi_notif, event_logger)),
+            join(join(battery, water_meter), mqtt.run(topic_prefix)),
+            join(
+                join(valve, emergency),
+                join(
+                    wifi_notif,
+                    join(
+                        event_logger,
+                        join(button1.run(), join(button2.run(), button3.run())),
+                    ),
+                ),
+            ),
         )
         .await
     });

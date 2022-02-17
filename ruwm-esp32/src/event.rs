@@ -6,7 +6,8 @@ use esp_idf_svc::eventloop::{
 };
 
 use ruwm::battery::BatteryState;
-use ruwm::mqtt_recv::MqttClientNotification;
+use ruwm::button::ButtonCommand;
+use ruwm::mqtt::MqttClientNotification;
 use ruwm::valve::{ValveCommand, ValveState};
 use ruwm::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -20,6 +21,7 @@ pub type MqttPublishNotificationEvent = SpecificEvent<MessageId, 7>;
 pub type ValveSpinCommandEvent = SpecificEvent<ValveCommand, 8>;
 pub type ValveSpinNotifEvent = SpecificEvent<(), 9>;
 pub type WifiStatusNotifEvent = SpecificEvent<(), 10>;
+pub type ButtonCommandEvent = SpecificEvent<ButtonCommand, 11>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Event {
@@ -35,9 +37,11 @@ pub enum Event {
     MqttPublishNotification(MessageId),
 
     ValveSpinCommandEvent(ValveCommand),
-    ValveSpinNotifEvent,
+    ValveSpinNotif,
 
     WifiStatus,
+
+    ButtonCommand(ButtonCommand),
 }
 
 impl EspTypedEventSource for Event {
@@ -61,8 +65,9 @@ impl EspTypedEventSerializer<Event> for Event {
                 MqttPublishNotificationEvent::serialize(payload, f)
             }
             Self::ValveSpinCommandEvent(payload) => ValveSpinCommandEvent::serialize(payload, f),
-            Self::ValveSpinNotifEvent => ValveSpinNotifEvent::serialize(&(), f),
+            Self::ValveSpinNotif => ValveSpinNotifEvent::serialize(&(), f),
             Self::WifiStatus => WifiStatusNotifEvent::serialize(&(), f),
+            Self::ButtonCommand(payload) => ButtonCommandEvent::serialize(payload, f),
         }
     }
 }
@@ -89,9 +94,11 @@ impl EspTypedEventDeserializer<Event> for Event {
             } else if id == ValveSpinCommandEvent::event_id() {
                 Self::ValveSpinCommandEvent(*data.as_payload())
             } else if id == ValveSpinNotifEvent::event_id() {
-                Self::ValveSpinNotifEvent
+                Self::ValveSpinNotif
             } else if id == WifiStatusNotifEvent::event_id() {
                 Self::WifiStatus
+            } else if id == ButtonCommandEvent::event_id() {
+                Self::ButtonCommand(*data.as_payload())
             } else {
                 panic!("Unknown event ID: {:?}", id);
             }
