@@ -1,5 +1,7 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use core::time::Duration;
+
+use anyhow::anyhow;
 
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
@@ -30,7 +32,8 @@ pub async fn run<M, N, T, ADC, A, BP, PP>(
     mut one_shot: A,
     mut battery_pin: BP,
     power_pin: PP,
-) where
+) -> anyhow::Result<()>
+where
     M: Mutex<Data = BatteryState>,
     N: Sender<Data = BatteryState>,
     T: PeriodicTimer,
@@ -38,11 +41,15 @@ pub async fn run<M, N, T, ADC, A, BP, PP>(
     BP: adc::Channel<ADC>,
     PP: InputPin,
     PP::Error: Debug,
+    N::Error: Display + Send + Sync + 'static,
+    T::Error: Display + Send + Sync + 'static,
 {
-    let mut tick = timer.every(Duration::from_secs(2)).unwrap();
+    let mut tick = timer
+        .every(Duration::from_secs(2))
+        .map_err(|e| anyhow!(e))?;
 
     loop {
-        tick.recv().await.unwrap();
+        tick.recv().await.map_err(|e| anyhow!(e))?;
 
         let voltage = one_shot.read(&mut battery_pin).ok();
 
@@ -56,6 +63,6 @@ pub async fn run<M, N, T, ADC, A, BP, PP>(
                 },
                 &mut notif,
             )
-            .await;
+            .await?;
     }
 }

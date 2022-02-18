@@ -1,16 +1,21 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use core::marker::PhantomData;
 use core::mem;
 
+extern crate alloc;
 use alloc::boxed::Box;
-use embedded_graphics::draw_target::DrawTarget;
-use embedded_svc::nonblocking::Unblocker;
-use futures::future::{select, Either};
-use futures::pin_mut;
 
-use embedded_graphics::prelude::{PixelColor, RgbColor};
+use anyhow::anyhow;
+
+use futures::{pin_mut, select, FutureExt};
+
+use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, RgbColor};
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
+use embedded_graphics::Drawable;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::nonblocking::Unblocker;
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
@@ -22,10 +27,27 @@ mod shapes;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Page {
-    Battery,
+    Summary = 0,
+    Battery = 1,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+impl Page {
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Summary => Self::Battery,
+            Self::Battery => Self::Summary,
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Summary => Self::Battery,
+            Self::Battery => Self::Summary,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct DrawRequest {
     active_page: Page,
     valve_state: Option<ValveState>,
@@ -33,8 +55,7 @@ pub struct DrawRequest {
     battery_state: BatteryState,
 }
 
-pub struct Screen<C, B, VU, WU, BU, D> {
-    _color: PhantomData<C>,
+pub struct Screen<B, VU, WU, BU, D> {
     draw_request: DrawRequest,
     button_command: B,
     valve_state_updates: VU,
@@ -43,14 +64,18 @@ pub struct Screen<C, B, VU, WU, BU, D> {
     draw_engine: D,
 }
 
-impl<C, B, VU, WU, BU, D> Screen<C, B, VU, WU, BU, D>
+impl<B, VU, WU, BU, D> Screen<B, VU, WU, BU, D>
 where
-    C: PixelColor + RgbColor,
     B: Receiver<Data = ButtonCommand>,
     VU: Receiver<Data = Option<ValveState>>,
     WU: Receiver<Data = WaterMeterState>,
     BU: Receiver<Data = BatteryState>,
     D: Sender<Data = DrawRequest>,
+    B::Error: Send + Sync + Display + Debug + 'static,
+    VU::Error: Send + Sync + Display + Debug + 'static,
+    WU::Error: Send + Sync + Display + Debug + 'static,
+    BU::Error: Send + Sync + Display + Debug + 'static,
+    D::Error: Send + Sync + Display + Debug + 'static,
 {
     pub fn new(
         button_command: B,
@@ -63,13 +88,12 @@ where
         draw_engine: D,
     ) -> Self {
         Self {
-            _color: PhantomData,
             button_command,
             valve_state_updates,
             water_meter_state_updates,
             battery_meter_state_updates,
             draw_request: DrawRequest {
-                active_page: Page::Battery,
+                active_page: Page::Summary,
                 valve_state,
                 water_meter_state,
                 battery_state,
@@ -78,57 +102,57 @@ where
         }
     }
 
-    pub async fn run(&mut self) {
-        let command = self.button_command.recv();
-        let valve_state_updates = self.valve_state_updates.recv();
-        let water_meter_state_updates = self.water_meter_state_updates.recv();
-        let battery_meter_state_updates = self.battery_meter_state_updates.recv();
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        let command = self.button_command.recv().fuse();
+        let valve_state_updates = self.valve_state_updates.recv().fuse();
+        let water_meter_state_updates = self.water_meter_state_updates.recv().fuse();
+        let battery_meter_state_updates = self.battery_meter_state_updates.recv().fuse();
 
         pin_mut!(command);
         pin_mut!(valve_state_updates);
         pin_mut!(water_meter_state_updates);
         pin_mut!(battery_meter_state_updates);
 
-        let draw_request = match select(
-            command,
-            select(
-                valve_state_updates,
-                select(water_meter_state_updates, battery_meter_state_updates),
-            ),
-        )
-        .await
-        {
-            Either::Left((command, _)) => DrawRequest {
+        let draw_request = select! {
+            command = command => DrawRequest {
+                active_page: match command.map_err(|e| anyhow!(e))? {
+                    ButtonCommand::Pressed(1) => self.draw_request.active_page.prev(),
+                    ButtonCommand::Pressed(2) => self.draw_request.active_page.next(),
+                    ButtonCommand::Pressed(3) => self.draw_request.active_page,
+                    _ => panic!("What's that button?"),
+                },
                 ..self.draw_request
             },
-            Either::Right((Either::Left((valve_state, _)), _)) => DrawRequest {
-                valve_state: valve_state.unwrap(),
+            valve_state = valve_state_updates => DrawRequest {
+                valve_state: valve_state.map_err(|e| anyhow!(e))?,
                 ..self.draw_request
             },
-            Either::Right((Either::Right((Either::Left((water_meter_state, _)), _)), _)) => {
-                DrawRequest {
-                    water_meter_state: water_meter_state.unwrap(),
-                    ..self.draw_request
-                }
-            }
-            Either::Right((Either::Right((Either::Right((battery_state, _)), _)), _)) => {
-                DrawRequest {
-                    battery_state: battery_state.unwrap(),
-                    ..self.draw_request
-                }
+            water_meter_state = water_meter_state_updates => DrawRequest {
+                water_meter_state: water_meter_state.map_err(|e| anyhow!(e))?,
+                ..self.draw_request
+            },
+            battery_state = battery_meter_state_updates => DrawRequest {
+                battery_state: battery_state.map_err(|e| anyhow!(e))?,
+                ..self.draw_request
             }
         };
 
         if self.draw_request != draw_request {
             self.draw_request = draw_request.clone();
 
-            self.draw_engine.send(draw_request);
+            self.draw_engine
+                .send(draw_request)
+                .await
+                .map_err(|e| anyhow!(e))?;
         }
+
+        Ok(())
     }
 }
 
 enum PageDrawable {
-    Battery(pages::battery::Battery),
+    Summary(pages::Summary),
+    Battery(pages::Battery),
 }
 
 pub struct DrawEngine<U, N, D> {
@@ -144,6 +168,7 @@ where
     N: Receiver<Data = DrawRequest>,
     D: DrawTarget + Send + 'static,
     D::Color: RgbColor,
+    N::Error: Debug + Display + Send + Sync + 'static,
     D::Error: Debug,
 {
     pub fn new(draw_notif: N, display: D) -> Self {
@@ -155,8 +180,8 @@ where
         }
     }
 
-    pub async fn run(&mut self) {
-        let draw_request = self.draw_notif.recv().await.unwrap();
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        let draw_request = self.draw_notif.recv().await.map_err(|e| anyhow!(e))?;
 
         let display = mem::replace(&mut self.display, None);
         let page_drawable = mem::replace(&mut self.page_drawable, None);
@@ -164,32 +189,60 @@ where
         let result = U::unblock(Box::new(move || {
             Self::draw(display.unwrap(), page_drawable, draw_request)
         }))
-        .await;
+        .await?;
 
         self.display = Some(result.0);
         self.page_drawable = result.1;
+
+        Ok(())
     }
 
     fn draw(
-        mut display: D,
+        mut display_orig: D,
         mut page_drawable: Option<PageDrawable>,
         draw_request: DrawRequest,
-    ) -> (D, Option<PageDrawable>) {
+    ) -> anyhow::Result<(D, Option<PageDrawable>)> {
+        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+        let mut display = display_orig.cropped(&Rectangle::new(
+            embedded_graphics::prelude::Point::new(52, 40),
+            embedded_graphics::prelude::Size::new(135, 240),
+        ));
+
         loop {
             match draw_request.active_page {
+                Page::Summary => {
+                    if let Some(PageDrawable::Summary(drawable)) = &mut page_drawable {
+                        drawable
+                            .draw(
+                                &mut display,
+                                draw_request.valve_state,
+                                draw_request.water_meter_state,
+                                draw_request.battery_state,
+                            )
+                            .map_err(|e| anyhow!("Display error: {:?}", e))?;
+                        break;
+                    } else {
+                        page_drawable = Some(PageDrawable::Summary(pages::Summary::new()));
+                    }
+                }
                 Page::Battery => {
                     if let Some(PageDrawable::Battery(drawable)) = &mut page_drawable {
                         drawable
                             .draw(&mut display, draw_request.battery_state)
-                            .unwrap();
+                            .map_err(|e| anyhow!("Display error: {:?}", e))?;
                         break;
                     } else {
-                        page_drawable = Some(PageDrawable::Battery(pages::battery::Battery::new()));
+                        page_drawable = Some(PageDrawable::Battery(pages::Battery::new()));
                     }
                 }
             }
+
+            Rectangle::new(Point::zero(), display.size())
+                .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
+                .draw(&mut display)
+                .map_err(|e| anyhow!("Display error: {:?}", e))?;
         }
 
-        (display, page_drawable)
+        Ok((display_orig, page_drawable))
     }
 }

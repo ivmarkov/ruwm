@@ -1,4 +1,4 @@
-use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor, Drawable};
+use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor};
 
 use crate::{battery::BatteryState, screen::shapes};
 
@@ -16,19 +16,15 @@ impl Battery {
         D: DrawTarget,
         D::Color: RgbColor,
     {
-        if let Some(current_state) = self.state {
-            if current_state == state {
-                return Ok(());
-            }
+        if self.state != Some(state) {
+            self.state = Some(state);
+
+            let percentage = state.voltage.map(|voltage| {
+                (voltage * 100 / (BatteryState::MAX_VOLTAGE + BatteryState::LOW_VOLTAGE)) as u8
+            });
+
+            shapes::Battery::new(percentage, true, true).draw(target)?;
         }
-
-        self.state = Some(state);
-
-        let percentage = state.voltage.map(|voltage| {
-            (voltage * 100 / (BatteryState::MAX_VOLTAGE + BatteryState::LOW_VOLTAGE)) as u8
-        });
-
-        shapes::battery::Battery::new(percentage, true, true).draw(target)?;
 
         Ok(())
     }

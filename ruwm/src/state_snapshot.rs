@@ -1,5 +1,9 @@
+use core::fmt::Display;
+
 extern crate alloc;
 use alloc::sync::Arc;
+
+use anyhow::anyhow;
 
 use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mutex::Mutex;
@@ -19,10 +23,15 @@ where
         Self(Arc::new(M::new(Default::default())))
     }
 
-    pub async fn update_with<N>(&self, updater: impl Fn(&S) -> S, notif: &mut N)
+    pub async fn update_with<N>(
+        &self,
+        updater: impl Fn(&S) -> S,
+        notif: &mut N,
+    ) -> anyhow::Result<bool>
     where
         S: PartialEq + Clone,
         N: Sender<Data = S>,
+        N::Error: Display + Send + Sync + 'static,
     {
         let mut guard = self.0.lock();
 
@@ -31,14 +40,19 @@ where
         if *guard != state {
             *guard = state.clone();
 
-            notif.send(state).await.unwrap();
+            notif.send(state).await.map_err(|e| anyhow!(e))?;
+
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
-    pub async fn update<N>(&self, state: S, notif: &mut N)
+    pub async fn update<N>(&self, state: S, notif: &mut N) -> anyhow::Result<bool>
     where
         S: PartialEq + Clone,
         N: Sender<Data = S>,
+        N::Error: Display + Send + Sync + 'static,
     {
         let updated = {
             let mut guard = self.0.lock();
@@ -52,8 +66,10 @@ where
         };
 
         if updated {
-            notif.send(state).await.unwrap();
+            notif.send(state).await.map_err(|e| anyhow!(e))?;
         }
+
+        Ok(updated)
     }
 }
 

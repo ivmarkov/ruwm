@@ -1,8 +1,9 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use core::future::pending;
 use core::time::Duration;
 
-use futures::future::join;
+use anyhow::anyhow;
+
 use futures::future::select;
 use futures::future::Either;
 use futures::pin_mut;
@@ -12,6 +13,7 @@ use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::OnceTimer;
 
 use embedded_hal::digital::v2::OutputPin;
+use futures::try_join;
 
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
@@ -42,7 +44,8 @@ pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
     power_pin: PP,
     open_pin: PO,
     close_pin: PC,
-) where
+) -> anyhow::Result<()>
+where
     M: Mutex<Data = Option<ValveState>>,
     C: Receiver<Data = ValveCommand>,
     N: Sender<Data = Option<ValveState>>,
@@ -57,8 +60,15 @@ pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
     PP::Error: Debug,
     PO::Error: Debug,
     PC::Error: Debug,
+    C::Error: Display + Send + Sync + 'static,
+    N::Error: Display + Send + Sync + 'static,
+    SCS::Error: Display + Send + Sync + 'static,
+    SCR::Error: Display + Send + Sync + 'static,
+    SNS::Error: Display + Send + Sync + 'static,
+    SNR::Error: Display + Send + Sync + 'static,
+    O::Error: Display + Send + Sync + 'static,
 {
-    join(
+    try_join! {
         run_events(
             state_snapshot,
             command,
@@ -74,8 +84,9 @@ pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
             open_pin,
             close_pin,
         ),
-    )
-    .await;
+    }?;
+
+    Ok(())
 }
 
 async fn run_events<M, C, N, SC, SN>(
@@ -84,12 +95,17 @@ async fn run_events<M, C, N, SC, SN>(
     mut notif: N,
     mut spin_command: SC,
     mut spin_notif: SN,
-) where
+) -> anyhow::Result<()>
+where
     M: Mutex<Data = Option<ValveState>>,
     C: Receiver<Data = ValveCommand>,
     N: Sender<Data = Option<ValveState>>,
     SC: Sender<Data = ValveCommand>,
     SN: Receiver<Data = ()>,
+    C::Error: Display + Send + Sync + 'static,
+    N::Error: Display + Send + Sync + 'static,
+    SC::Error: Display + Send + Sync + 'static,
+    SN::Error: Display + Send + Sync + 'static,
 {
     loop {
         let state = {
@@ -100,12 +116,15 @@ async fn run_events<M, C, N, SC, SN>(
             pin_mut!(spin_notif);
 
             match select(command, spin_notif).await {
-                Either::Left((command, _)) => match command.unwrap() {
+                Either::Left((command, _)) => match command.map_err(|e| anyhow!(e))? {
                     ValveCommand::Open => {
                         let state = state_snapshot.get();
 
                         if !matches!(state, Some(ValveState::Open) | Some(ValveState::Opening)) {
-                            spin_command.send(ValveCommand::Open).await.unwrap();
+                            spin_command
+                                .send(ValveCommand::Open)
+                                .await
+                                .map_err(|e| anyhow!(e))?;
                             Some(ValveState::Opening)
                         } else {
                             state
@@ -115,7 +134,10 @@ async fn run_events<M, C, N, SC, SN>(
                         let state = state_snapshot.get();
 
                         if !matches!(state, Some(ValveState::Closed) | Some(ValveState::Closing)) {
-                            spin_command.send(ValveCommand::Close).await.unwrap();
+                            spin_command
+                                .send(ValveCommand::Close)
+                                .await
+                                .map_err(|e| anyhow!(e))?;
                             Some(ValveState::Closing)
                         } else {
                             state
@@ -134,7 +156,7 @@ async fn run_events<M, C, N, SC, SN>(
             }
         };
 
-        state_snapshot.update(state, &mut notif).await;
+        state_snapshot.update(state, &mut notif).await?;
     }
 }
 
@@ -145,7 +167,8 @@ async fn run_spin<T, R, C, PP, PO, PC>(
     mut power_pin: PP,
     mut open_pin: PO,
     mut close_pin: PC,
-) where
+) -> anyhow::Result<()>
+where
     T: OnceTimer,
     R: Receiver<Data = ValveCommand>,
     C: Sender<Data = ()>,
@@ -155,6 +178,9 @@ async fn run_spin<T, R, C, PP, PO, PC>(
     PP::Error: Debug,
     PO::Error: Debug,
     PC::Error: Debug,
+    T::Error: Display + Send + Sync + 'static,
+    R::Error: Display + Send + Sync + 'static,
+    C::Error: Display + Send + Sync + 'static,
 {
     let mut current_command: Option<ValveCommand> = None;
 
@@ -180,7 +206,10 @@ async fn run_spin<T, R, C, PP, PO, PC>(
         let command = command.recv();
 
         let timer = if current_command.is_some() {
-            Either::Left(once.after(Duration::from_secs(20)).unwrap())
+            Either::Left(
+                once.after(Duration::from_secs(20))
+                    .map_err(|e| anyhow!(e))?,
+            )
         } else {
             Either::Right(pending())
         };
@@ -190,11 +219,11 @@ async fn run_spin<T, R, C, PP, PO, PC>(
 
         match select(command, timer).await {
             Either::Left((command, _)) => {
-                current_command = Some(command.unwrap());
+                current_command = Some(command.map_err(|e| anyhow!(e))?);
             }
             Either::Right(_) => {
                 current_command = None;
-                complete.send(()).await.unwrap();
+                complete.send(()).await.map_err(|e| anyhow!(e))?;
             }
         }
     }

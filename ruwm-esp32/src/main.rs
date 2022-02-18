@@ -1,47 +1,59 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 
-extern crate alloc;
 use std::env;
 
+extern crate alloc;
 use alloc::sync::Arc;
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use futures::try_join;
+
+use display_interface_spi::SPIInterfaceNoCS;
+
+use embedded_hal::digital::v2::OutputPin;
+
+use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
 use embedded_svc::timer::nonblocking::TimerService;
+use embedded_svc::utils::nonblocking::event_bus::{AsyncPostbox, AsyncSubscription};
 use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+
 use esp_idf_hal::gpio::Pull;
+use esp_idf_hal::mutex::Mutex;
+use esp_idf_hal::prelude::*;
+use esp_idf_hal::{adc, delay, gpio, spi};
+
+use esp_idf_svc::eventloop::{
+    EspBackgroundEventLoop, EspEventLoop, EspEventLoopType, EspSubscription,
+    EspTypedEventDeserializer, EspTypedEventLoop, EspTypedEventSerializer,
+};
+use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::timer::EspTimerService;
 use esp_idf_svc::wifi::EspWifi;
+
 use esp_idf_sys::EspError;
-use event::{ButtonCommandEvent, ValveSpinCommandEvent, ValveSpinNotifEvent, WifiStatusNotifEvent};
-use futures::future::join;
 
-use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
-
-use esp_idf_hal::adc;
-use esp_idf_hal::mutex::Mutex;
-use esp_idf_hal::prelude::Peripherals;
-
-use esp_idf_svc::eventloop::{
-    EspBackgroundEventLoop, EspEventLoop, EspEventLoopType, EspTypedEventDeserializer,
-    EspTypedEventSerializer,
+use event::{
+    ButtonCommandEvent, DrawRequestEvent, ValveSpinCommandEvent, ValveSpinNotifEvent,
+    WifiStatusNotifEvent,
 };
-use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
 use ruwm::button::{Button, PressedLevel};
 use ruwm::pulse_counter::PulseCounter as _;
+use ruwm::screen::{DrawEngine, Screen};
 use ruwm::state_snapshot::StateSnapshot;
+use ruwm::storage::Storage;
 use ruwm::valve::{self, ValveState};
 use ruwm::water_meter::{self, WaterMeterState};
 use ruwm::{emergency, pipe};
 use ruwm::{event_logger, mqtt};
+
 use unblocker::SmolUnblocker;
 
 use crate::event::{
@@ -65,7 +77,9 @@ where
     StateSnapshot::<Mutex<S>>::new()
 }
 
-fn receiver<D, P, T>(event_loop: &mut EspEventLoop<T>) -> Result<impl Receiver<Data = P>, EspError>
+fn receiver<D, P, T>(
+    event_loop: &mut EspEventLoop<T>,
+) -> Result<AsyncSubscription<esp_idf_hal::mutex::Condvar, P, EspSubscription<T>, EspError>, EspError>
 where
     T: EspEventLoopType + Send + 'static,
     D: EspTypedEventDeserializer<P>,
@@ -74,7 +88,9 @@ where
     event_loop.as_typed::<D, _>().as_async().subscribe()
 }
 
-fn sender<D, P, T>(event_loop: &mut EspEventLoop<T>) -> Result<impl Sender<Data = P>, EspError>
+fn sender<D, P, T>(
+    event_loop: &mut EspEventLoop<T>,
+) -> Result<AsyncPostbox<SmolUnblocker, P, EspTypedEventLoop<D, P, EspEventLoop<T>>>, EspError>
 where
     T: EspEventLoopType + Send + 'static,
     D: EspTypedEventSerializer<P> + 'static,
@@ -194,6 +210,60 @@ fn main() -> anyhow::Result<()> {
         PressedLevel::Low,
     );
 
+    let mut screen = Screen::new(
+        receiver::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
+        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
+        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
+        valve_state.get(),
+        water_meter_state.get(),
+        battery_state.get(),
+        sender::<DrawRequestEvent, _, _>(&mut event_loop)?,
+    );
+
+    let backlight = peripherals.pins.gpio4;
+    let dc = peripherals.pins.gpio16;
+    let rst = peripherals.pins.gpio23;
+    let spi = peripherals.spi2;
+    let sclk = peripherals.pins.gpio18;
+    let sdo = peripherals.pins.gpio19;
+    let cs = peripherals.pins.gpio5;
+
+    let mut backlight = backlight.into_output()?;
+    backlight.set_high()?;
+
+    let di = SPIInterfaceNoCS::new(
+        spi::Master::<spi::SPI2, _, _, _, _>::new(
+            spi,
+            spi::Pins {
+                sclk,
+                sdo,
+                sdi: Option::<gpio::Gpio21<gpio::Unknown>>::None,
+                cs: Some(cs),
+            },
+            <spi::config::Config as Default>::default().baudrate(26.MHz().into()),
+        )?,
+        dc.into_output()?,
+    );
+
+    let mut display = st7789::ST7789::new(
+        di,
+        rst.into_output()?,
+        // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
+        240,
+        320,
+    );
+
+    display.init(&mut delay::Ets).unwrap();
+    display
+        .set_orientation(st7789::Orientation::Portrait)
+        .unwrap();
+
+    let mut draw_engine = DrawEngine::<SmolUnblocker, _, _>::new(
+        receiver::<DrawRequestEvent, _, _>(&mut event_loop)?,
+        display,
+    );
+
     let mqtt_conf = MqttClientConfiguration {
         client_id: Some("water-meter-demo"),
         ..Default::default()
@@ -230,21 +300,21 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     smol::block_on(async move {
-        join(
-            join(join(battery, water_meter), mqtt.run(topic_prefix)),
-            join(
-                join(valve, emergency),
-                join(
-                    wifi_notif,
-                    join(
-                        event_logger,
-                        join(button1.run(), join(button2.run(), button3.run())),
-                    ),
-                ),
-            ),
-        )
-        .await
-    });
+        try_join! {
+            event_logger,
+            valve,
+            battery,
+            water_meter,
+            emergency,
+            wifi_notif,
+            mqtt.run(topic_prefix),
+            button1.run(),
+            button2.run(),
+            button3.run(),
+            screen.run(),
+            draw_engine.run(),
+        }
+    })?;
 
     Ok(())
 }

@@ -1,5 +1,7 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use core::time::Duration;
+
+use anyhow::anyhow;
 
 use embedded_hal::digital::v2::InputPin;
 
@@ -36,6 +38,8 @@ where
     P::Error: Debug,
     T: PeriodicTimer,
     S: Sender<Data = ButtonCommand>,
+    T::Error: Display + Send + Sync + 'static,
+    S::Error: Display + Send + Sync + 'static,
 {
     pub fn new(id: ButtonId, pin: P, timer: T, notif: S, pressed_level: PressedLevel) -> Self {
         Self {
@@ -47,16 +51,16 @@ where
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
         let mut debounce = 0;
 
         let mut clock = self
             .timer
             .every(Duration::from_millis(POLLING_TIME_MS))
-            .unwrap();
+            .map_err(|e| anyhow!(e))?;
 
         loop {
-            clock.recv().await.unwrap();
+            clock.recv().await.map_err(|e| anyhow!(e))?;
 
             let pressed = self.pin.is_high().unwrap() == (self.pressed_level == PressedLevel::High);
 
@@ -68,7 +72,7 @@ where
                         self.notif
                             .send(ButtonCommand::Pressed(self.id))
                             .await
-                            .unwrap();
+                            .map_err(|e| anyhow!(e))?;
                     }
                 }
             } else if pressed {

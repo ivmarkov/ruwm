@@ -4,7 +4,7 @@ use log::info;
 
 use embedded_svc::channel::nonblocking::Receiver;
 
-pub async fn run<R, E>(mut receiver: R)
+pub async fn run<R, E>(mut receiver: R) -> anyhow::Result<()>
 where
     R: Receiver<Data = E>,
     E: Debug,

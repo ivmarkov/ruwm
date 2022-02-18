@@ -8,6 +8,7 @@ use esp_idf_svc::eventloop::{
 use ruwm::battery::BatteryState;
 use ruwm::button::ButtonCommand;
 use ruwm::mqtt::MqttClientNotification;
+use ruwm::screen::DrawRequest;
 use ruwm::valve::{ValveCommand, ValveState};
 use ruwm::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -22,6 +23,7 @@ pub type ValveSpinCommandEvent = SpecificEvent<ValveCommand, 8>;
 pub type ValveSpinNotifEvent = SpecificEvent<(), 9>;
 pub type WifiStatusNotifEvent = SpecificEvent<(), 10>;
 pub type ButtonCommandEvent = SpecificEvent<ButtonCommand, 11>;
+pub type DrawRequestEvent = SpecificEvent<DrawRequest, 12>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Event {
@@ -42,6 +44,8 @@ pub enum Event {
     WifiStatus,
 
     ButtonCommand(ButtonCommand),
+
+    DrawRequest(DrawRequest),
 }
 
 impl EspTypedEventSource for Event {
@@ -68,6 +72,7 @@ impl EspTypedEventSerializer<Event> for Event {
             Self::ValveSpinNotif => ValveSpinNotifEvent::serialize(&(), f),
             Self::WifiStatus => WifiStatusNotifEvent::serialize(&(), f),
             Self::ButtonCommand(payload) => ButtonCommandEvent::serialize(payload, f),
+            Self::DrawRequest(payload) => DrawRequestEvent::serialize(payload, f),
         }
     }
 }
@@ -99,6 +104,8 @@ impl EspTypedEventDeserializer<Event> for Event {
                 Self::WifiStatus
             } else if id == ButtonCommandEvent::event_id() {
                 Self::ButtonCommand(*data.as_payload())
+            } else if id == DrawRequestEvent::event_id() {
+                Self::DrawRequest(*data.as_payload())
             } else {
                 panic!("Unknown event ID: {:?}", id);
             }

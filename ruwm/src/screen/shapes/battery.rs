@@ -68,49 +68,62 @@ impl Battery {
         };
 
         // Draw charging level fill
-        Rectangle::new(Point::new(10, 10), Size::new(WIDTH - 20, HEIGHT - 20))
-            .into_styled(PrimitiveStyle::with_fill(charged_color))
-            .draw(target)?;
+        Rectangle::new(
+            Point::new(10, fill_line as _),
+            Size::new(WIDTH - 20, HEIGHT - 20),
+        )
+        .into_styled(PrimitiveStyle::with_fill(charged_color))
+        .draw(target)?;
 
         // Left outline
-        Rectangle::new(Point::new(10, 20), Size::new(5, HEIGHT - 20))
+        Rectangle::new(Point::new(10, 20), Size::new(5, HEIGHT - 30))
             .into_styled(PrimitiveStyle::with_fill(outline_color))
             .draw(target)?;
 
         // Right outline
         Rectangle::new(
-            Point::new(WIDTH as i32 - 20 - 5, 20),
-            Size::new(5, HEIGHT - 20),
+            Point::new(WIDTH as i32 - 20 + 5, 20),
+            Size::new(5, HEIGHT - 30),
         )
         .into_styled(PrimitiveStyle::with_fill(outline_color))
         .draw(target)?;
 
         // Bottom outline
         Rectangle::new(
-            Point::new(10, HEIGHT as i32 - 20 - 5),
+            Point::new(10, HEIGHT as i32 - 20 + 5),
             Size::new(WIDTH - 20, 5),
         )
-        .into_styled(PrimitiveStyle::with_stroke(outline_color, 5))
+        .into_styled(PrimitiveStyle::with_fill(outline_color))
         .draw(target)?;
 
         // Top outline
         Rectangle::new(Point::new(40, 10), Size::new(WIDTH - 80, 5))
-            .into_styled(PrimitiveStyle::with_stroke(outline_color, 5))
+            .into_styled(PrimitiveStyle::with_fill(outline_color))
             .draw(target)?;
 
-        // Top left outline
+        // Top left horizontal outline
+        Rectangle::new(Point::new(10, 20), Size::new(30, 5))
+            .into_styled(PrimitiveStyle::with_fill(outline_color))
+            .draw(target)?;
+
+        // Top right horizontal outline
+        Rectangle::new(Point::new(WIDTH as i32 - 40 - 30, 20), Size::new(30, 5))
+            .into_styled(PrimitiveStyle::with_fill(outline_color))
+            .draw(target)?;
+
+        // Top left vertical outline
         Rectangle::new(Point::new(40, 10), Size::new(5, 10))
-            .into_styled(PrimitiveStyle::with_stroke(outline_color, 5))
+            .into_styled(PrimitiveStyle::with_fill(outline_color))
             .draw(target)?;
 
-        // Top right outline
+        // Top right vertical outline
         Rectangle::new(Point::new(WIDTH as i32 - 40, 10), Size::new(5, 10))
-            .into_styled(PrimitiveStyle::with_stroke(outline_color, 5))
+            .into_styled(PrimitiveStyle::with_fill(outline_color))
             .draw(target)?;
 
         // Remove charge fill from the top left corner
         Rectangle::new(Point::new(10, 10), Size::new(40 - 5, 10 - 5))
-            .into_styled(PrimitiveStyle::with_stroke(D::Color::BLACK, 5))
+            .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
             .draw(target)?;
 
         // Remove charge fill from the top right corner
@@ -118,7 +131,7 @@ impl Battery {
             Point::new(WIDTH as i32 - 40 + 5, 10),
             Size::new(40 - 5, 10 - 5),
         )
-        .into_styled(PrimitiveStyle::with_stroke(D::Color::BLACK, 5))
+        .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
         .draw(target)?;
 
         let light_color = if percentage < PERCENTAGE_THRESHOLD {
