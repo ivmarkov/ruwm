@@ -210,7 +210,7 @@ impl Battery {
 
             let mut bonw = target.clipped(&Rectangle::new(
                 Point::new(0, fill_line as i32),
-                Size::new(width, height),
+                Size::new(width, height - fill_line),
             ));
             self.draw_percentage(&mut bonw, position, D::Color::BLACK)?;
         } else if self.text_rendering == BatteryChargedText::Outline {
