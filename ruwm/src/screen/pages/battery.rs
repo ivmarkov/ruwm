@@ -1,6 +1,9 @@
 use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor};
 
-use crate::{battery::BatteryState, screen::shapes};
+use crate::{
+    battery::BatteryState,
+    screen::shapes::{self, BatteryChargedText},
+};
 
 pub struct Battery {
     state: Option<BatteryState>,
@@ -23,7 +26,7 @@ impl Battery {
                 (voltage * 100 / (BatteryState::MAX_VOLTAGE + BatteryState::LOW_VOLTAGE)) as u8
             });
 
-            shapes::Battery::new(percentage, true, true).draw(target)?;
+            shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
         }
 
         Ok(())

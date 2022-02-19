@@ -1,7 +1,10 @@
 use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor};
 
 use crate::{
-    battery::BatteryState, screen::shapes, valve::ValveState, water_meter::WaterMeterState,
+    battery::BatteryState,
+    screen::shapes::{self, BatteryChargedText},
+    valve::ValveState,
+    water_meter::WaterMeterState,
 };
 
 pub struct Summary {
@@ -51,7 +54,7 @@ impl Summary {
                     as u8
             });
 
-            shapes::Battery::new(percentage, true, true).draw(target)?;
+            shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
         }
 
         Ok(())

@@ -8,7 +8,7 @@ use alloc::sync::Arc;
 
 use futures::try_join;
 
-use embedded_graphics::prelude::{Point, Size};
+use embedded_graphics::prelude::{Dimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 
 use display_interface_spi::SPIInterfaceNoCS;
@@ -44,6 +44,7 @@ use event::{
     WifiStatusNotifEvent,
 };
 
+use log::info;
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
@@ -261,6 +262,8 @@ fn main() -> anyhow::Result<()> {
     display
         .set_orientation(st7789::Orientation::Portrait)
         .unwrap();
+
+    info!("Original size: {:?}", display.bounding_box());
 
     let mut draw_engine = DrawEngine::<SmolUnblocker, _, _>::new(
         receiver::<DrawRequestEvent, _, _>(&mut event_loop)?,
