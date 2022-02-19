@@ -8,6 +8,9 @@ use alloc::sync::Arc;
 
 use futures::try_join;
 
+use embedded_graphics::prelude::{Point, Size};
+use embedded_graphics::primitives::Rectangle;
+
 use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
@@ -46,7 +49,7 @@ use pulse_counter::PulseCounter;
 use ruwm::battery::{self, BatteryState};
 use ruwm::button::{Button, PressedLevel};
 use ruwm::pulse_counter::PulseCounter as _;
-use ruwm::screen::{DrawEngine, Screen};
+use ruwm::screen::{CroppedAdaptor, DrawEngine, FlushableAdaptor, Screen};
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::storage::Storage;
 use ruwm::valve::{self, ValveState};
@@ -261,7 +264,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut draw_engine = DrawEngine::<SmolUnblocker, _, _>::new(
         receiver::<DrawRequestEvent, _, _>(&mut event_loop)?,
-        display,
+        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+        FlushableAdaptor::noop(CroppedAdaptor::new(
+            Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
+            display,
+        )),
     );
 
     let mqtt_conf = MqttClientConfiguration {

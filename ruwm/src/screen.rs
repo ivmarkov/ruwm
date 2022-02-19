@@ -9,10 +9,7 @@ use anyhow::anyhow;
 
 use futures::{pin_mut, select, FutureExt};
 
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
-use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, RgbColor};
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::Drawable;
+use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::nonblocking::Unblocker;
@@ -22,6 +19,9 @@ use crate::button::ButtonCommand;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 
+pub use adaptors::*;
+
+mod adaptors;
 mod pages;
 mod shapes;
 
@@ -166,7 +166,7 @@ impl<U, N, D> DrawEngine<U, N, D>
 where
     U: Unblocker,
     N: Receiver<Data = DrawRequest>,
-    D: DrawTarget + Send + 'static,
+    D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
     N::Error: Debug + Display + Send + Sync + 'static,
     D::Error: Debug,
@@ -198,16 +198,10 @@ where
     }
 
     fn draw(
-        mut display_orig: D,
+        mut display: D,
         mut page_drawable: Option<PageDrawable>,
         draw_request: DrawRequest,
     ) -> anyhow::Result<(D, Option<PageDrawable>)> {
-        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
-        let mut display = display_orig.cropped(&Rectangle::new(
-            embedded_graphics::prelude::Point::new(52, 40),
-            embedded_graphics::prelude::Size::new(135, 240),
-        ));
-
         loop {
             match draw_request.active_page {
                 Page::Summary => {
@@ -237,12 +231,15 @@ where
                 }
             }
 
-            Rectangle::new(Point::zero(), display.size())
-                .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
-                .draw(&mut display)
+            display
+                .clear(RgbColor::BLACK)
                 .map_err(|e| anyhow!("Display error: {:?}", e))?;
         }
 
-        Ok((display_orig, page_drawable))
+        display
+            .flush()
+            .map_err(|e| anyhow!("Display error: {:?}", e))?;
+
+        Ok((display, page_drawable))
     }
 }
