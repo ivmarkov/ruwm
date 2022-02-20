@@ -32,6 +32,7 @@ pub enum ValveCommand {
     Close,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
     state_snapshot: StateSnapshot<M>,
     command: C,

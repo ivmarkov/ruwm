@@ -58,6 +58,7 @@ where
     SV::Error: Display + Send + Sync + 'static,
     SW::Error: Display + Send + Sync + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mqtt: C,
         connection: M,
@@ -310,7 +311,7 @@ where
 
             if let Some(incoming) = incoming {
                 self.mqtt_notif
-                    .send(incoming.clone())
+                    .send(incoming)
                     .await
                     .map_err(|e| anyhow!(e))?;
 
@@ -344,6 +345,7 @@ where
 
 #[derive(Default)]
 struct MessageParser {
+    #[allow(clippy::type_complexity)]
     command_parser: Option<fn(&[u8]) -> Option<MqttCommand>>,
     payload_buf: [u8; 16],
 }
@@ -396,6 +398,7 @@ impl MessageParser {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn parse_command(topic: &str) -> Option<fn(&[u8]) -> Option<MqttCommand>> {
         if topic.ends_with("/commands/valve") {
             Some(Self::parse_valve_command)
@@ -411,11 +414,11 @@ impl MessageParser {
     }
 
     fn parse_valve_command(data: &[u8]) -> Option<MqttCommand> {
-        Self::parse::<bool>(data).map(|flag| MqttCommand::Valve(flag))
+        Self::parse::<bool>(data).map(MqttCommand::Valve)
     }
 
     fn parse_flow_watch_command(data: &[u8]) -> Option<MqttCommand> {
-        Self::parse::<bool>(data).map(|flag| MqttCommand::FlowWatch(flag))
+        Self::parse::<bool>(data).map(MqttCommand::FlowWatch)
     }
 
     fn parse_keep_alive_command(data: &[u8]) -> Option<MqttCommand> {

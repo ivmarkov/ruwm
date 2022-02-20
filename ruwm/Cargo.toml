@@ -20,6 +20,6 @@ anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = "0.2"
-embedded-svc = "0.16.8"
+embedded-svc = "0.17.1"
 embedded-graphics = "0.7"
 profont = "0.5"

@@ -22,10 +22,10 @@ log = "0.4"
 smol = "1.2"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.16.8" }
+embedded-svc = { version = "0.17.1" }
 esp-idf-sys = { version = "0.30", features = ["binstart"] }
-esp-idf-svc = { version = "0.36.10" }
-esp-idf-hal = { version = "0.32.10" }
+esp-idf-svc = { version = "0.37" }
+esp-idf-hal = { version = "0.33.1" }
 embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"

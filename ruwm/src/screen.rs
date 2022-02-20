@@ -12,7 +12,7 @@ use futures::{pin_mut, select, FutureExt};
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::nonblocking::Unblocker;
+use embedded_svc::unblocker::nonblocking::Unblocker;
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
@@ -77,6 +77,7 @@ where
     BU::Error: Send + Sync + Display + Debug + 'static,
     D::Error: Send + Sync + Display + Debug + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         button_command: B,
         valve_state_updates: VU,
@@ -138,7 +139,7 @@ where
         };
 
         if self.draw_request != draw_request {
-            self.draw_request = draw_request.clone();
+            self.draw_request = draw_request;
 
             self.draw_engine
                 .send(draw_request)

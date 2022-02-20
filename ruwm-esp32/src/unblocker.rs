@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use embedded_svc::nonblocking::Unblocker;
+use embedded_svc::unblocker::nonblocking::Unblocker;
 
 pub struct SmolUnblocker;
 

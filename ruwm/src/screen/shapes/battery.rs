@@ -288,7 +288,7 @@ fn to_str(mut num: u32, buf: &mut [u8]) -> usize {
 
         buf[len] = b'0' + (num % 10) as u8;
 
-        num = num / 10;
+        num /= 10;
     }
 
     len

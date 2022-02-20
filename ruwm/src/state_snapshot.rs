@@ -73,6 +73,16 @@ where
     }
 }
 
+impl<M, S> Default for StateSnapshot<M>
+where
+    M: Mutex<Data = S>,
+    S: Default,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<M> Clone for StateSnapshot<M>
 where
     M: Send + Sync,

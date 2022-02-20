@@ -186,7 +186,7 @@ where
         let display = &mut self.display;
         let adaptor = &self.adaptor;
 
-        display.fill_contiguous(area, colors.into_iter().map(|color| (adaptor)(color)))
+        display.fill_contiguous(area, colors.into_iter().map(adaptor))
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {

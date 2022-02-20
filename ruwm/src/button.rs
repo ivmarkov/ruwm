@@ -67,13 +67,11 @@ where
             if debounce > 0 {
                 debounce -= 1;
 
-                if debounce == 0 {
-                    if pressed {
-                        self.notif
-                            .send(ButtonCommand::Pressed(self.id))
-                            .await
-                            .map_err(|e| anyhow!(e))?;
-                    }
+                if debounce == 0 && pressed {
+                    self.notif
+                        .send(ButtonCommand::Pressed(self.id))
+                        .await
+                        .map_err(|e| anyhow!(e))?;
                 }
             } else if pressed {
                 debounce = (DEBOUNCE_TIME_MS / POLLING_TIME_MS) as u32;

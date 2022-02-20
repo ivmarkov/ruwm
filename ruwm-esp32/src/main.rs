@@ -8,6 +8,8 @@ use alloc::sync::Arc;
 
 use futures::try_join;
 
+use log::info;
+
 use embedded_graphics::prelude::{Dimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 
@@ -44,7 +46,6 @@ use event::{
     WifiStatusNotifEvent,
 };
 
-use log::info;
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
