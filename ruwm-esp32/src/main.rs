@@ -20,6 +20,7 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
 use embedded_svc::timer::nonblocking::TimerService;
 use embedded_svc::unblocker::nonblocking::Unblocker;
+use embedded_svc::utils::nonblocking::channel::adapt;
 use embedded_svc::utils::nonblocking::event_bus::{AsyncPostbox, AsyncSubscription};
 use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
@@ -50,13 +51,14 @@ use event::{
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
+use ruwm::broadcast_event::*;
 use ruwm::button::{Button, PressedLevel};
 use ruwm::pulse_counter::PulseCounter as _;
-use ruwm::screen::{CroppedAdaptor, DrawEngine, FlushableAdaptor, Screen};
+use ruwm::screen::{CroppedAdaptor, DrawEngine, DrawRequest, FlushableAdaptor, Screen};
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::storage::Storage;
-use ruwm::valve::{self, ValveState};
-use ruwm::water_meter::{self, WaterMeterState};
+use ruwm::valve::{self, ValveCommand, ValveState};
+use ruwm::water_meter::{self, WaterMeterCommand, WaterMeterState};
 use ruwm::{emergency, pipe};
 use ruwm::{event_logger, mqtt};
 
@@ -82,31 +84,6 @@ where
     StateSnapshot::<Mutex<S>>::new()
 }
 
-fn receiver<D, P, T>(
-    event_loop: &mut EspEventLoop<T>,
-) -> Result<AsyncSubscription<esp_idf_hal::mutex::Condvar, P, EspSubscription<T>, EspError>, EspError>
-where
-    T: EspEventLoopType + Send + 'static,
-    D: EspTypedEventDeserializer<P>,
-    P: Clone + Send + Sync + 'static,
-{
-    event_loop.as_typed::<D, _>().as_async().subscribe()
-}
-
-fn sender<D, P, T>(
-    event_loop: &mut EspEventLoop<T>,
-) -> Result<AsyncPostbox<impl Unblocker, P, EspTypedEventLoop<D, P, EspEventLoop<T>>>, EspError>
-where
-    T: EspEventLoopType + Send + 'static,
-    D: EspTypedEventSerializer<P> + 'static,
-    P: Clone + Send + Sync + 'static,
-{
-    event_loop
-        .as_typed::<D, _>()
-        .as_async_with_unblocker::<SmolUnblocker>()
-        .postbox()
-}
-
 fn main() -> anyhow::Result<()> {
     env::set_var("BLOCKING_MAX_THREADS", "2");
 
@@ -117,11 +94,14 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
 
+    //let broadcast = espidf::broadcast::broadcast(100)?;
+    let (bc_sender, bc_receiver) = ruwm_std::broadcast::broadcast::<BroadcastEvent>(100)?;
+
     let mut event_loop = EspBackgroundEventLoop::new(&Default::default())?;
 
     let mut timer_service = EspTimerService::new()?.into_async();
 
-    let event_logger = event_logger::run(receiver::<event::Event, _, _>(&mut event_loop)?);
+    let event_logger = event_logger::run(bc_receiver.clone());
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -137,7 +117,9 @@ fn main() -> anyhow::Result<()> {
 
     let wifi_notif = pipe::run(
         wifi.as_async().subscribe()?,
-        sender::<WifiStatusNotifEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |_| {
+            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus))
+        }),
     );
 
     let valve_state = state::<Option<ValveState>>();
@@ -148,15 +130,20 @@ fn main() -> anyhow::Result<()> {
     let valve_open_pin = peripherals.pins.gpio12.into_output()?;
     let valve_close_pin = peripherals.pins.gpio13.into_output()?;
 
+    let (vsc_sender, vsc_receiver) = espidf::notify::notify::<ValveCommand>()?;
+    let (vsn_sender, vsn_receiver) = espidf::notify::notify::<()>()?;
+
     let valve = valve::run(
         valve_state.clone(),
-        receiver::<ValveCommandEvent, _, _>(&mut event_loop)?,
-        sender::<ValveStateEvent, _, _>(&mut event_loop)?,
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
+        }),
         timer_service.timer()?,
-        sender::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
-        receiver::<ValveSpinCommandEvent, _, _>(&mut event_loop)?,
-        sender::<ValveSpinNotifEvent, _, _>(&mut event_loop)?,
-        receiver::<ValveSpinNotifEvent, _, _>(&mut event_loop)?,
+        vsc_sender,
+        vsc_receiver,
+        vsn_sender,
+        vsn_receiver,
         valve_power_pin,
         valve_open_pin,
         valve_close_pin,
@@ -172,7 +159,9 @@ fn main() -> anyhow::Result<()> {
 
     let battery = battery::run(
         battery_state.clone(),
-        sender::<BatteryStateEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("VALVE", Payload::BatteryState(p)))
+        }),
         timer_service.timer()?,
         powered_adc1,
         battery_pin,
@@ -185,8 +174,10 @@ fn main() -> anyhow::Result<()> {
 
     let water_meter = water_meter::run(
         water_meter_state.clone(),
-        receiver::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
-        sender::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
+        }),
         timer_service.timer()?,
         pulse_counter,
     );
@@ -195,7 +186,9 @@ fn main() -> anyhow::Result<()> {
         1,
         peripherals.pins.gpio25.into_input()?.into_pull_up()?,
         timer_service.timer()?,
-        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
+        }),
         PressedLevel::Low,
     );
 
@@ -203,7 +196,9 @@ fn main() -> anyhow::Result<()> {
         2,
         peripherals.pins.gpio26.into_input()?.into_pull_up()?,
         timer_service.timer()?,
-        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("BUTTON2", Payload::ButtonCommand(p)))
+        }),
         PressedLevel::Low,
     );
 
@@ -211,19 +206,23 @@ fn main() -> anyhow::Result<()> {
         3,
         peripherals.pins.gpio27.into_input()?.into_pull_up()?,
         timer_service.timer()?,
-        sender::<ButtonCommandEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
+        }),
         PressedLevel::Low,
     );
 
+    let (draw_sender, draw_receiver) = espidf::notify::notify::<DrawRequest>()?;
+
     let mut screen = Screen::new(
-        receiver::<ButtonCommandEvent, _, _>(&mut event_loop)?,
-        receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
-        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
-        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
         valve_state.get(),
         water_meter_state.get(),
         battery_state.get(),
-        sender::<DrawRequestEvent, _, _>(&mut event_loop)?,
+        draw_sender,
     );
 
     let backlight = peripherals.pins.gpio4;
@@ -267,7 +266,7 @@ fn main() -> anyhow::Result<()> {
     info!("Original size: {:?}", display.bounding_box());
 
     let mut draw_engine = DrawEngine::<SmolUnblocker, _, _>::new(
-        receiver::<DrawRequestEvent, _, _>(&mut event_loop)?,
+        draw_receiver,
         // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
         FlushableAdaptor::noop(CroppedAdaptor::new(
             Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
@@ -288,19 +287,35 @@ fn main() -> anyhow::Result<()> {
     let mut mqtt = mqtt::Mqtt::new(
         mqtt_client,
         mqtt_connection,
-        sender::<MqttPublishNotificationEvent, _, _>(&mut event_loop)?,
-        receiver::<ValveStateEvent, _, _>(&mut event_loop)?,
-        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
-        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
-        sender::<MqttClientNotificationEvent, _, _>(&mut event_loop)?,
-        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
-        sender::<WaterMeterCommandEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new(
+                "MQTT",
+                Payload::MqttPublishNotification(p),
+            ))
+        }),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new(
+                "MQTT",
+                Payload::MqttClientNotification(p),
+            ))
+        }),
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))
+        }),
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("MQTT", Payload::WaterMeterCommand(p)))
+        }),
     );
 
     let emergency = emergency::run(
-        sender::<ValveCommandEvent, _, _>(&mut event_loop)?,
-        receiver::<WaterMeterStateEvent, _, _>(&mut event_loop)?,
-        receiver::<BatteryStateEvent, _, _>(&mut event_loop)?,
+        adapt::sender(bc_sender.clone(), |p| {
+            Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
+        }),
+        adapt::receiver(bc_receiver.clone(), Into::into),
+        adapt::receiver(bc_receiver.clone(), Into::into),
     );
 
     esp_idf_sys::esp!(unsafe {

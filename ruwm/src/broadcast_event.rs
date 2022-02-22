@@ -1,5 +1,8 @@
+use embedded_svc::mqtt::client::nonblocking::MessageId;
+
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
+use crate::mqtt::MqttClientNotification;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -10,10 +13,10 @@ pub struct BroadcastEvent {
 }
 
 impl BroadcastEvent {
-    pub fn new(source: &'static str, payload: &Payload) -> Self {
+    pub fn new(source: &'static str, payload: Payload) -> Self {
         Self {
             source,
-            payload: *payload,
+            payload: payload,
         }
     }
 
@@ -39,6 +42,9 @@ pub enum Payload {
     ButtonCommand(ButtonCommand),
 
     WifiStatus,
+
+    MqttPublishNotification(MessageId),
+    MqttClientNotification(MqttClientNotification),
 }
 
 impl From<BroadcastEvent> for Option<ValveCommand> {
