@@ -6,6 +6,7 @@
 extern crate alloc;
 
 pub mod battery;
+pub mod broadcast_event;
 pub mod button;
 pub mod emergency;
 pub mod event_logger;

@@ -1,25 +1,21 @@
 [package]
-name = "ruwm"
+name = "ruwm-std"
 version = "0.1.0"
 authors = ["ivmarkov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
 categories = ["embedded", "hardware-support"]
 keywords = ["hal", "embedded"]
-description = "A library of subsystems for a water meter controller."
+description = "A library of implementations for various async traits from embedded-svc based on Rust STD."
 repository = "https://github.com/ivmarkov/ruwm"
 readme = "README.md"
 
 [features]
-default = ["experimental"]
-
-experimental = ["embedded-svc/experimental"]
 
 [dependencies]
 anyhow = "1"
 log = "0.4"
+smol = "1.2"
+async-broadcast = "0.3.4"
 futures = {version = "0.3", features = ["async-await"] }
-embedded-hal = "0.2"
 embedded-svc = "0.17.2"
-embedded-graphics = "0.7"
-profont = "0.5"

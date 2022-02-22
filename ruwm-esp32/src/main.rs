@@ -19,6 +19,7 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
 use embedded_svc::timer::nonblocking::TimerService;
+use embedded_svc::unblocker::nonblocking::Unblocker;
 use embedded_svc::utils::nonblocking::event_bus::{AsyncPostbox, AsyncSubscription};
 use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
@@ -59,16 +60,15 @@ use ruwm::water_meter::{self, WaterMeterState};
 use ruwm::{emergency, pipe};
 use ruwm::{event_logger, mqtt};
 
-use unblocker::SmolUnblocker;
+use ruwm_std::unblocker::SmolUnblocker;
 
 use crate::event::{
     BatteryStateEvent, MqttClientNotificationEvent, MqttPublishNotificationEvent,
     ValveCommandEvent, ValveStateEvent, WaterMeterCommandEvent, WaterMeterStateEvent,
 };
 
+mod espidf;
 mod event;
-mod unblocker;
-
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 
@@ -95,7 +95,7 @@ where
 
 fn sender<D, P, T>(
     event_loop: &mut EspEventLoop<T>,
-) -> Result<AsyncPostbox<SmolUnblocker, P, EspTypedEventLoop<D, P, EspEventLoop<T>>>, EspError>
+) -> Result<AsyncPostbox<impl Unblocker, P, EspTypedEventLoop<D, P, EspEventLoop<T>>>, EspError>
 where
     T: EspEventLoopType + Send + 'static,
     D: EspTypedEventSerializer<P> + 'static,

@@ -38,7 +38,7 @@ pub enum Event {
     MqttClientNotification(MqttClientNotification),
     MqttPublishNotification(MessageId),
 
-    ValveSpinCommandEvent(ValveCommand),
+    ValveSpinCommand(ValveCommand),
     ValveSpinNotif,
 
     WifiStatus,
@@ -68,7 +68,7 @@ impl EspTypedEventSerializer<Event> for Event {
             Self::MqttPublishNotification(payload) => {
                 MqttPublishNotificationEvent::serialize(payload, f)
             }
-            Self::ValveSpinCommandEvent(payload) => ValveSpinCommandEvent::serialize(payload, f),
+            Self::ValveSpinCommand(payload) => ValveSpinCommandEvent::serialize(payload, f),
             Self::ValveSpinNotif => ValveSpinNotifEvent::serialize(&(), f),
             Self::WifiStatus => WifiStatusNotifEvent::serialize(&(), f),
             Self::ButtonCommand(payload) => ButtonCommandEvent::serialize(payload, f),
@@ -97,7 +97,7 @@ impl EspTypedEventDeserializer<Event> for Event {
             } else if id == MqttPublishNotificationEvent::event_id() {
                 Self::MqttPublishNotification(*data.as_payload())
             } else if id == ValveSpinCommandEvent::event_id() {
-                Self::ValveSpinCommandEvent(*data.as_payload())
+                Self::ValveSpinCommand(*data.as_payload())
             } else if id == ValveSpinNotifEvent::event_id() {
                 Self::ValveSpinNotif
             } else if id == WifiStatusNotifEvent::event_id() {
