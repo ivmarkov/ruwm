@@ -7,6 +7,7 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::errors::Errors;
 use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::PeriodicTimer;
 
@@ -25,24 +26,18 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub async fn run<M, N, T, ADC, A, BP, PP>(
-    state: StateSnapshot<M>,
-    mut notif: N,
-    mut timer: T,
-    mut one_shot: A,
+pub async fn run<ADC, BP, PP>(
+    state: StateSnapshot<impl Mutex<Data = BatteryState>>,
+    mut notif: impl Sender<Data = BatteryState>,
+    mut timer: impl PeriodicTimer,
+    mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
     power_pin: PP,
 ) -> anyhow::Result<()>
 where
-    M: Mutex<Data = BatteryState>,
-    N: Sender<Data = BatteryState>,
-    T: PeriodicTimer,
-    A: adc::OneShot<ADC, u16, BP>,
     BP: adc::Channel<ADC>,
     PP: InputPin,
     PP::Error: Debug,
-    N::Error: Display + Send + Sync + 'static,
-    T::Error: Display + Send + Sync + 'static,
 {
     let mut tick = timer
         .every(Duration::from_secs(2))

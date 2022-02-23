@@ -71,11 +71,6 @@ where
     WU: Receiver<Data = WaterMeterState>,
     BU: Receiver<Data = BatteryState>,
     D: Sender<Data = DrawRequest>,
-    B::Error: Send + Sync + Display + Debug + 'static,
-    VU::Error: Send + Sync + Display + Debug + 'static,
-    WU::Error: Send + Sync + Display + Debug + 'static,
-    BU::Error: Send + Sync + Display + Debug + 'static,
-    D::Error: Send + Sync + Display + Debug + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -169,7 +164,6 @@ where
     N: Receiver<Data = DrawRequest>,
     D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
-    N::Error: Debug + Display + Send + Sync + 'static,
     D::Error: Debug,
 {
     pub fn new(draw_notif: N, display: D) -> Self {

@@ -33,41 +33,26 @@ pub enum ValveCommand {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run<M, C, N, SCS, SCR, SNS, SNR, O, PP, PO, PC>(
-    state_snapshot: StateSnapshot<M>,
-    command: C,
-    notif: N,
-    once: O,
-    spin_command_sender: SCS,
-    spin_command_receiver: SCR,
-    spin_notif_sender: SNS,
-    spin_notif_receiver: SNR,
+pub async fn run<PP, PO, PC>(
+    state_snapshot: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    command: impl Receiver<Data = ValveCommand>,
+    notif: impl Sender<Data = Option<ValveState>>,
+    once: impl OnceTimer,
+    spin_command_sender: impl Sender<Data = ValveCommand>,
+    spin_command_receiver: impl Receiver<Data = ValveCommand>,
+    spin_notif_sender: impl Sender<Data = ()>,
+    spin_notif_receiver: impl Receiver<Data = ()>,
     power_pin: PP,
     open_pin: PO,
     close_pin: PC,
 ) -> anyhow::Result<()>
 where
-    M: Mutex<Data = Option<ValveState>>,
-    C: Receiver<Data = ValveCommand>,
-    N: Sender<Data = Option<ValveState>>,
-    SCS: Sender<Data = ValveCommand>,
-    SCR: Receiver<Data = ValveCommand>,
-    SNS: Sender<Data = ()>,
-    SNR: Receiver<Data = ()>,
-    O: OnceTimer,
     PP: OutputPin,
     PO: OutputPin,
     PC: OutputPin,
     PP::Error: Debug,
     PO::Error: Debug,
     PC::Error: Debug,
-    C::Error: Display + Send + Sync + 'static,
-    N::Error: Display + Send + Sync + 'static,
-    SCS::Error: Display + Send + Sync + 'static,
-    SCR::Error: Display + Send + Sync + 'static,
-    SNS::Error: Display + Send + Sync + 'static,
-    SNR::Error: Display + Send + Sync + 'static,
-    O::Error: Display + Send + Sync + 'static,
 {
     try_join! {
         run_events(
@@ -90,24 +75,13 @@ where
     Ok(())
 }
 
-async fn run_events<M, C, N, SC, SN>(
-    state_snapshot: StateSnapshot<M>,
-    mut command: C,
-    mut notif: N,
-    mut spin_command: SC,
-    mut spin_notif: SN,
-) -> anyhow::Result<()>
-where
-    M: Mutex<Data = Option<ValveState>>,
-    C: Receiver<Data = ValveCommand>,
-    N: Sender<Data = Option<ValveState>>,
-    SC: Sender<Data = ValveCommand>,
-    SN: Receiver<Data = ()>,
-    C::Error: Display + Send + Sync + 'static,
-    N::Error: Display + Send + Sync + 'static,
-    SC::Error: Display + Send + Sync + 'static,
-    SN::Error: Display + Send + Sync + 'static,
-{
+async fn run_events(
+    state_snapshot: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    mut command: impl Receiver<Data = ValveCommand>,
+    mut notif: impl Sender<Data = Option<ValveState>>,
+    mut spin_command: impl Sender<Data = ValveCommand>,
+    mut spin_notif: impl Receiver<Data = ()>,
+) -> anyhow::Result<()> {
     loop {
         let state = {
             let command = command.recv();
@@ -161,27 +135,21 @@ where
     }
 }
 
-async fn run_spin<T, R, C, PP, PO, PC>(
-    mut once: T,
-    mut command: R,
-    mut complete: C,
+async fn run_spin<PP, PO, PC>(
+    mut once: impl OnceTimer,
+    mut command: impl Receiver<Data = ValveCommand>,
+    mut complete: impl Sender<Data = ()>,
     mut power_pin: PP,
     mut open_pin: PO,
     mut close_pin: PC,
 ) -> anyhow::Result<()>
 where
-    T: OnceTimer,
-    R: Receiver<Data = ValveCommand>,
-    C: Sender<Data = ()>,
     PP: OutputPin,
     PO: OutputPin,
     PC: OutputPin,
     PP::Error: Debug,
     PO::Error: Debug,
     PC::Error: Debug,
-    T::Error: Display + Send + Sync + 'static,
-    R::Error: Display + Send + Sync + 'static,
-    C::Error: Display + Send + Sync + 'static,
 {
     let mut current_command: Option<ValveCommand> = None;
 

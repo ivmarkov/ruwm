@@ -38,8 +38,6 @@ where
     P::Error: Debug,
     T: PeriodicTimer,
     S: Sender<Data = ButtonCommand>,
-    T::Error: Display + Send + Sync + 'static,
-    S::Error: Display + Send + Sync + 'static,
 {
     pub fn new(id: ButtonId, pin: P, timer: T, notif: S, pressed_level: PressedLevel) -> Self {
         Self {

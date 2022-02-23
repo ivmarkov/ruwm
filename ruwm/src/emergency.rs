@@ -11,19 +11,11 @@ use crate::battery::BatteryState;
 use crate::valve::ValveCommand;
 use crate::water_meter::WaterMeterState;
 
-pub async fn run<N, W, B>(
-    mut notif: N,
-    mut wm_status: W,
-    mut battery_status: B,
-) -> anyhow::Result<()>
-where
-    N: Sender<Data = ValveCommand>,
-    W: Receiver<Data = WaterMeterState>,
-    B: Receiver<Data = BatteryState>,
-    N::Error: Display + Send + Sync + 'static,
-    W::Error: Display + Send + Sync + 'static,
-    B::Error: Display + Send + Sync + 'static,
-{
+pub async fn run(
+    mut notif: impl Sender<Data = ValveCommand>,
+    mut wm_status: impl Receiver<Data = WaterMeterState>,
+    mut battery_status: impl Receiver<Data = BatteryState>,
+) -> anyhow::Result<()> {
     loop {
         let wm = wm_status.recv();
         let battery = battery_status.recv();

@@ -4,27 +4,18 @@ use anyhow::anyhow;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 
-pub async fn run<R, S, D>(receiver: R, sender: S) -> anyhow::Result<()>
-where
-    R: Receiver<Data = D>,
-    S: Sender<Data = D>,
-    R::Error: Display + Send + Sync + 'static,
-    S::Error: Display + Send + Sync + 'static,
-{
+pub async fn run<D>(
+    receiver: impl Receiver<Data = D>,
+    sender: impl Sender<Data = D>,
+) -> anyhow::Result<()> {
     run_transform(receiver, sender, |d| d).await
 }
 
-pub async fn run_transform<R, S, RD, SD>(
-    mut receiver: R,
-    mut sender: S,
+pub async fn run_transform<RD, SD>(
+    mut receiver: impl Receiver<Data = RD>,
+    mut sender: impl Sender<Data = SD>,
     transformer: impl Fn(RD) -> SD,
-) -> anyhow::Result<()>
-where
-    R: Receiver<Data = RD>,
-    S: Sender<Data = SD>,
-    R::Error: Display + Send + Sync + 'static,
-    S::Error: Display + Send + Sync + 'static,
-{
+) -> anyhow::Result<()> {
     loop {
         sender
             .send(transformer(receiver.recv().await.map_err(|e| anyhow!(e))?))

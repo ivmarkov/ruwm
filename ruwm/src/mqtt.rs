@@ -49,14 +49,6 @@ where
     N: Sender<Data = MqttClientNotification>,
     SV: Sender<Data = ValveCommand>,
     SW: Sender<Data = WaterMeterCommand>,
-    C::Error: Display + Send + Sync + 'static,
-    Q::Error: Display + Send + Sync + 'static,
-    V::Error: Display + Send + Sync + 'static,
-    W::Error: Display + Send + Sync + 'static,
-    B::Error: Display + Send + Sync + 'static,
-    N::Error: Display + Send + Sync + 'static,
-    SV::Error: Display + Send + Sync + 'static,
-    SW::Error: Display + Send + Sync + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -101,11 +93,6 @@ where
     V: Receiver<Data = Option<ValveState>>,
     W: Receiver<Data = WaterMeterState>,
     B: Receiver<Data = BatteryState>,
-    C::Error: Display + Send + Sync + 'static,
-    Q::Error: Display + Send + Sync + 'static,
-    V::Error: Display + Send + Sync + 'static,
-    W::Error: Display + Send + Sync + 'static,
-    B::Error: Display + Send + Sync + 'static,
 {
     fn new(mqtt: C, pubq: Q, valve_status: V, wm_status: W, battery_status: B) -> Self {
         Self {
@@ -287,9 +274,6 @@ where
     N: Sender<Data = MqttClientNotification>,
     SV: Sender<Data = ValveCommand>,
     SW: Sender<Data = WaterMeterCommand>,
-    N::Error: Display + Send + Sync + 'static,
-    SV::Error: Display + Send + Sync + 'static,
-    SW::Error: Display + Send + Sync + 'static,
 {
     fn new(connection: M, mqtt_notif: N, valve_command: SV, wm_command: SW) -> Self {
         Self {

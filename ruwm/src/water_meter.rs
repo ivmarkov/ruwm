@@ -29,23 +29,13 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub async fn run<M, C, N, T, PC>(
-    state: StateSnapshot<M>,
-    mut command: C,
-    mut notif: N,
-    mut timer: T,
-    mut pulse_counter: PC,
-) -> anyhow::Result<()>
-where
-    M: Mutex<Data = WaterMeterState>,
-    C: Receiver<Data = WaterMeterCommand>,
-    N: Sender<Data = WaterMeterState>,
-    T: PeriodicTimer,
-    PC: PulseCounter,
-    C::Error: Display + Send + Sync + 'static,
-    N::Error: Display + Send + Sync + 'static,
-    T::Error: Display + Send + Sync + 'static,
-{
+pub async fn run(
+    state: StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    mut command: impl Receiver<Data = WaterMeterCommand>,
+    mut notif: impl Sender<Data = WaterMeterState>,
+    mut timer: impl PeriodicTimer,
+    mut pulse_counter: impl PulseCounter,
+) -> anyhow::Result<()> {
     pulse_counter.start().map_err(|e| anyhow!(e))?;
 
     let mut clock = timer
