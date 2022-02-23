@@ -4,18 +4,27 @@ use core::time::Duration;
 
 use embedded_svc::channel::nonblocking::Receiver;
 use embedded_svc::errors::Errors;
-use embedded_svc::timer::nonblocking::{OnceTimer, PeriodicTimer};
+use embedded_svc::timer::nonblocking::*;
 
-pub fn oneshot() -> anyhow::Result<impl OnceTimer> {
-    Ok(SmolTimer)
+pub fn timers() -> anyhow::Result<impl TimerService> {
+    Ok(SmolTimers)
 }
 
-pub fn periodic() -> anyhow::Result<impl PeriodicTimer> {
-    Ok(SmolTimer)
-}
-
+struct SmolTimers;
 struct SmolTimer;
 pub struct SmolInterval(Duration);
+
+impl Errors for SmolTimers {
+    type Error = Infallible;
+}
+
+impl TimerService for SmolTimers {
+    type Timer = SmolTimer;
+
+    fn timer(&mut self) -> Result<Self::Timer, Self::Error> {
+        Ok(SmolTimer)
+    }
+}
 
 impl Errors for SmolTimer {
     type Error = Infallible;

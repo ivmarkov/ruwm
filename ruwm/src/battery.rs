@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
 use core::time::Duration;
 
 use anyhow::anyhow;
@@ -7,7 +7,6 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::errors::Errors;
 use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::PeriodicTimer;
 

@@ -1,5 +1,3 @@
-use core::fmt::Display;
-
 use anyhow::anyhow;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};

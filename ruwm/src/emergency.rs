@@ -1,5 +1,3 @@
-use core::fmt::Display;
-
 use anyhow::anyhow;
 
 use futures::future::{select, Either};

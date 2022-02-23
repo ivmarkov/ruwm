@@ -17,12 +17,10 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
 
-use embedded_svc::event_bus::nonblocking::{EventBus as _, PostboxProvider};
+use embedded_svc::event_bus::nonblocking::EventBus;
 use embedded_svc::timer::nonblocking::TimerService;
-use embedded_svc::unblocker::nonblocking::Unblocker;
 use embedded_svc::utils::nonblocking::channel::adapt;
-use embedded_svc::utils::nonblocking::event_bus::{AsyncPostbox, AsyncSubscription};
-use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
+use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
 use esp_idf_hal::gpio::Pull;
@@ -30,47 +28,31 @@ use esp_idf_hal::mutex::Mutex;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::{adc, delay, gpio, spi};
 
-use esp_idf_svc::eventloop::{
-    EspBackgroundEventLoop, EspEventLoop, EspEventLoopType, EspSubscription,
-    EspTypedEventDeserializer, EspTypedEventLoop, EspTypedEventSerializer,
-};
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
-use esp_idf_svc::timer::EspTimerService;
 use esp_idf_svc::wifi::EspWifi;
-
-use esp_idf_sys::EspError;
-
-use event::{
-    ButtonCommandEvent, DrawRequestEvent, ValveSpinCommandEvent, ValveSpinNotifEvent,
-    WifiStatusNotifEvent,
-};
 
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::{self, BatteryState};
 use ruwm::broadcast_event::*;
 use ruwm::button::{Button, PressedLevel};
+use ruwm::emergency;
+use ruwm::event_logger;
+use ruwm::mqtt;
+use ruwm::pipe;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, DrawEngine, DrawRequest, FlushableAdaptor, Screen};
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::storage::Storage;
 use ruwm::valve::{self, ValveCommand, ValveState};
-use ruwm::water_meter::{self, WaterMeterCommand, WaterMeterState};
-use ruwm::{emergency, pipe};
-use ruwm::{event_logger, mqtt};
+use ruwm::water_meter::{self, WaterMeterState};
 
 use ruwm_std::unblocker::SmolUnblocker;
 
-use crate::event::{
-    BatteryStateEvent, MqttClientNotificationEvent, MqttPublishNotificationEvent,
-    ValveCommandEvent, ValveStateEvent, WaterMeterCommandEvent, WaterMeterStateEvent,
-};
-
 mod espidf;
-mod event;
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 
@@ -94,12 +76,12 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
 
-    //let broadcast = espidf::broadcast::broadcast(100)?;
-    let (bc_sender, bc_receiver) = ruwm_std::broadcast::broadcast::<BroadcastEvent>(100)?;
+    let (bc_sender, bc_receiver) =
+        espidf::broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
+    //let (bc_sender, bc_receiver) = ruwm_std::broadcast::broadcast::<BroadcastEvent>(100)?;
 
-    let mut event_loop = EspBackgroundEventLoop::new(&Default::default())?;
-
-    let mut timer_service = EspTimerService::new()?.into_async();
+    let mut timers = espidf::timer::timers()?;
+    //let mut timers = ruwm_std::timer::timers()?;
 
     let event_logger = event_logger::run(bc_receiver.clone());
 
@@ -139,7 +121,7 @@ fn main() -> anyhow::Result<()> {
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
         }),
-        timer_service.timer()?,
+        timers.timer()?,
         vsc_sender,
         vsc_receiver,
         vsn_sender,
@@ -162,7 +144,7 @@ fn main() -> anyhow::Result<()> {
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("VALVE", Payload::BatteryState(p)))
         }),
-        timer_service.timer()?,
+        timers.timer()?,
         powered_adc1,
         battery_pin,
         power_pin,
@@ -178,14 +160,14 @@ fn main() -> anyhow::Result<()> {
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
         }),
-        timer_service.timer()?,
+        timers.timer()?,
         pulse_counter,
     );
 
     let mut button1 = Button::new(
         1,
         peripherals.pins.gpio25.into_input()?.into_pull_up()?,
-        timer_service.timer()?,
+        timers.timer()?,
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
         }),
@@ -195,7 +177,7 @@ fn main() -> anyhow::Result<()> {
     let mut button2 = Button::new(
         2,
         peripherals.pins.gpio26.into_input()?.into_pull_up()?,
-        timer_service.timer()?,
+        timers.timer()?,
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("BUTTON2", Payload::ButtonCommand(p)))
         }),
@@ -205,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     let mut button3 = Button::new(
         3,
         peripherals.pins.gpio27.into_input()?.into_pull_up()?,
-        timer_service.timer()?,
+        timers.timer()?,
         adapt::sender(bc_sender.clone(), |p| {
             Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
         }),

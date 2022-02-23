@@ -1,4 +1,3 @@
-use core::convert::Infallible;
 use core::future::Future;
 
 use embedded_svc::channel::nonblocking::*;
@@ -26,8 +25,11 @@ where
     T: Send + Sync + Clone + 'static,
     D: EspTypedEventSerializer<T> + EspTypedEventDeserializer<T> + Clone + 'static,
 {
-    let mut blocking_event_bus =
-        EspBackgroundEventLoop::new(&Default::default())?.into_typed::<D, _>();
+    let mut blocking_event_bus = EspBackgroundEventLoop::new(&BackgroundLoopConfiguration {
+        queue_size: cap,
+        ..Default::default()
+    })?
+    .into_typed::<D, _>();
 
     let postbox = blocking_event_bus
         .as_async_with_unblocker::<SmolUnblocker>()
