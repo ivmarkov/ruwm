@@ -32,50 +32,7 @@ pub enum ValveCommand {
     Close,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run<PP, PO, PC>(
-    state_snapshot: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    command: impl Receiver<Data = ValveCommand>,
-    notif: impl Sender<Data = Option<ValveState>>,
-    once: impl OnceTimer,
-    spin_command_sender: impl Sender<Data = ValveCommand>,
-    spin_command_receiver: impl Receiver<Data = ValveCommand>,
-    spin_notif_sender: impl Sender<Data = ()>,
-    spin_notif_receiver: impl Receiver<Data = ()>,
-    power_pin: PP,
-    open_pin: PO,
-    close_pin: PC,
-) -> anyhow::Result<()>
-where
-    PP: OutputPin,
-    PO: OutputPin,
-    PC: OutputPin,
-    PP::Error: Debug,
-    PO::Error: Debug,
-    PC::Error: Debug,
-{
-    try_join! {
-        run_events(
-            state_snapshot,
-            command,
-            notif,
-            spin_command_sender,
-            spin_notif_receiver,
-        ),
-        run_spin(
-            once,
-            spin_command_receiver,
-            spin_notif_sender,
-            power_pin,
-            open_pin,
-            close_pin,
-        ),
-    }?;
-
-    Ok(())
-}
-
-async fn run_events(
+pub async fn run_events(
     state_snapshot: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     mut command: impl Receiver<Data = ValveCommand>,
     mut notif: impl Sender<Data = Option<ValveState>>,
@@ -135,7 +92,7 @@ async fn run_events(
     }
 }
 
-async fn run_spin<PP, PO, PC>(
+pub async fn run_spin<PP, PO, PC>(
     mut once: impl OnceTimer,
     mut command: impl Receiver<Data = ValveCommand>,
     mut complete: impl Sender<Data = ()>,

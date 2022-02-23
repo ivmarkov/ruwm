@@ -24,56 +24,39 @@ pub enum ButtonCommand {
     Pressed(ButtonId),
 }
 
-pub struct Button<P, T, S> {
+pub async fn run<P>(
     id: ButtonId,
     pin: P,
-    timer: T,
-    notif: S,
+    mut timer: impl PeriodicTimer,
+    mut notif: impl Sender<Data = ButtonCommand>,
     pressed_level: PressedLevel,
-}
-
-impl<P, T, S> Button<P, T, S>
+) -> anyhow::Result<()>
 where
     P: InputPin,
     P::Error: Debug,
-    T: PeriodicTimer,
-    S: Sender<Data = ButtonCommand>,
 {
-    pub fn new(id: ButtonId, pin: P, timer: T, notif: S, pressed_level: PressedLevel) -> Self {
-        Self {
-            id,
-            pin,
-            timer,
-            notif,
-            pressed_level,
-        }
-    }
+    let mut debounce = 0;
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut debounce = 0;
+    let mut clock = timer
+        .every(Duration::from_millis(POLLING_TIME_MS))
+        .map_err(|e| anyhow!(e))?;
 
-        let mut clock = self
-            .timer
-            .every(Duration::from_millis(POLLING_TIME_MS))
-            .map_err(|e| anyhow!(e))?;
+    loop {
+        clock.recv().await.map_err(|e| anyhow!(e))?;
 
-        loop {
-            clock.recv().await.map_err(|e| anyhow!(e))?;
+        let pressed = pin.is_high().unwrap() == (pressed_level == PressedLevel::High);
 
-            let pressed = self.pin.is_high().unwrap() == (self.pressed_level == PressedLevel::High);
+        if debounce > 0 {
+            debounce -= 1;
 
-            if debounce > 0 {
-                debounce -= 1;
-
-                if debounce == 0 && pressed {
-                    self.notif
-                        .send(ButtonCommand::Pressed(self.id))
-                        .await
-                        .map_err(|e| anyhow!(e))?;
-                }
-            } else if pressed {
-                debounce = (DEBOUNCE_TIME_MS / POLLING_TIME_MS) as u32;
+            if debounce == 0 && pressed {
+                notif
+                    .send(ButtonCommand::Pressed(id))
+                    .await
+                    .map_err(|e| anyhow!(e))?;
             }
+        } else if pressed {
+            debounce = (DEBOUNCE_TIME_MS / POLLING_TIME_MS) as u32;
         }
     }
 }

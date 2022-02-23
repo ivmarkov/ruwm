@@ -6,6 +6,22 @@ use embedded_svc::errors::Errors;
 use embedded_svc::utils::nonblocking::signal;
 
 use esp_idf_hal::mutex::Mutex;
+use ruwm::broadcast_binder::Notif;
+
+pub struct Notify;
+
+impl Notif for Notify {
+    type Sender<D> = impl Sender<Data = D>;
+
+    type Receiver<D> = impl Receiver<Data = D>;
+
+    fn create<D>(&mut self) -> anyhow::Result<(Self::Sender<D>, Self::Receiver<D>)>
+    where
+        D: Send + Sync + Clone + 'static,
+    {
+        notify()
+    }
+}
 
 pub fn notify<T>() -> anyhow::Result<(
     impl Sender<Data = T> + Clone,

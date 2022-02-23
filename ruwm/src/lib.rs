@@ -2,10 +2,12 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 #![feature(const_generics_defaults)]
+#![feature(explicit_generic_args_with_impl_trait)]
 
 extern crate alloc;
 
 pub mod battery;
+pub mod broadcast_binder;
 pub mod broadcast_event;
 pub mod button;
 pub mod emergency;

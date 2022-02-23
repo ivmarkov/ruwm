@@ -32,295 +32,239 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub struct Mqtt<C, M, Q, V, W, B, N, SV, SW> {
-    sender: MqttSender<C, Q, V, W, B>,
-    receiver: MqttReceiver<M, N, SV, SW>,
-}
+pub async fn run_sender(
+    topic_prefix: impl AsRef<str>,
+    mut mqtt: impl Client + Publish,
+    mut pubq: impl Sender<Data = MessageId>,
+    mut valve_status: impl Receiver<Data = Option<ValveState>>,
+    mut wm_status: impl Receiver<Data = WaterMeterState>,
+    mut battery_status: impl Receiver<Data = BatteryState>,
+) -> anyhow::Result<()> {
+    let topic_prefix = topic_prefix.as_ref();
 
-impl<C, M, Q, V, W, B, N, SV, SW> Mqtt<C, M, Q, V, W, B, N, SV, SW>
-where
-    C: Client + Publish,
-    M: Connection,
-    M::Error: Display,
-    Q: Sender<Data = MessageId>,
-    V: Receiver<Data = Option<ValveState>>,
-    W: Receiver<Data = WaterMeterState>,
-    B: Receiver<Data = BatteryState>,
-    N: Sender<Data = MqttClientNotification>,
-    SV: Sender<Data = ValveCommand>,
-    SW: Sender<Data = WaterMeterCommand>,
-{
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        mqtt: C,
-        connection: M,
-        pubq: Q,
-        valve_status: V,
-        wm_status: W,
-        battery_status: B,
-        mqtt_notif: N,
-        valve_command: SV,
-        wm_command: SW,
-    ) -> Self {
-        Self {
-            sender: MqttSender::new(mqtt, pubq, valve_status, wm_status, battery_status),
-            receiver: MqttReceiver::new(connection, mqtt_notif, valve_command, wm_command),
-        }
-    }
+    mqtt.subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
+        .await
+        .map_err(|e| anyhow!(e))?;
 
-    pub async fn run(&mut self, topic_prefix: impl AsRef<str>) -> anyhow::Result<()> {
-        try_join! {
-            self.sender.run(topic_prefix),
-            self.receiver.run(),
-        }?;
+    let topic_valve = format!("{}/valve", topic_prefix);
 
-        Ok(())
-    }
-}
+    let topic_meter_edges = format!("{}/meter/edges", topic_prefix);
+    let topic_meter_armed = format!("{}/meter/armed", topic_prefix);
+    let topic_meter_leak = format!("{}/meter/leak", topic_prefix);
 
-struct MqttSender<C, Q, V, W, B> {
-    mqtt: C,
-    pubq: Q,
-    valve_status: V,
-    wm_status: W,
-    battery_status: B,
-}
+    let topic_battery_voltage = format!("{}/battery/voltage", topic_prefix);
+    let topic_battery_low = format!("{}/battery/low", topic_prefix);
+    let topic_battery_charged = format!("{}/battery/charged", topic_prefix);
 
-impl<C, Q, V, W, B> MqttSender<C, Q, V, W, B>
-where
-    C: Client + Publish,
-    Q: Sender<Data = MessageId>,
-    V: Receiver<Data = Option<ValveState>>,
-    W: Receiver<Data = WaterMeterState>,
-    B: Receiver<Data = BatteryState>,
-{
-    fn new(mqtt: C, pubq: Q, valve_status: V, wm_status: W, battery_status: B) -> Self {
-        Self {
-            mqtt,
-            pubq,
-            valve_status,
-            wm_status,
-            battery_status,
-        }
-    }
+    let topic_powered = format!("{}/powered", topic_prefix);
 
-    async fn run(&mut self, topic_prefix: impl AsRef<str>) -> anyhow::Result<()> {
-        let topic_prefix = topic_prefix.as_ref();
+    loop {
+        let (valve_state, wm_state, battery_state) = {
+            let valve = valve_status.recv().fuse();
+            let wm = wm_status.recv().fuse();
+            let battery = battery_status.recv().fuse();
 
-        self.mqtt
-            .subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
-            .await
-            .map_err(|e| anyhow!(e))?;
+            pin_mut!(valve);
+            pin_mut!(wm);
+            pin_mut!(battery);
 
-        let topic_valve = format!("{}/valve", topic_prefix);
+            select! {
+                valve_state = valve => (Some(valve_state.map_err(|e| anyhow!(e))?), None, None),
+                wm_state = wm => (None, Some(wm_state.map_err(|e| anyhow!(e))?), None),
+                battery_state = battery => (None, None, Some(battery_state.map_err(|e| anyhow!(e))?)),
+            }
+        };
 
-        let topic_meter_edges = format!("{}/meter/edges", topic_prefix);
-        let topic_meter_armed = format!("{}/meter/armed", topic_prefix);
-        let topic_meter_leak = format!("{}/meter/leak", topic_prefix);
-
-        let topic_battery_voltage = format!("{}/battery/voltage", topic_prefix);
-        let topic_battery_low = format!("{}/battery/low", topic_prefix);
-        let topic_battery_charged = format!("{}/battery/charged", topic_prefix);
-
-        let topic_powered = format!("{}/powered", topic_prefix);
-
-        loop {
-            let (valve_state, wm_state, battery_state) = {
-                let valve = self.valve_status.recv().fuse();
-                let wm = self.wm_status.recv().fuse();
-                let battery = self.battery_status.recv().fuse();
-
-                pin_mut!(valve);
-                pin_mut!(wm);
-                pin_mut!(battery);
-
-                select! {
-                    valve_state = valve => (Some(valve_state.map_err(|e| anyhow!(e))?), None, None),
-                    wm_state = wm => (None, Some(wm_state.map_err(|e| anyhow!(e))?), None),
-                    battery_state = battery => (None, None, Some(battery_state.map_err(|e| anyhow!(e))?)),
-                }
+        if let Some(valve_state) = valve_state {
+            let status = match valve_state {
+                Some(ValveState::Open) => "open",
+                Some(ValveState::Opening) => "opening",
+                Some(ValveState::Closed) => "closed",
+                Some(ValveState::Closing) => "closing",
+                None => "unknown",
             };
 
-            if let Some(valve_state) = valve_state {
-                let status = match valve_state {
-                    Some(ValveState::Open) => "open",
-                    Some(ValveState::Opening) => "opening",
-                    Some(ValveState::Closed) => "closed",
-                    Some(ValveState::Closing) => "closing",
-                    None => "unknown",
-                };
+            publish(
+                &mut mqtt,
+                &mut pubq,
+                &topic_valve,
+                QoS::AtLeastOnce,
+                status.as_bytes(),
+            )
+            .await?;
+        }
 
-                self.publish(&topic_valve, QoS::AtLeastOnce, status.as_bytes())
-                    .await?;
+        if let Some(wm_state) = wm_state {
+            if wm_state.prev_edges_count != wm_state.edges_count {
+                let num = wm_state.edges_count.to_le_bytes();
+                let num_slice: &[u8] = &num;
+
+                publish(
+                    &mut mqtt,
+                    &mut pubq,
+                    &topic_meter_edges,
+                    QoS::AtLeastOnce,
+                    num_slice,
+                )
+                .await?;
             }
 
-            if let Some(wm_state) = wm_state {
-                if wm_state.prev_edges_count != wm_state.edges_count {
-                    let num = wm_state.edges_count.to_le_bytes();
+            if wm_state.prev_armed != wm_state.armed {
+                publish(
+                    &mut mqtt,
+                    &mut pubq,
+                    &topic_meter_armed,
+                    QoS::AtLeastOnce,
+                    (if wm_state.armed { "true" } else { "false" }).as_bytes(),
+                )
+                .await?;
+            }
+
+            if wm_state.prev_leaking != wm_state.leaking {
+                publish(
+                    &mut mqtt,
+                    &mut pubq,
+                    &topic_meter_leak,
+                    QoS::AtLeastOnce,
+                    (if wm_state.armed { "true" } else { "false" }).as_bytes(),
+                )
+                .await?;
+            }
+        }
+
+        if let Some(battery_state) = battery_state {
+            if battery_state.prev_voltage != battery_state.voltage {
+                if let Some(voltage) = battery_state.voltage {
+                    let num = voltage.to_le_bytes();
                     let num_slice: &[u8] = &num;
 
-                    self.publish(&topic_meter_edges, QoS::AtLeastOnce, num_slice)
-                        .await?;
-                }
-
-                if wm_state.prev_armed != wm_state.armed {
-                    self.publish(
-                        &topic_meter_armed,
-                        QoS::AtLeastOnce,
-                        (if wm_state.armed { "true" } else { "false" }).as_bytes(),
+                    publish(
+                        &mut mqtt,
+                        &mut pubq,
+                        &topic_battery_voltage,
+                        QoS::AtMostOnce,
+                        num_slice,
                     )
                     .await?;
-                }
 
-                if wm_state.prev_leaking != wm_state.leaking {
-                    self.publish(
-                        &topic_meter_leak,
-                        QoS::AtLeastOnce,
-                        (if wm_state.armed { "true" } else { "false" }).as_bytes(),
-                    )
-                    .await?;
-                }
-            }
+                    if let Some(prev_voltage) = battery_state.prev_voltage {
+                        if (prev_voltage > BatteryState::LOW_VOLTAGE)
+                            != (voltage > BatteryState::LOW_VOLTAGE)
+                        {
+                            let status = if voltage > BatteryState::LOW_VOLTAGE {
+                                "false"
+                            } else {
+                                "true"
+                            };
 
-            if let Some(battery_state) = battery_state {
-                if battery_state.prev_voltage != battery_state.voltage {
-                    if let Some(voltage) = battery_state.voltage {
-                        let num = voltage.to_le_bytes();
-                        let num_slice: &[u8] = &num;
-
-                        self.publish(&topic_battery_voltage, QoS::AtMostOnce, num_slice)
+                            publish(
+                                &mut mqtt,
+                                &mut pubq,
+                                &topic_battery_low,
+                                QoS::AtLeastOnce,
+                                status.as_bytes(),
+                            )
                             .await?;
+                        }
 
-                        if let Some(prev_voltage) = battery_state.prev_voltage {
-                            if (prev_voltage > BatteryState::LOW_VOLTAGE)
-                                != (voltage > BatteryState::LOW_VOLTAGE)
-                            {
-                                let status = if voltage > BatteryState::LOW_VOLTAGE {
-                                    "false"
-                                } else {
-                                    "true"
-                                };
+                        if (prev_voltage >= BatteryState::MAX_VOLTAGE)
+                            != (voltage >= BatteryState::MAX_VOLTAGE)
+                        {
+                            let status = if voltage >= BatteryState::MAX_VOLTAGE {
+                                "true"
+                            } else {
+                                "false"
+                            };
 
-                                self.publish(
-                                    &topic_battery_low,
-                                    QoS::AtLeastOnce,
-                                    status.as_bytes(),
-                                )
-                                .await?;
-                            }
-
-                            if (prev_voltage >= BatteryState::MAX_VOLTAGE)
-                                != (voltage >= BatteryState::MAX_VOLTAGE)
-                            {
-                                let status = if voltage >= BatteryState::MAX_VOLTAGE {
-                                    "true"
-                                } else {
-                                    "false"
-                                };
-
-                                self.publish(
-                                    &topic_battery_charged,
-                                    QoS::AtMostOnce,
-                                    status.as_bytes(),
-                                )
-                                .await?;
-                            }
+                            publish(
+                                &mut mqtt,
+                                &mut pubq,
+                                &topic_battery_charged,
+                                QoS::AtMostOnce,
+                                status.as_bytes(),
+                            )
+                            .await?;
                         }
                     }
                 }
+            }
 
-                if battery_state.prev_powered != battery_state.powered {
-                    if let Some(powered) = battery_state.powered {
-                        self.publish(
-                            &topic_powered,
-                            QoS::AtMostOnce,
-                            (if powered { "true" } else { "false" }).as_bytes(),
-                        )
-                        .await?;
-                    }
+            if battery_state.prev_powered != battery_state.powered {
+                if let Some(powered) = battery_state.powered {
+                    publish(
+                        &mut mqtt,
+                        &mut pubq,
+                        &topic_powered,
+                        QoS::AtMostOnce,
+                        (if powered { "true" } else { "false" }).as_bytes(),
+                    )
+                    .await?;
                 }
-            };
-        }
-    }
-
-    async fn publish(&mut self, topic: &str, qos: QoS, payload: &[u8]) -> anyhow::Result<()> {
-        let msg_id = self
-            .mqtt
-            .publish(topic, qos, false, payload)
-            .await
-            .map_err(|e| anyhow!(e))?;
-
-        info!("Published to {}", topic);
-
-        if qos >= QoS::AtLeastOnce {
-            self.pubq.send(msg_id).await.map_err(|e| anyhow!(e))?;
-        }
-
-        Ok(())
+            }
+        };
     }
 }
 
-pub struct MqttReceiver<M, N, SV, SW> {
-    connection: M,
-    mqtt_notif: N,
-    valve_command: SV,
-    wm_command: SW,
+async fn publish(
+    mqtt: &mut impl Publish,
+    pubq: &mut impl Sender<Data = MessageId>,
+    topic: &str,
+    qos: QoS,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    let msg_id = mqtt
+        .publish(topic, qos, false, payload)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+    info!("Published to {}", topic);
+
+    if qos >= QoS::AtLeastOnce {
+        pubq.send(msg_id).await.map_err(|e| anyhow!(e))?;
+    }
+
+    Ok(())
 }
 
-impl<M, N, SV, SW> MqttReceiver<M, N, SV, SW>
+pub async fn run_receiver<M>(
+    mut connection: M,
+    mut mqtt_notif: impl Sender<Data = MqttClientNotification>,
+    mut valve_command: impl Sender<Data = ValveCommand>,
+    mut wm_command: impl Sender<Data = WaterMeterCommand>,
+) -> anyhow::Result<()>
 where
     M: Connection,
     M::Error: Display,
-    N: Sender<Data = MqttClientNotification>,
-    SV: Sender<Data = ValveCommand>,
-    SW: Sender<Data = WaterMeterCommand>,
 {
-    fn new(connection: M, mqtt_notif: N, valve_command: SV, wm_command: SW) -> Self {
-        Self {
-            connection,
-            mqtt_notif,
-            valve_command,
-            wm_command,
-        }
-    }
+    let mut message_parser = MessageParser::new();
 
-    async fn run(&mut self) -> anyhow::Result<()> {
-        let mut message_parser = MessageParser::new();
+    loop {
+        let incoming = connection
+            .next(|message| message_parser.process(message), |error| ())
+            .await;
 
-        loop {
-            let incoming = self
-                .connection
-                .next(|message| message_parser.process(message), |error| ())
-                .await;
+        if let Some(incoming) = incoming {
+            mqtt_notif.send(incoming).await.map_err(|e| anyhow!(e))?;
 
-            if let Some(incoming) = incoming {
-                self.mqtt_notif
-                    .send(incoming)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
-
-                if let Ok(Event::Received(Some(cmd))) = incoming {
-                    match cmd {
-                        MqttCommand::Valve(open) => self
-                            .valve_command
-                            .send(if open {
-                                ValveCommand::Open
-                            } else {
-                                ValveCommand::Close
-                            })
-                            .await
-                            .map_err(|e| anyhow!(e))?,
-                        MqttCommand::FlowWatch(enable) => self
-                            .wm_command
-                            .send(if enable {
-                                WaterMeterCommand::Arm
-                            } else {
-                                WaterMeterCommand::Disarm
-                            })
-                            .await
-                            .map_err(|e| anyhow!(e))?,
-                        _ => (),
-                    }
+            if let Ok(Event::Received(Some(cmd))) = incoming {
+                match cmd {
+                    MqttCommand::Valve(open) => valve_command
+                        .send(if open {
+                            ValveCommand::Open
+                        } else {
+                            ValveCommand::Close
+                        })
+                        .await
+                        .map_err(|e| anyhow!(e))?,
+                    MqttCommand::FlowWatch(enable) => wm_command
+                        .send(if enable {
+                            WaterMeterCommand::Arm
+                        } else {
+                            WaterMeterCommand::Disarm
+                        })
+                        .await
+                        .map_err(|e| anyhow!(e))?,
+                    _ => (),
                 }
             }
         }

@@ -8,9 +8,7 @@ use alloc::sync::Arc;
 
 use futures::try_join;
 
-use log::info;
-
-use embedded_graphics::prelude::{Dimensions, Point, Size};
+use embedded_graphics::prelude::{Point, Size};
 use embedded_graphics::primitives::Rectangle;
 
 use display_interface_spi::SPIInterfaceNoCS;
@@ -18,8 +16,6 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::nonblocking::EventBus;
-use embedded_svc::timer::nonblocking::TimerService;
-use embedded_svc::utils::nonblocking::channel::adapt;
 use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
@@ -36,21 +32,18 @@ use esp_idf_svc::wifi::EspWifi;
 
 use pulse_counter::PulseCounter;
 
-use ruwm::battery::{self, BatteryState};
-use ruwm::broadcast_event::*;
-use ruwm::button::{Button, PressedLevel};
-use ruwm::emergency;
-use ruwm::event_logger;
-use ruwm::mqtt;
-use ruwm::pipe;
+use ruwm::battery::BatteryState;
+use ruwm::broadcast_binder;
 use ruwm::pulse_counter::PulseCounter as _;
-use ruwm::screen::{CroppedAdaptor, DrawEngine, DrawRequest, FlushableAdaptor, Screen};
+use ruwm::screen::{CroppedAdaptor, FlushableAdaptor};
 use ruwm::state_snapshot::StateSnapshot;
 use ruwm::storage::Storage;
-use ruwm::valve::{self, ValveCommand, ValveState};
-use ruwm::water_meter::{self, WaterMeterState};
+use ruwm::valve::ValveState;
+use ruwm::water_meter::WaterMeterState;
 
 use ruwm_std::unblocker::SmolUnblocker;
+
+use crate::espidf::notify::Notify;
 
 mod espidf;
 #[cfg(any(esp32, esp32s2))]
@@ -76,14 +69,20 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
 
+    let valve_state = state::<Option<ValveState>>();
+    let battery_state = state::<BatteryState>();
+    let water_meter_state = state::<WaterMeterState>();
+
     let (bc_sender, bc_receiver) =
         espidf::broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
     //let (bc_sender, bc_receiver) = ruwm_std::broadcast::broadcast::<BroadcastEvent>(100)?;
 
-    let mut timers = espidf::timer::timers()?;
-    //let mut timers = ruwm_std::timer::timers()?;
-
-    let event_logger = event_logger::run(bc_receiver.clone());
+    let binder = broadcast_binder::BroadcastBinder::new(
+        bc_sender.clone(),
+        bc_receiver.clone(),
+        espidf::timer::timers()?,
+        Notify,
+    );
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -97,115 +96,48 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     }))?;
 
-    let wifi_notif = pipe::run(
-        wifi.as_async().subscribe()?,
-        adapt::sender(bc_sender.clone(), |_| {
-            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus))
-        }),
-    );
+    let event_logger = binder.event_logger()?;
 
-    let valve_state = state::<Option<ValveState>>();
-    let battery_state = state::<BatteryState>();
-    let water_meter_state = state::<WaterMeterState>();
+    let wifi_notif = binder.wifi(wifi.as_async().subscribe()?)?;
 
-    let valve_power_pin = peripherals.pins.gpio10.into_output()?;
-    let valve_open_pin = peripherals.pins.gpio12.into_output()?;
-    let valve_close_pin = peripherals.pins.gpio13.into_output()?;
-
-    let (vsc_sender, vsc_receiver) = espidf::notify::notify::<ValveCommand>()?;
-    let (vsn_sender, vsn_receiver) = espidf::notify::notify::<()>()?;
-
-    let valve = valve::run(
-        valve_state.clone(),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
-        }),
-        timers.timer()?,
-        vsc_sender,
-        vsc_receiver,
-        vsn_sender,
-        vsn_receiver,
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-    );
-
-    let powered_adc1 = adc::PoweredAdc::new(
-        peripherals.adc1,
-        adc::config::Config::new().calibration(true),
+    let valve = binder.valve(
+        peripherals.pins.gpio10.into_output()?,
+        peripherals.pins.gpio12.into_output()?,
+        peripherals.pins.gpio13.into_output()?,
+        valve_state,
     )?;
 
-    let battery_pin = peripherals.pins.gpio35.into_analog_atten_11db()?;
-    let power_pin = peripherals.pins.gpio14.into_input()?;
-
-    let battery = battery::run(
+    let battery = binder.battery(
         battery_state.clone(),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("VALVE", Payload::BatteryState(p)))
-        }),
-        timers.timer()?,
-        powered_adc1,
-        battery_pin,
-        power_pin,
-    );
+        adc::PoweredAdc::new(
+            peripherals.adc1,
+            adc::config::Config::new().calibration(true),
+        )?,
+        peripherals.pins.gpio35.into_analog_atten_11db()?,
+        peripherals.pins.gpio14.into_input()?,
+    )?;
 
     let mut pulse_counter = PulseCounter::new(peripherals.ulp);
 
     pulse_counter.initialize()?;
 
-    let water_meter = water_meter::run(
-        water_meter_state.clone(),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
-        }),
-        timers.timer()?,
-        pulse_counter,
-    );
+    let water_meter = binder.water_meter(water_meter_state.clone(), pulse_counter)?;
 
-    let mut button1 = Button::new(
+    let button1 = binder.button(
         1,
+        "BUTON1",
         peripherals.pins.gpio25.into_input()?.into_pull_up()?,
-        timers.timer()?,
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
-        }),
-        PressedLevel::Low,
-    );
-
-    let mut button2 = Button::new(
+    )?;
+    let button2 = binder.button(
         2,
+        "BUTON2",
         peripherals.pins.gpio26.into_input()?.into_pull_up()?,
-        timers.timer()?,
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("BUTTON2", Payload::ButtonCommand(p)))
-        }),
-        PressedLevel::Low,
-    );
-
-    let mut button3 = Button::new(
+    )?;
+    let button3 = binder.button(
         3,
+        "BUTON3",
         peripherals.pins.gpio27.into_input()?.into_pull_up()?,
-        timers.timer()?,
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("BUTTON1", Payload::ButtonCommand(p)))
-        }),
-        PressedLevel::Low,
-    );
-
-    let (draw_sender, draw_receiver) = espidf::notify::notify::<DrawRequest>()?;
-
-    let mut screen = Screen::new(
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        valve_state.get(),
-        water_meter_state.get(),
-        battery_state.get(),
-        draw_sender,
-    );
+    )?;
 
     let backlight = peripherals.pins.gpio4;
     let dc = peripherals.pins.gpio16;
@@ -245,60 +177,30 @@ fn main() -> anyhow::Result<()> {
         .set_orientation(st7789::Orientation::Portrait)
         .unwrap();
 
-    info!("Original size: {:?}", display.bounding_box());
+    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+    let display = FlushableAdaptor::noop(CroppedAdaptor::new(
+        Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
+        display,
+    ));
 
-    let mut draw_engine = DrawEngine::<SmolUnblocker, _, _>::new(
-        draw_receiver,
-        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
-        FlushableAdaptor::noop(CroppedAdaptor::new(
-            Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
-            display,
-        )),
-    );
+    let screen = binder.screen(
+        valve_state.get(),
+        water_meter_state.get(),
+        battery_state.get(),
+        display,
+    )?;
 
     let mqtt_conf = MqttClientConfiguration {
-        client_id: Some("water-meter-demo"),
+        client_id: Some("water-meter-demo"), // TODO
         ..Default::default()
     };
 
     let (mqtt_client, mqtt_connection) =
         EspMqttClient::new_async::<SmolUnblocker, _>("mqtt://broker.emqx.io:1883", &mqtt_conf)?;
 
-    let topic_prefix = "water-meter-demo";
+    let mqtt = binder.mqtt(mqtt_conf.client_id.unwrap(), mqtt_client, mqtt_connection)?;
 
-    let mut mqtt = mqtt::Mqtt::new(
-        mqtt_client,
-        mqtt_connection,
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new(
-                "MQTT",
-                Payload::MqttPublishNotification(p),
-            ))
-        }),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new(
-                "MQTT",
-                Payload::MqttClientNotification(p),
-            ))
-        }),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))
-        }),
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("MQTT", Payload::WaterMeterCommand(p)))
-        }),
-    );
-
-    let emergency = emergency::run(
-        adapt::sender(bc_sender.clone(), |p| {
-            Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
-        }),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-        adapt::receiver(bc_receiver.clone(), Into::into),
-    );
+    let emergency = binder.emergency()?;
 
     esp_idf_sys::esp!(unsafe {
         esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
@@ -315,12 +217,11 @@ fn main() -> anyhow::Result<()> {
             water_meter,
             emergency,
             wifi_notif,
-            mqtt.run(topic_prefix),
-            button1.run(),
-            button2.run(),
-            button3.run(),
-            screen.run(),
-            draw_engine.run(),
+            mqtt,
+            button1,
+            button2,
+            button3,
+            screen,
         }
     })?;
 
