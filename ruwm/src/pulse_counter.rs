@@ -22,7 +22,9 @@ impl Default for Data {
 pub trait PulseCounter {
     type Error: Debug + Display + Send + Sync + 'static;
 
-    fn initialize(&mut self) -> Result<(), Self::Error>;
+    fn initialize(self) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
 
     fn start(&mut self) -> Result<(), Self::Error>;
     fn stop(&mut self) -> Result<(), Self::Error>;

@@ -28,13 +28,13 @@ impl PulseCounter {
 impl pulse_counter::PulseCounter for PulseCounter {
     type Error = EspError;
 
-    fn initialize(&mut self) -> Result<(), Self::Error> {
+    fn initialize(mut self) -> Result<Self, Self::Error> {
         unsafe {
             self.ulp_mut().load(Self::ULP_CODE)?;
         }
         self.swap_data(&Default::default())?;
 
-        Ok(())
+        Ok(self)
     }
 
     fn start(&mut self) -> Result<(), Self::Error> {
