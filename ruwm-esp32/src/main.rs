@@ -1,12 +1,11 @@
-#![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
-
+#![feature(type_alias_impl_trait)]
 use std::env;
 
 extern crate alloc;
 use alloc::sync::Arc;
 
-use embedded_graphics::prelude::{Point, Size};
+use embedded_graphics::prelude::{Point, RgbColor, Size};
 use embedded_graphics::primitives::Rectangle;
 
 use display_interface_spi::SPIInterfaceNoCS;
@@ -17,9 +16,10 @@ use embedded_svc::event_bus::nonblocking::EventBus;
 use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
-use esp_idf_hal::gpio::Pull;
+use esp_idf_hal::gpio::{Output, Pull};
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_hal::prelude::*;
+use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, gpio, spi};
 
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
@@ -36,8 +36,13 @@ use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 
 use ruwm_std::unblocker::SmolUnblocker;
 
-use crate::espidf::notify::Notify;
+#[cfg(feature = "espidf")]
+use crate::espidf::*;
 
+#[cfg(not(feature = "espidf"))]
+use ruwm_std::*;
+
+#[cfg(feature = "espidf")]
 mod espidf;
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
@@ -46,25 +51,15 @@ const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
 
 fn main() -> anyhow::Result<()> {
-    env::set_var("BLOCKING_MAX_THREADS", "2");
-
-    esp_idf_sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
-
-    esp_idf_sys::esp!(unsafe {
-        esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
-            max_fds: 5,
-            ..Default::default()
-        })
-    })?;
+    init()?;
 
     let peripherals = Peripherals::take().unwrap();
 
-    let (bc_sender, bc_receiver) =
-        espidf::broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
-    //let (bc_sender, bc_receiver) = ruwm_std::broadcast::broadcast::<BroadcastEvent>(100)?;
+    #[cfg(feature = "espidf")]
+    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
+
+    #[cfg(not(feature = "espidf"))]
+    let broadcast = broadcast::broadcast(100)?;
 
     let mut binder = broadcast_binder::BroadcastBinder::<
         SmolUnblocker,
@@ -75,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         _,
         _,
         _,
-    >::new(bc_sender, bc_receiver, espidf::timer::timers()?, Notify);
+    >::new(broadcast, timer::timers()?, signal::SignalFactory);
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -89,57 +84,7 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     }))?;
 
-    let backlight = peripherals.pins.gpio4;
-    let dc = peripherals.pins.gpio16;
-    let rst = peripherals.pins.gpio23;
-    let spi = peripherals.spi2;
-    let sclk = peripherals.pins.gpio18;
-    let sdo = peripherals.pins.gpio19;
-    let cs = peripherals.pins.gpio5;
-
-    let mut backlight = backlight.into_output()?;
-    backlight.set_high()?;
-
-    let di = SPIInterfaceNoCS::new(
-        spi::Master::<spi::SPI2, _, _, _, _>::new(
-            spi,
-            spi::Pins {
-                sclk,
-                sdo,
-                sdi: Option::<gpio::Gpio21<gpio::Unknown>>::None,
-                cs: Some(cs),
-            },
-            <spi::config::Config as Default>::default().baudrate(26.MHz().into()),
-        )?,
-        dc.into_output()?,
-    );
-
-    let mut display = st7789::ST7789::new(
-        di,
-        rst.into_output()?,
-        // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
-        240,
-        320,
-    );
-
-    display.init(&mut delay::Ets).unwrap();
-    display
-        .set_orientation(st7789::Orientation::Portrait)
-        .unwrap();
-
-    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
-    let display = FlushableAdaptor::noop(CroppedAdaptor::new(
-        Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
-        display,
-    ));
-
-    let mqtt_conf = MqttClientConfiguration {
-        client_id: Some("water-meter-demo"), // TODO
-        ..Default::default()
-    };
-
-    let (mqtt_client, mqtt_connection) =
-        EspMqttClient::new_async::<SmolUnblocker, _>("mqtt://broker.emqx.io:1883", &mqtt_conf)?;
+    let client_id = "water-meter-demo";
 
     binder
         .event_logger()?
@@ -173,11 +118,92 @@ fn main() -> anyhow::Result<()> {
             "BUTON3",
             peripherals.pins.gpio27.into_input()?.into_pull_up()?,
         )?
-        .screen(display)?
-        .mqtt(mqtt_conf.client_id.unwrap(), mqtt_client, mqtt_connection)?
+        .screen(display(
+            peripherals.pins.gpio4.into_output()?.degrade(),
+            peripherals.pins.gpio16.into_output()?.degrade(),
+            peripherals.pins.gpio23.into_output()?.degrade(),
+            peripherals.spi2,
+            peripherals.pins.gpio18.into_output()?.degrade(),
+            peripherals.pins.gpio19.into_output()?.degrade(),
+            Some(peripherals.pins.gpio5.into_output()?.degrade()),
+        )?)?
+        .mqtt(
+            client_id,
+            EspMqttClient::new_async::<SmolUnblocker, _>(
+                "mqtt://broker.emqx.io:1883",
+                MqttClientConfiguration {
+                    client_id: Some(client_id),
+                    ..Default::default()
+                },
+            )?,
+        )?
         .emergency()?;
 
-    smol::block_on(binder.run())?;
+    smol::block_on(binder.into_future())?;
 
     Ok(())
+}
+
+fn init() -> anyhow::Result<()> {
+    env::set_var("BLOCKING_MAX_THREADS", "2");
+
+    esp_idf_sys::link_patches();
+
+    // Bind the log crate to the ESP Logging facilities
+    esp_idf_svc::log::EspLogger::initialize_default();
+
+    esp_idf_sys::esp!(unsafe {
+        esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
+            max_fds: 5,
+            ..Default::default()
+        })
+    })?;
+
+    Ok(())
+}
+
+fn display(
+    mut backlight: gpio::GpioPin<Output>,
+    dc: gpio::GpioPin<Output>,
+    rst: gpio::GpioPin<Output>,
+    spi: SPI2,
+    sclk: gpio::GpioPin<Output>,
+    sdo: gpio::GpioPin<Output>,
+    cs: Option<gpio::GpioPin<Output>>,
+) -> anyhow::Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl core::fmt::Debug>>
+{
+    backlight.set_high()?;
+
+    let di = SPIInterfaceNoCS::new(
+        spi::Master::<SPI2, _, _, _, _>::new(
+            spi,
+            spi::Pins {
+                sclk,
+                sdo,
+                sdi: Option::<gpio::Gpio21<gpio::Unknown>>::None,
+                cs,
+            },
+            <spi::config::Config as Default>::default().baudrate(26.MHz().into()),
+        )?,
+        dc,
+    );
+
+    let mut display = st7789::ST7789::new(
+        di, rst,
+        // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
+        240, 320,
+    );
+
+    display.init(&mut delay::Ets).unwrap();
+    display
+        .set_orientation(st7789::Orientation::Portrait)
+        .unwrap();
+
+    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+    let display = FlushableAdaptor::noop(CroppedAdaptor::new(
+        Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
+        display,
+    ));
+
+    Ok(display)
 }

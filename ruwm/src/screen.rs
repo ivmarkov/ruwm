@@ -1,6 +1,4 @@
 use core::fmt::Debug;
-use core::marker::PhantomData;
-use core::mem;
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -124,12 +122,10 @@ enum PageDrawable {
     Battery(pages::Battery),
 }
 
-pub async fn run_draw_engine<U, D>(
-    mut draw_notif: impl Receiver<Data = DrawRequest>,
-    mut display: D,
-) -> anyhow::Result<()>
+pub async fn run_draw_engine<U, R, D>(mut draw_notif: R, mut display: D) -> anyhow::Result<()>
 where
     U: Unblocker,
+    R: Receiver<Data = DrawRequest>,
     D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
     D::Error: Debug,

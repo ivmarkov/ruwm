@@ -5,7 +5,10 @@ use core::{fmt::Debug, marker::PhantomData};
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
+
+use futures::future::try_join;
 
 use embedded_graphics::prelude::RgbColor;
 
@@ -20,7 +23,6 @@ use embedded_svc::{
     timer::nonblocking::TimerService,
     utils::nonblocking::channel::adapt,
 };
-use futures::try_join;
 
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
@@ -35,7 +37,7 @@ use crate::{
     water_meter::WaterMeterState,
 };
 
-pub trait Notif {
+pub trait SignalFactory {
     type Sender<D>: Sender<Data = D>;
     type Receiver<D>: Receiver<Data = D>;
 
@@ -49,7 +51,7 @@ pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N> {
     bc_sender: S,
     bc_receiver: R,
     timers: T,
-    notif: N,
+    signal_factory: N,
     valve_state: StateSnapshot<MV>,
     water_meter_state: StateSnapshot<MW>,
     battery_state: StateSnapshot<MB>,
@@ -65,15 +67,15 @@ where
     S: Sender<Data = BroadcastEvent> + Clone + 'static,
     R: Receiver<Data = BroadcastEvent> + Clone + 'static,
     T: TimerService + 'static,
-    N: Notif + 'static,
+    N: SignalFactory + 'static,
 {
-    pub fn new(bc_sender: S, bc_receiver: R, timers: T, notif: N) -> Self {
+    pub fn new(broadcast: (S, R), timers: T, signal_factory: N) -> Self {
         Self {
             _unblocker: PhantomData,
-            bc_sender,
-            bc_receiver,
+            bc_sender: broadcast.0,
+            bc_receiver: broadcast.1,
             timers,
-            notif,
+            signal_factory,
             valve_state: StateSnapshot::<MV>::new(),
             water_meter_state: StateSnapshot::<MW>::new(),
             battery_state: StateSnapshot::<MB>::new(),
@@ -118,8 +120,8 @@ where
         PC: OutputPin + 'static,
         PC::Error: Debug,
     {
-        let (vsc_sender, vsc_receiver) = self.notif.create()?;
-        let (vsn_sender, vsn_receiver) = self.notif.create()?;
+        let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
+        let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
 
         let valve_events = valve::run_events(
             self.valve_state.clone(),
@@ -141,10 +143,7 @@ where
         );
 
         self.bind(async move {
-            try_join! {
-                valve_events,
-                valve_spin,
-            }?;
+            try_join(valve_events, valve_spin).await?;
 
             Ok(())
         })
@@ -192,18 +191,18 @@ where
         ))
     }
 
-    pub fn mqtt<M>(
+    pub fn mqtt(
         &mut self,
-        topic_prefix: impl AsRef<str> + 'static,
-        mqtt_client: impl Client + Publish + 'static,
-        mqtt_connection: M,
-    ) -> anyhow::Result<&mut Self>
-    where
-        M: Connection + 'static,
-        M::Error: Display,
-    {
+        topic_prefix: impl Into<String>,
+        mqtt: (
+            impl Client + Publish + 'static,
+            impl Connection<Error = impl Display + 'static> + 'static,
+        ),
+    ) -> anyhow::Result<&mut Self> {
+        let (mqtt_client, mqtt_connection) = mqtt;
+
         let mqtt_sender = mqtt::run_sender(
-            topic_prefix,
+            topic_prefix.into(),
             mqtt_client,
             adapt::sender(self.bc_sender.clone(), |p| {
                 Some(BroadcastEvent::new(
@@ -233,10 +232,7 @@ where
         );
 
         self.bind(async move {
-            try_join! {
-                mqtt_sender,
-                mqtt_receiver,
-            }?;
+            try_join(mqtt_sender, mqtt_receiver).await?;
 
             Ok(())
         })
@@ -272,7 +268,7 @@ where
         D::Color: RgbColor,
         D::Error: Debug,
     {
-        let (de_sender, de_receiver) = self.notif.create()?;
+        let (de_sender, de_receiver) = self.signal_factory.create()?;
 
         let screen = screen::run_screen(
             adapt::receiver(self.bc_receiver.clone(), Into::into),
@@ -285,28 +281,22 @@ where
             de_sender,
         );
 
-        let draw_engine = screen::run_draw_engine::<U, _>(de_receiver, display);
+        let draw_engine = screen::run_draw_engine::<U, _, _>(de_receiver, display);
 
         self.bind(async move {
-            try_join! {
-                screen,
-                draw_engine,
-            }?;
+            try_join(screen, draw_engine).await?;
 
             Ok(())
         })
     }
 
-    pub fn run(self) -> impl Future<Output = anyhow::Result<()>> {
+    pub fn into_future(self) -> impl Future<Output = anyhow::Result<()>> {
         let mut fut: Pin<Box<dyn Future<Output = anyhow::Result<()>>>> =
             Box::pin(futures::future::ready(Ok(())));
 
         for b in self.bindings {
             fut = Box::pin(async move {
-                try_join! {
-                    fut,
-                    b,
-                }?;
+                try_join(fut, b).await?;
 
                 Ok(())
             });

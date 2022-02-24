@@ -25,18 +25,16 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub async fn run<ADC, BP, PP>(
+pub async fn run<ADC, BP>(
     state: StateSnapshot<impl Mutex<Data = BatteryState>>,
     mut notif: impl Sender<Data = BatteryState>,
     mut timer: impl PeriodicTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
-    power_pin: PP,
+    power_pin: impl InputPin<Error = impl Debug>,
 ) -> anyhow::Result<()>
 where
     BP: adc::Channel<ADC>,
-    PP: InputPin,
-    PP::Error: Debug,
 {
     let mut tick = timer
         .every(Duration::from_secs(2))

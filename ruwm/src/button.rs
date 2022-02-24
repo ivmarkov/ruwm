@@ -24,17 +24,13 @@ pub enum ButtonCommand {
     Pressed(ButtonId),
 }
 
-pub async fn run<P>(
+pub async fn run(
     id: ButtonId,
-    pin: P,
+    pin: impl InputPin<Error = impl Debug>,
     mut timer: impl PeriodicTimer,
     mut notif: impl Sender<Data = ButtonCommand>,
     pressed_level: PressedLevel,
-) -> anyhow::Result<()>
-where
-    P: InputPin,
-    P::Error: Debug,
-{
+) -> anyhow::Result<()> {
     let mut debounce = 0;
 
     let mut clock = timer

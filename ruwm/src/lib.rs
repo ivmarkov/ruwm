@@ -1,8 +1,6 @@
 #![no_std]
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
-#![feature(const_generics_defaults)]
-#![feature(explicit_generic_args_with_impl_trait)]
 
 extern crate alloc;
 

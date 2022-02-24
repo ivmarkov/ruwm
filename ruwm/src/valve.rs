@@ -13,7 +13,6 @@ use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::OnceTimer;
 
 use embedded_hal::digital::v2::OutputPin;
-use futures::try_join;
 
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
@@ -92,22 +91,14 @@ pub async fn run_events(
     }
 }
 
-pub async fn run_spin<PP, PO, PC>(
+pub async fn run_spin(
     mut once: impl OnceTimer,
     mut command: impl Receiver<Data = ValveCommand>,
     mut complete: impl Sender<Data = ()>,
-    mut power_pin: PP,
-    mut open_pin: PO,
-    mut close_pin: PC,
-) -> anyhow::Result<()>
-where
-    PP: OutputPin,
-    PO: OutputPin,
-    PC: OutputPin,
-    PP::Error: Debug,
-    PO::Error: Debug,
-    PC::Error: Debug,
-{
+    mut power_pin: impl OutputPin<Error = impl Debug>,
+    mut open_pin: impl OutputPin<Error = impl Debug>,
+    mut close_pin: impl OutputPin<Error = impl Debug>,
+) -> anyhow::Result<()> {
     let mut current_command: Option<ValveCommand> = None;
 
     loop {

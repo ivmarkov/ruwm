@@ -7,7 +7,24 @@ use embedded_svc::channel::nonblocking::*;
 use embedded_svc::errors::Errors;
 use embedded_svc::utils::nonblocking::signal;
 
-pub fn notify<T>() -> anyhow::Result<(
+use ruwm::broadcast_binder;
+
+pub struct SignalFactory;
+
+impl broadcast_binder::SignalFactory for SignalFactory {
+    type Sender<D> = impl Sender<Data = D>;
+
+    type Receiver<D> = impl Receiver<Data = D>;
+
+    fn create<D>(&mut self) -> anyhow::Result<(Self::Sender<D>, Self::Receiver<D>)>
+    where
+        D: Send + Sync + Clone + 'static,
+    {
+        signal()
+    }
+}
+
+pub fn signal<T>() -> anyhow::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>
@@ -16,17 +33,17 @@ where
 {
     let signal = signal::Signal::<Mutex<signal::State<T>>, T>::new();
 
-    Ok((NotifySender(signal.clone()), NotifyReceiver(signal)))
+    Ok((SignalSender(signal.clone()), SignalReceiver(signal)))
 }
 
 #[derive(Clone)]
-struct NotifySender<T: Send>(signal::Signal<Mutex<signal::State<T>>, T>);
+struct SignalSender<T: Send>(signal::Signal<Mutex<signal::State<T>>, T>);
 
-impl<T: Send> Errors for NotifySender<T> {
+impl<T: Send> Errors for SignalSender<T> {
     type Error = Infallible;
 }
 
-impl<T> Sender for NotifySender<T>
+impl<T> Sender for SignalSender<T>
 where
     T: Clone + Send + Sync + 'static,
 {
@@ -44,13 +61,13 @@ where
 }
 
 #[derive(Clone)]
-struct NotifyReceiver<T: Send>(signal::Signal<Mutex<signal::State<T>>, T>);
+struct SignalReceiver<T: Send>(signal::Signal<Mutex<signal::State<T>>, T>);
 
-impl<T: Send> Errors for NotifyReceiver<T> {
+impl<T: Send> Errors for SignalReceiver<T> {
     type Error = Infallible;
 }
 
-impl<T> Receiver for NotifyReceiver<T>
+impl<T> Receiver for SignalReceiver<T>
 where
     T: Clone + Send + Sync + 'static,
 {

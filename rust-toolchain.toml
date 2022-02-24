@@ -1,5 +1,2 @@
 [toolchain]
-
-channel = "esp-patched"
-
-
+channel = "esp"

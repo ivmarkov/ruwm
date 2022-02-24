@@ -7,7 +7,7 @@ use alloc::format;
 
 use anyhow::anyhow;
 
-use futures::{pin_mut, select, try_join, FutureExt};
+use futures::{pin_mut, select, FutureExt};
 
 use log::info;
 
@@ -226,16 +226,12 @@ async fn publish(
     Ok(())
 }
 
-pub async fn run_receiver<M>(
-    mut connection: M,
+pub async fn run_receiver(
+    mut connection: impl Connection<Error = impl Display>,
     mut mqtt_notif: impl Sender<Data = MqttClientNotification>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
-) -> anyhow::Result<()>
-where
-    M: Connection,
-    M::Error: Display,
-{
+) -> anyhow::Result<()> {
     let mut message_parser = MessageParser::new();
 
     loop {
