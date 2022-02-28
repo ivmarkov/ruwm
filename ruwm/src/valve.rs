@@ -93,28 +93,28 @@ pub async fn run_spin(
     mut once: impl OnceTimer,
     mut command: impl Receiver<Data = ValveCommand>,
     mut complete: impl Sender<Data = ()>,
-    mut power_pin: impl OutputPin<Error = impl Debug>,
-    mut open_pin: impl OutputPin<Error = impl Debug>,
-    mut close_pin: impl OutputPin<Error = impl Debug>,
+    mut power_pin: impl OutputPin<Error = impl error::HalError>,
+    mut open_pin: impl OutputPin<Error = impl error::HalError>,
+    mut close_pin: impl OutputPin<Error = impl error::HalError>,
 ) -> error::Result<()> {
     let mut current_command: Option<ValveCommand> = None;
 
     loop {
         match current_command {
             Some(ValveCommand::Open) => {
-                close_pin.set_low().unwrap();
-                open_pin.set_high().unwrap();
-                power_pin.set_high().unwrap();
+                close_pin.set_low().map_err(error::hal)?;
+                open_pin.set_high().map_err(error::hal)?;
+                power_pin.set_high().map_err(error::hal)?;
             }
             Some(ValveCommand::Close) => {
-                open_pin.set_low().unwrap();
-                close_pin.set_high().unwrap();
-                power_pin.set_high().unwrap();
+                open_pin.set_low().map_err(error::hal)?;
+                close_pin.set_high().map_err(error::hal)?;
+                power_pin.set_high().map_err(error::hal)?;
             }
             None => {
-                power_pin.set_low().unwrap();
-                open_pin.set_low().unwrap();
-                close_pin.set_low().unwrap();
+                power_pin.set_low().map_err(error::hal)?;
+                open_pin.set_low().map_err(error::hal)?;
+                close_pin.set_low().map_err(error::hal)?;
             }
         };
 
