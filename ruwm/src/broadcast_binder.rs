@@ -1,4 +1,3 @@
-use core::fmt::Display;
 use core::future::{ready, Future, Ready};
 use core::pin::Pin;
 use core::{fmt::Debug, marker::PhantomData};
@@ -6,6 +5,9 @@ use core::{fmt::Debug, marker::PhantomData};
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
+
+use futures::future::try_join;
+use futures::FutureExt;
 
 use embedded_graphics::prelude::RgbColor;
 
@@ -20,13 +22,11 @@ use embedded_svc::{
     timer::nonblocking::TimerService,
     utils::nonblocking::channel::adapt,
 };
-use futures::future::try_join;
-use futures::FutureExt;
 
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
-use crate::{battery, emergency, event_logger, mqtt, pipe, valve, water_meter};
+use crate::{battery, emergency, error, event_logger, mqtt, pipe, valve, water_meter};
 use crate::{
     battery::BatteryState,
     broadcast_event::{BroadcastEvent, Payload},
@@ -40,7 +40,7 @@ pub trait SignalFactory {
     type Sender<D>: Sender<Data = D>;
     type Receiver<D>: Receiver<Data = D>;
 
-    fn create<D>(&mut self) -> anyhow::Result<(Self::Sender<D>, Self::Receiver<D>)>
+    fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
         D: Send + Sync + Clone + 'static;
 }
@@ -57,8 +57,7 @@ pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, F> {
     joined_fut: F,
 }
 
-impl<U, MV, MW, MB, S, R, T, N>
-    BroadcastBinder<U, MV, MW, MB, S, R, T, N, Ready<anyhow::Result<()>>>
+impl<U, MV, MW, MB, S, R, T, N> BroadcastBinder<U, MV, MW, MB, S, R, T, N, Ready<error::Result<()>>>
 where
     U: Unblocker,
     MV: Mutex<Data = Option<ValveState>> + Send + Sync,
@@ -94,7 +93,7 @@ where
     R: Receiver<Data = BroadcastEvent> + Clone + 'static,
     T: TimerService + 'static,
     N: SignalFactory + 'static,
-    F: Future<Output = anyhow::Result<()>> + 'static,
+    F: Future<Output = error::Result<()>> + 'static,
     Self: Sized,
 {
     pub fn valve_state(&self) -> &StateSnapshot<MV> {
@@ -119,8 +118,8 @@ where
 
     pub fn event_logger(
         self,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let bc_receiver = self.bc_receiver.clone();
 
@@ -129,8 +128,8 @@ where
 
     pub fn emergency(
         self,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let bc_sender = self.bc_sender.clone();
         let bc_receiver = self.bc_receiver.clone();
@@ -147,8 +146,8 @@ where
     pub fn wifi(
         self,
         wifi: impl Receiver + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let bc_sender = self.bc_sender.clone();
 
@@ -162,11 +161,11 @@ where
 
     pub fn valve(
         mut self,
-        power_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
-        open_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
-        close_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
+        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
+        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
         let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
@@ -190,18 +189,14 @@ where
             close_pin,
         );
 
-        self.bind(async move {
-            try_join(valve_events, valve_spin).await?;
-
-            Ok(())
-        })
+        self.bind(try_join(valve_events, valve_spin).map(|_| Ok(())))
     }
 
     pub fn water_meter(
         mut self,
         pulse_counter: impl PulseCounter + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let timer = self.timers.timer()?;
         let bc_sender = self.bc_sender.clone();
@@ -223,9 +218,9 @@ where
         mut self,
         one_shot: impl adc::OneShot<ADC, u16, BP> + 'static,
         battery_pin: BP,
-        power_pin: impl InputPin<Error = impl Debug + 'static> + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+        power_pin: impl InputPin<Error = impl error::HalError + 'static> + 'static,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     >
     where
         BP: adc::Channel<ADC> + 'static,
@@ -249,12 +244,9 @@ where
     pub fn mqtt(
         self,
         topic_prefix: impl Into<String>,
-        mqtt: (
-            impl Client + Publish + 'static,
-            impl Connection<Error = impl Display + 'static> + 'static,
-        ),
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+        mqtt: (impl Client + Publish + 'static, impl Connection + 'static),
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let (mqtt_client, mqtt_connection) = mqtt;
 
@@ -288,20 +280,16 @@ where
             }),
         );
 
-        self.bind(async move {
-            try_join(mqtt_sender, mqtt_receiver).await?;
-
-            Ok(())
-        })
+        self.bind(try_join(mqtt_sender, mqtt_receiver).map(|_| Ok(())))
     }
 
     pub fn button(
         mut self,
         id: ButtonId,
         source: &'static str,
-        pin: impl InputPin<Error = impl Debug + 'static> + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+        pin: impl InputPin<Error = impl error::HalError + 'static> + 'static,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let timer = self.timers.timer()?;
         let bc_sender = self.bc_sender.clone();
@@ -320,8 +308,8 @@ where
     pub fn screen(
         mut self,
         display: impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + Send + 'static,
-    ) -> anyhow::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let (de_sender, de_receiver) = self.signal_factory.create()?;
 
@@ -338,18 +326,14 @@ where
 
         let draw_engine = screen::run_draw_engine::<U, _, _>(de_receiver, display);
 
-        self.bind(async move {
-            try_join(screen, draw_engine).await?;
-
-            Ok(())
-        })
+        self.bind(try_join(screen, draw_engine).map(|_| Ok(())))
     }
 
     fn bind(
         self,
-        fut: impl Future<Output = anyhow::Result<()>> + 'static,
-    ) -> anyhow::Result<
-        // TODO: Results in an extremely slow build BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = anyhow::Result<()>>>,
+        fut: impl Future<Output = error::Result<()>> + 'static,
+    ) -> error::Result<
+        // TODO: Results in an extremely slow build BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
         BroadcastBinder<
             U,
             MV,
@@ -359,7 +343,7 @@ where
             R,
             T,
             N,
-            Pin<Box<dyn Future<Output = anyhow::Result<()>>>>,
+            Pin<Box<dyn Future<Output = error::Result<()>>>>,
         >,
     > {
         let joined_fut = self.joined_fut;
@@ -377,7 +361,7 @@ where
         })
     }
 
-    pub fn into_future(self) -> impl Future<Output = anyhow::Result<()>> {
+    pub fn into_future(self) -> impl Future<Output = error::Result<()>> {
         self.joined_fut
     }
 }

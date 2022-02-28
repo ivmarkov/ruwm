@@ -6,7 +6,9 @@ use embedded_svc::channel::nonblocking::Receiver;
 use embedded_svc::errors::Errors;
 use embedded_svc::timer::nonblocking::*;
 
-pub fn timers() -> anyhow::Result<impl TimerService> {
+use ruwm::error;
+
+pub fn timers() -> error::Result<impl TimerService> {
     Ok(SmolTimers)
 }
 

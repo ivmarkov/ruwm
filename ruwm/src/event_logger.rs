@@ -4,7 +4,9 @@ use log::info;
 
 use embedded_svc::channel::nonblocking::Receiver;
 
-pub async fn run(mut receiver: impl Receiver<Data = impl Debug>) -> anyhow::Result<()> {
+use crate::error;
+
+pub async fn run(mut receiver: impl Receiver<Data = impl Debug>) -> error::Result<()> {
     loop {
         let event = receiver.recv().await;
 

@@ -1,8 +1,6 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use anyhow::anyhow;
-
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
@@ -10,6 +8,7 @@ use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::PeriodicTimer;
 
+use crate::error;
 use crate::state_snapshot::StateSnapshot;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
@@ -31,27 +30,28 @@ pub async fn run<ADC, BP>(
     mut timer: impl PeriodicTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
-    power_pin: impl InputPin<Error = impl Debug>,
-) -> anyhow::Result<()>
+    power_pin: impl InputPin<Error = impl error::HalError>,
+) -> error::Result<()>
 where
     BP: adc::Channel<ADC>,
 {
-    let mut tick = timer
-        .every(Duration::from_secs(2))
-        .map_err(|e| anyhow!(e))?;
+    let mut tick = timer.every(Duration::from_secs(2)).map_err(error::svc)?;
 
     loop {
-        tick.recv().await.map_err(|e| anyhow!(e))?;
+        tick.recv().await.map_err(error::svc)?;
 
         let voltage = one_shot.read(&mut battery_pin).ok();
+        //.map_err(error::wrap_display)?; TODO
 
         state
             .update_with(
-                |state| BatteryState {
-                    prev_voltage: state.voltage,
-                    prev_powered: state.powered,
-                    voltage,
-                    powered: power_pin.is_high().ok(),
+                |state| {
+                    Ok(BatteryState {
+                        prev_voltage: state.voltage,
+                        prev_powered: state.powered,
+                        voltage,
+                        powered: Some(power_pin.is_high().map_err(error::hal)?),
+                    })
                 },
                 &mut notif,
             )

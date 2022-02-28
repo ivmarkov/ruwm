@@ -13,11 +13,13 @@ use esp_idf_svc::eventloop::*;
 
 use esp_idf_sys::*;
 
+use ruwm::error;
+
 use ruwm_std::unblocker::SmolUnblocker;
 
 pub fn broadcast<D, T>(
     cap: usize,
-) -> anyhow::Result<(
+) -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>

@@ -9,6 +9,7 @@ pub mod broadcast_binder;
 pub mod broadcast_event;
 pub mod button;
 pub mod emergency;
+pub mod error;
 pub mod event_logger;
 pub mod mqtt;
 pub mod pipe;

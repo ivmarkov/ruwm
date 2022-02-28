@@ -3,8 +3,6 @@ use core::fmt::Debug;
 extern crate alloc;
 use alloc::boxed::Box;
 
-use anyhow::anyhow;
-
 use futures::{pin_mut, select, FutureExt};
 
 use embedded_graphics::prelude::RgbColor;
@@ -14,6 +12,7 @@ use embedded_svc::unblocker::nonblocking::Unblocker;
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
+use crate::error;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 
@@ -63,7 +62,7 @@ pub async fn run_screen(
     water_meter_state: WaterMeterState,
     battery_state: BatteryState,
     mut draw_engine: impl Sender<Data = DrawRequest>,
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     let mut screen_state = DrawRequest {
         active_page: Page::Summary,
         valve_state,
@@ -77,14 +76,16 @@ pub async fn run_screen(
         let water_meter_state_updates = water_meter_state_updates.recv().fuse();
         let battery_meter_state_updates = battery_meter_state_updates.recv().fuse();
 
-        pin_mut!(command);
-        pin_mut!(valve_state_updates);
-        pin_mut!(water_meter_state_updates);
-        pin_mut!(battery_meter_state_updates);
+        pin_mut!(
+            command,
+            valve_state_updates,
+            water_meter_state_updates,
+            battery_meter_state_updates
+        );
 
         let draw_request = select! {
             command = command => DrawRequest {
-                active_page: match command.map_err(|e| anyhow!(e))? {
+                active_page: match command.map_err(error::svc)? {
                     ButtonCommand::Pressed(1) => screen_state.active_page.prev(),
                     ButtonCommand::Pressed(2) => screen_state.active_page.next(),
                     ButtonCommand::Pressed(3) => screen_state.active_page,
@@ -93,15 +94,15 @@ pub async fn run_screen(
                 ..screen_state
             },
             valve_state = valve_state_updates => DrawRequest {
-                valve_state: valve_state.map_err(|e| anyhow!(e))?,
+                valve_state: valve_state.map_err(error::svc)?,
                 ..screen_state
             },
             water_meter_state = water_meter_state_updates => DrawRequest {
-                water_meter_state: water_meter_state.map_err(|e| anyhow!(e))?,
+                water_meter_state: water_meter_state.map_err(error::svc)?,
                 ..screen_state
             },
             battery_state = battery_meter_state_updates => DrawRequest {
-                battery_state: battery_state.map_err(|e| anyhow!(e))?,
+                battery_state: battery_state.map_err(error::svc)?,
                 ..screen_state
             }
         };
@@ -109,10 +110,7 @@ pub async fn run_screen(
         if screen_state != draw_request {
             screen_state = draw_request;
 
-            draw_engine
-                .send(draw_request)
-                .await
-                .map_err(|e| anyhow!(e))?;
+            draw_engine.send(draw_request).await.map_err(error::svc)?;
         }
     }
 }
@@ -122,7 +120,7 @@ enum PageDrawable {
     Battery(pages::Battery),
 }
 
-pub async fn run_draw_engine<U, R, D>(mut draw_notif: R, mut display: D) -> anyhow::Result<()>
+pub async fn run_draw_engine<U, R, D>(mut draw_notif: R, mut display: D) -> error::Result<()>
 where
     U: Unblocker,
     R: Receiver<Data = DrawRequest>,
@@ -133,7 +131,7 @@ where
     let mut page_drawable = None;
 
     loop {
-        let draw_request = draw_notif.recv().await.map_err(|e| anyhow!(e))?;
+        let draw_request = draw_notif.recv().await.map_err(error::svc)?;
 
         let result =
             U::unblock(Box::new(move || draw(display, page_drawable, draw_request))).await?;
@@ -147,7 +145,7 @@ fn draw<D>(
     mut display: D,
     mut page_drawable: Option<PageDrawable>,
     draw_request: DrawRequest,
-) -> anyhow::Result<(D, Option<PageDrawable>)>
+) -> error::Result<(D, Option<PageDrawable>)>
 where
     D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
@@ -164,7 +162,7 @@ where
                             draw_request.water_meter_state,
                             draw_request.battery_state,
                         )
-                        .map_err(|e| anyhow!("Display error: {:?}", e))?;
+                        .map_err(error::debug)?;
                     break;
                 } else {
                     page_drawable = Some(PageDrawable::Summary(pages::Summary::new()));
@@ -174,7 +172,7 @@ where
                 if let Some(PageDrawable::Battery(drawable)) = &mut page_drawable {
                     drawable
                         .draw(&mut display, draw_request.battery_state)
-                        .map_err(|e| anyhow!("Display error: {:?}", e))?;
+                        .map_err(error::debug)?;
                     break;
                 } else {
                     page_drawable = Some(PageDrawable::Battery(pages::Battery::new()));
@@ -182,14 +180,10 @@ where
             }
         }
 
-        display
-            .clear(RgbColor::BLACK)
-            .map_err(|e| anyhow!("Display error: {:?}", e))?;
+        display.clear(RgbColor::BLACK).map_err(error::debug)?;
     }
 
-    display
-        .flush()
-        .map_err(|e| anyhow!("Display error: {:?}", e))?;
+    display.flush().map_err(error::debug)?;
 
     Ok((display, page_drawable))
 }

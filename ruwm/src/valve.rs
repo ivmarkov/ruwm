@@ -2,8 +2,6 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use anyhow::anyhow;
-
 use futures::future::select;
 use futures::future::Either;
 use futures::pin_mut;
@@ -14,6 +12,7 @@ use embedded_svc::timer::nonblocking::OnceTimer;
 
 use embedded_hal::digital::v2::OutputPin;
 
+use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 
@@ -37,17 +36,16 @@ pub async fn run_events(
     mut notif: impl Sender<Data = Option<ValveState>>,
     mut spin_command: impl Sender<Data = ValveCommand>,
     mut spin_notif: impl Receiver<Data = ()>,
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     loop {
         let state = {
             let command = command.recv();
             let spin_notif = spin_notif.recv();
 
-            pin_mut!(command);
-            pin_mut!(spin_notif);
+            pin_mut!(command, spin_notif);
 
             match select(command, spin_notif).await {
-                Either::Left((command, _)) => match command.map_err(|e| anyhow!(e))? {
+                Either::Left((command, _)) => match command.map_err(error::svc)? {
                     ValveCommand::Open => {
                         let state = state_snapshot.get();
 
@@ -55,7 +53,7 @@ pub async fn run_events(
                             spin_command
                                 .send(ValveCommand::Open)
                                 .await
-                                .map_err(|e| anyhow!(e))?;
+                                .map_err(error::svc)?;
                             Some(ValveState::Opening)
                         } else {
                             state
@@ -68,7 +66,7 @@ pub async fn run_events(
                             spin_command
                                 .send(ValveCommand::Close)
                                 .await
-                                .map_err(|e| anyhow!(e))?;
+                                .map_err(error::svc)?;
                             Some(ValveState::Closing)
                         } else {
                             state
@@ -98,7 +96,7 @@ pub async fn run_spin(
     mut power_pin: impl OutputPin<Error = impl Debug>,
     mut open_pin: impl OutputPin<Error = impl Debug>,
     mut close_pin: impl OutputPin<Error = impl Debug>,
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     let mut current_command: Option<ValveCommand> = None;
 
     loop {
@@ -123,24 +121,20 @@ pub async fn run_spin(
         let command = command.recv();
 
         let timer = if current_command.is_some() {
-            Either::Left(
-                once.after(Duration::from_secs(20))
-                    .map_err(|e| anyhow!(e))?,
-            )
+            Either::Left(once.after(Duration::from_secs(20)).map_err(error::svc)?)
         } else {
             Either::Right(pending())
         };
 
-        pin_mut!(command);
-        pin_mut!(timer);
+        pin_mut!(command, timer);
 
         match select(command, timer).await {
             Either::Left((command, _)) => {
-                current_command = Some(command.map_err(|e| anyhow!(e))?);
+                current_command = Some(command.map_err(error::svc)?);
             }
             Either::Right(_) => {
                 current_command = None;
-                complete.send(()).await.map_err(|e| anyhow!(e))?;
+                complete.send(()).await.map_err(error::svc)?;
             }
         }
     }

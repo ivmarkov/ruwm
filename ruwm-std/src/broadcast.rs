@@ -4,9 +4,11 @@ use core::future::Future;
 use embedded_svc::channel::nonblocking::*;
 use embedded_svc::errors::Errors;
 
+use ruwm::error;
+
 pub fn broadcast<T>(
     cap: usize,
-) -> anyhow::Result<(
+) -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>

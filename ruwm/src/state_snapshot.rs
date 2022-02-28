@@ -1,13 +1,10 @@
-use core::fmt::Display;
-
 extern crate alloc;
 use alloc::sync::Arc;
-
-use anyhow::anyhow;
 
 use embedded_svc::channel::nonblocking::Sender;
 use embedded_svc::mutex::Mutex;
 
+use crate::error;
 use crate::storage::Storage;
 
 pub struct StateSnapshot<M>(Arc<M>);
@@ -23,24 +20,22 @@ where
         Self(Arc::new(M::new(Default::default())))
     }
 
-    pub async fn update_with<N>(
+    pub async fn update_with(
         &self,
-        updater: impl Fn(&S) -> S,
-        notif: &mut N,
-    ) -> anyhow::Result<bool>
+        updater: impl Fn(&S) -> error::Result<S>,
+        notif: &mut impl Sender<Data = S>,
+    ) -> error::Result<bool>
     where
         S: PartialEq + Clone,
-        N: Sender<Data = S>,
-        N::Error: Display + Send + Sync + 'static,
     {
         let mut guard = self.0.lock();
 
-        let state = updater(&guard);
+        let state = updater(&guard).map_err(error::svc)?;
 
         if *guard != state {
             *guard = state.clone();
 
-            notif.send(state).await.map_err(|e| anyhow!(e))?;
+            notif.send(state).await.map_err(error::svc)?;
 
             Ok(true)
         } else {
@@ -48,11 +43,9 @@ where
         }
     }
 
-    pub async fn update<N>(&self, state: S, notif: &mut N) -> anyhow::Result<bool>
+    pub async fn update(&self, state: S, notif: &mut impl Sender<Data = S>) -> error::Result<bool>
     where
         S: PartialEq + Clone,
-        N: Sender<Data = S>,
-        N::Error: Display + Send + Sync + 'static,
     {
         let updated = {
             let mut guard = self.0.lock();
@@ -66,7 +59,7 @@ where
         };
 
         if updated {
-            notif.send(state).await.map_err(|e| anyhow!(e))?;
+            notif.send(state).await.map_err(error::svc)?;
         }
 
         Ok(updated)

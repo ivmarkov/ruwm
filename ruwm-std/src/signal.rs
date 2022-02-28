@@ -8,6 +8,7 @@ use embedded_svc::errors::Errors;
 use embedded_svc::utils::nonblocking::signal;
 
 use ruwm::broadcast_binder;
+use ruwm::error;
 
 pub struct SignalFactory;
 
@@ -16,7 +17,7 @@ impl broadcast_binder::SignalFactory for SignalFactory {
 
     type Receiver<D> = impl Receiver<Data = D>;
 
-    fn create<D>(&mut self) -> anyhow::Result<(Self::Sender<D>, Self::Receiver<D>)>
+    fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
         D: Send + Sync + Clone + 'static,
     {
@@ -24,7 +25,7 @@ impl broadcast_binder::SignalFactory for SignalFactory {
     }
 }
 
-pub fn signal<T>() -> anyhow::Result<(
+pub fn signal<T>() -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>

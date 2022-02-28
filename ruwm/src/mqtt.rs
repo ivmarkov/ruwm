@@ -5,8 +5,6 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::format;
 
-use anyhow::anyhow;
-
 use futures::{pin_mut, select, FutureExt};
 
 use log::info;
@@ -19,6 +17,7 @@ use embedded_svc::mqtt::client::nonblocking::{
 };
 
 use crate::battery::BatteryState;
+use crate::error;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -39,12 +38,12 @@ pub async fn run_sender(
     mut valve_status: impl Receiver<Data = Option<ValveState>>,
     mut wm_status: impl Receiver<Data = WaterMeterState>,
     mut battery_status: impl Receiver<Data = BatteryState>,
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     let topic_prefix = topic_prefix.as_ref();
 
     mqtt.subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
         .await
-        .map_err(|e| anyhow!(e))?;
+        .map_err(error::svc)?;
 
     let topic_valve = format!("{}/valve", topic_prefix);
 
@@ -64,14 +63,12 @@ pub async fn run_sender(
             let wm = wm_status.recv().fuse();
             let battery = battery_status.recv().fuse();
 
-            pin_mut!(valve);
-            pin_mut!(wm);
-            pin_mut!(battery);
+            pin_mut!(valve, wm, battery);
 
             select! {
-                valve_state = valve => (Some(valve_state.map_err(|e| anyhow!(e))?), None, None),
-                wm_state = wm => (None, Some(wm_state.map_err(|e| anyhow!(e))?), None),
-                battery_state = battery => (None, None, Some(battery_state.map_err(|e| anyhow!(e))?)),
+                valve_state = valve => (Some(valve_state.map_err(error::svc)?), None, None),
+                wm_state = wm => (None, Some(wm_state.map_err(error::svc)?), None),
+                battery_state = battery => (None, None, Some(battery_state.map_err(error::svc)?)),
             }
         };
 
@@ -211,16 +208,16 @@ async fn publish(
     topic: &str,
     qos: QoS,
     payload: &[u8],
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     let msg_id = mqtt
         .publish(topic, qos, false, payload)
         .await
-        .map_err(|e| anyhow!(e))?;
+        .map_err(error::svc)?;
 
     info!("Published to {}", topic);
 
     if qos >= QoS::AtLeastOnce {
-        pubq.send(msg_id).await.map_err(|e| anyhow!(e))?;
+        pubq.send(msg_id).await.map_err(error::svc)?;
     }
 
     Ok(())
@@ -231,7 +228,7 @@ pub async fn run_receiver(
     mut mqtt_notif: impl Sender<Data = MqttClientNotification>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
-) -> anyhow::Result<()> {
+) -> error::Result<()> {
     let mut message_parser = MessageParser::new();
 
     loop {
@@ -240,7 +237,7 @@ pub async fn run_receiver(
             .await;
 
         if let Some(incoming) = incoming {
-            mqtt_notif.send(incoming).await.map_err(|e| anyhow!(e))?;
+            mqtt_notif.send(incoming).await.map_err(error::svc)?;
 
             if let Ok(Event::Received(Some(cmd))) = incoming {
                 match cmd {
@@ -251,7 +248,7 @@ pub async fn run_receiver(
                             ValveCommand::Close
                         })
                         .await
-                        .map_err(|e| anyhow!(e))?,
+                        .map_err(error::svc)?,
                     MqttCommand::FlowWatch(enable) => wm_command
                         .send(if enable {
                             WaterMeterCommand::Arm
@@ -259,7 +256,7 @@ pub async fn run_receiver(
                             WaterMeterCommand::Disarm
                         })
                         .await
-                        .map_err(|e| anyhow!(e))?,
+                        .map_err(error::svc)?,
                     _ => (),
                 }
             }

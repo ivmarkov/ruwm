@@ -1,4 +1,6 @@
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
+
+use crate::error;
 
 #[derive(Clone, Debug)]
 pub struct Data {
@@ -20,7 +22,7 @@ impl Default for Data {
 }
 
 pub trait PulseCounter {
-    type Error: Debug + Display + Send + Sync + 'static;
+    type Error: error::FullError;
 
     fn initialize(self) -> Result<Self, Self::Error>
     where

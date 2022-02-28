@@ -31,6 +31,7 @@ use esp_idf_svc::wifi::EspWifi;
 use pulse_counter::PulseCounter;
 
 use ruwm::broadcast_binder;
+use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 
@@ -50,7 +51,7 @@ mod pulse_counter;
 const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
 
-fn main() -> anyhow::Result<()> {
+fn main() -> error::Result<()> {
     init()?;
 
     let peripherals = Peripherals::take().unwrap();
@@ -145,7 +146,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn init() -> anyhow::Result<()> {
+fn init() -> error::Result<()> {
     env::set_var("BLOCKING_MAX_THREADS", "2");
 
     esp_idf_sys::link_patches();
@@ -171,8 +172,7 @@ fn display(
     sclk: gpio::GpioPin<Output>,
     sdo: gpio::GpioPin<Output>,
     cs: Option<gpio::GpioPin<Output>>,
-) -> anyhow::Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl core::fmt::Debug>>
-{
+) -> error::Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl core::fmt::Debug>> {
     backlight.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
