@@ -1,6 +1,19 @@
 use core::future::Future;
 
-use embedded_svc::unblocker::nonblocking::Unblocker;
+use embedded_svc::unblocker::nonblocking::{Blocker, Unblocker};
+
+pub struct SmolBlocker;
+
+impl Blocker for SmolBlocker {
+    fn block<F>(f: F) -> F::Output
+    where
+        F: Future,
+    {
+        smol::block_on(f)
+    }
+}
+
+pub struct SmolUnblocker;
 
 // TODO: Need to change the Unblocker trait to take self
 // pub fn unblocker() -> impl Unblocker {
@@ -8,8 +21,6 @@ use embedded_svc::unblocker::nonblocking::Unblocker;
 
 //     SmolUnblocker
 // }
-
-pub struct SmolUnblocker;
 
 impl Unblocker for SmolUnblocker {
     type UnblockFuture<T> = impl Future<Output = T>;

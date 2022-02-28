@@ -11,7 +11,7 @@ repository = "https://github.com/ivmarkov/esp32-water-meter"
 readme = "README.md"
 
 [features]
-default = ["experimental", "native"] # , "espidf"]
+default = ["experimental", "native", "espidf"]
 
 espidf = []
 native = ["esp-idf-sys/native"]

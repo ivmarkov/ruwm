@@ -83,6 +83,26 @@ where
         }
     }
 
+    pub fn valve_state(&self) -> &StateSnapshot<MV> {
+        &self.valve_state
+    }
+
+    pub fn water_meter_state(&self) -> &StateSnapshot<MW> {
+        &self.water_meter_state
+    }
+
+    pub fn battery_state(&self) -> &StateSnapshot<MB> {
+        &self.battery_state
+    }
+
+    pub fn bc_sender(&self) -> &impl Sender<Data = BroadcastEvent> {
+        &self.bc_sender
+    }
+
+    pub fn bc_receiver(&self) -> &impl Receiver<Data = BroadcastEvent> {
+        &self.bc_receiver
+    }
+
     pub fn event_logger(&mut self) -> anyhow::Result<&mut Self> {
         self.bind(event_logger::run(self.bc_receiver.clone()))
     }
