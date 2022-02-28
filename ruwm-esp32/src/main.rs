@@ -61,11 +61,12 @@ fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
 
-    let mut binder = broadcast_binder::BroadcastBinder::<
+    let binder = broadcast_binder::BroadcastBinder::<
         SmolUnblocker,
         Mutex<_>,
         Mutex<_>,
         Mutex<_>,
+        _,
         _,
         _,
         _,
@@ -86,7 +87,7 @@ fn main() -> anyhow::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    binder
+    let binder = binder
         .event_logger()?
         .wifi(wifi.as_async().subscribe()?)?
         .valve(
