@@ -126,20 +126,12 @@ where
         ))
     }
 
-    pub fn valve<P, PO, PC>(
+    pub fn valve(
         &mut self,
-        power_pin: P,
-        open_pin: PO,
-        close_pin: PC,
-    ) -> anyhow::Result<&mut Self>
-    where
-        P: OutputPin + 'static,
-        P::Error: Debug,
-        PO: OutputPin + 'static,
-        PO::Error: Debug,
-        PC: OutputPin + 'static,
-        PC::Error: Debug,
-    {
+        power_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
+        open_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
+        close_pin: impl OutputPin<Error = impl Debug + 'static> + 'static,
+    ) -> anyhow::Result<&mut Self> {
         let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
         let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
 
@@ -186,16 +178,14 @@ where
         ))
     }
 
-    pub fn battery<ADC: 'static, BP, PP>(
+    pub fn battery<ADC: 'static, BP>(
         &mut self,
         one_shot: impl adc::OneShot<ADC, u16, BP> + 'static,
         battery_pin: BP,
-        power_pin: PP,
+        power_pin: impl InputPin<Error = impl Debug + 'static> + 'static,
     ) -> anyhow::Result<&mut Self>
     where
         BP: adc::Channel<ADC> + 'static,
-        PP: InputPin + 'static,
-        PP::Error: Debug,
     {
         let timer = self.timers.timer()?;
 
@@ -258,16 +248,12 @@ where
         })
     }
 
-    pub fn button<P>(
+    pub fn button(
         &mut self,
         id: ButtonId,
         source: &'static str,
-        pin: P,
-    ) -> anyhow::Result<&mut Self>
-    where
-        P: InputPin + 'static,
-        P::Error: Debug,
-    {
+        pin: impl InputPin<Error = impl Debug + 'static> + 'static,
+    ) -> anyhow::Result<&mut Self> {
         let timer = self.timers.timer()?;
 
         self.bind(button::run(
@@ -281,13 +267,12 @@ where
         ))
     }
 
-    pub fn screen<D>(&mut self, display: D) -> anyhow::Result<&mut Self>
-    where
-        D: FlushableDrawTarget,
-        D: FlushableDrawTarget + Send + 'static,
-        D::Color: RgbColor,
-        D::Error: Debug,
-    {
+    pub fn screen(
+        &mut self,
+        display: impl FlushableDrawTarget<Color = impl RgbColor + 'static, Error = impl Debug + 'static>
+            + Send
+            + 'static,
+    ) -> anyhow::Result<&mut Self> {
         let (de_sender, de_receiver) = self.signal_factory.create()?;
 
         let screen = screen::run_screen(
@@ -311,18 +296,18 @@ where
     }
 
     pub fn into_future(self) -> impl Future<Output = anyhow::Result<()>> {
-        let mut fut: Pin<Box<dyn Future<Output = anyhow::Result<()>>>> =
+        let mut joined_fut: Pin<Box<dyn Future<Output = anyhow::Result<()>>>> =
             Box::pin(futures::future::ready(Ok(())));
 
-        for b in self.bindings {
-            fut = Box::pin(async move {
-                try_join(fut, b).await?;
+        for fut in self.bindings {
+            joined_fut = Box::pin(async move {
+                try_join(joined_fut, fut).await?;
 
                 Ok(())
             });
         }
 
-        fut
+        joined_fut
     }
 
     fn bind(
