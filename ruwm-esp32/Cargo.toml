@@ -7,7 +7,8 @@ resolver = "2"
 categories = ["embedded", "hardware-support"]
 keywords = ["hal", "embedded"]
 description = "A binary crate for the ESP32 implementing a water meter controller."
-repository = "https://github.com/ivmarkov/esp32-water-meter"
+repository = "https://github.com/ivmarkov/ruwm"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [features]
