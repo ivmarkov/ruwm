@@ -1,0 +1,45 @@
+#cargo-features = ["per-package-target"]
+
+[package]
+name = "ruwm-web"
+version = "0.1.0"
+authors = ["Ivan Markov <ivan.markov@gmail.com>"]
+edition = "2018"
+resolver = "2"
+categories = ["embedded", "hardware-support", "ui"]
+keywords = ["embedded", "hardware-support", "ui"]
+description = "A library of subsystems for a water meter controller."
+repository = "https://github.com/ivmarkov/ruwm"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+#forced-target = "wasm32-unknown-unknown"
+
+[profile.release]
+lto = true
+opt-level = 'z'
+
+[patch.crates-io]
+embedded-svc = { path = "../../embedded-svc" }
+
+[dependencies]
+enumset = "1"
+anyhow = "1"
+futures = "0.3"
+log = "0.4"
+wasm-logger = "0.2"
+#gloo-timers = "0.2"
+yew = { version = "0.19", default-features = false }
+yew-router = { version = "0.16" }
+serde = "1"
+postcard = "0.7"
+#url = "2"
+embedded-svc = { version = "0.17.4", features = ["experimental"] }
+edge-frame = { version = "0.3.1", git = "https://github.com/ivmarkov/edge-frame" }
+ruwm = { version = "0.1", path = "../ruwm" }
+
+# The `console_error_panic_hook` crate provides better debugging of panics by
+# logging them with `console.error`. This is great for development, but requires
+# all the `std::fmt` and `std::panicking` infrastructure, so it's only enabled
+# in debug mode.
+[target."cfg(debug_assertions)".dependencies]
+console_error_panic_hook = "0.1"

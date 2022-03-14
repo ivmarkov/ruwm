@@ -6,6 +6,8 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 
+use alloc::vec::Vec;
+use embedded_svc::ws;
 use futures::future::try_join;
 use futures::FutureExt;
 
@@ -26,7 +28,8 @@ use embedded_svc::{
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
-use crate::{battery, emergency, error, event_logger, mqtt, pipe, valve, water_meter};
+use crate::web::SenderInfo;
+use crate::{battery, emergency, error, event_logger, mqtt, pipe, valve, water_meter, web};
 use crate::{
     battery::BatteryState,
     broadcast_event::{BroadcastEvent, Payload},
@@ -116,6 +119,7 @@ where
         &self.bc_receiver
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn event_logger(
         self,
     ) -> error::Result<
@@ -126,6 +130,7 @@ where
         self.bind(event_logger::run(bc_receiver))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn emergency(
         self,
     ) -> error::Result<
@@ -143,6 +148,7 @@ where
         ))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn wifi(
         self,
         wifi: impl Receiver + 'static,
@@ -159,6 +165,51 @@ where
         ))
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn web<A, M>(
+        self,
+        web: A,
+    ) -> error::Result<
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
+    >
+    where
+        A: ws::nonblocking::Acceptor + 'static,
+        M: Mutex<Data = Vec<SenderInfo<A>>> + 'static,
+    {
+        let sis = web::sis::<A, M>();
+
+        let web_sender = web::run_sender(
+            sis.clone(),
+            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            adapt::receiver(self.bc_receiver.clone(), Into::into),
+        );
+
+        let web_receiver = web::run_receiver(
+            sis,
+            web,
+            adapt::sender(self.bc_sender.clone(), |(connection_id, event)| {
+                Some(BroadcastEvent::new(
+                    "WEB",
+                    Payload::WebResponse(connection_id, event),
+                ))
+            }),
+            adapt::sender(self.bc_sender.clone(), |p| {
+                Some(BroadcastEvent::new("WEB", Payload::ValveCommand(p)))
+            }),
+            adapt::sender(self.bc_sender.clone(), |p| {
+                Some(BroadcastEvent::new("WEB", Payload::WaterMeterCommand(p)))
+            }),
+            self.valve_state.clone(),
+            self.water_meter_state.clone(),
+            self.battery_state.clone(),
+        );
+
+        self.bind(try_join(web_sender, web_receiver).map(|_| Ok(())))
+    }
+
+    #[allow(clippy::type_complexity)]
     pub fn valve(
         mut self,
         power_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
@@ -192,6 +243,7 @@ where
         self.bind(try_join(valve_events, valve_spin).map(|_| Ok(())))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn water_meter(
         mut self,
         pulse_counter: impl PulseCounter + 'static,
@@ -214,6 +266,7 @@ where
         ))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn battery<ADC: 'static, BP>(
         mut self,
         one_shot: impl adc::OneShot<ADC, u16, BP> + 'static,
@@ -231,7 +284,7 @@ where
 
         self.bind(battery::run(
             battery_state,
-            adapt::sender(bc_sender.clone(), |p| {
+            adapt::sender(bc_sender, |p| {
                 Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
             }),
             timer,
@@ -241,6 +294,7 @@ where
         ))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn mqtt(
         self,
         topic_prefix: impl Into<String>,
@@ -283,6 +337,7 @@ where
         self.bind(try_join(mqtt_sender, mqtt_receiver).map(|_| Ok(())))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn button(
         mut self,
         id: ButtonId,
@@ -298,13 +353,14 @@ where
             id,
             pin,
             timer,
-            adapt::sender(bc_sender.clone(), move |p| {
+            adapt::sender(bc_sender, move |p| {
                 Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
             }),
             PressedLevel::Low,
         ))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn screen(
         mut self,
         display: impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + Send + 'static,
@@ -329,6 +385,7 @@ where
         self.bind(try_join(screen, draw_engine).map(|_| Ok(())))
     }
 
+    #[allow(clippy::type_complexity)]
     fn bind(
         self,
         fut: impl Future<Output = error::Result<()>> + 'static,

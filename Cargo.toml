@@ -7,6 +7,8 @@ members = [
     "ruwm-esp32",
 ]
 
+exclude = [ "ruwm-web" ]
+
 [patch.crates-io]
 #atomic-polyfill = { git = "https://github.com/esp-rs-compat/atomic-polyfill" }
 #critical-section = { git = "https://github.com/esp-rs-compat/critical-section" }
@@ -14,9 +16,9 @@ members = [
 smol = { git = "https://github.com/esp-rs-compat/smol" }
 socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
 polling = { git = "https://github.com/esp-rs-compat/polling" }
-embedded-svc = { path = "../embedded-svc" }
+#embedded-svc = { path = "../embedded-svc" }
 #esp-idf-hal = { path = "../esp-idf-hal" }
-esp-idf-svc = { path = "../esp-idf-svc" }
+#esp-idf-svc = { path = "../esp-idf-svc" }
 #esp-idf-sys = { path = "../esp-idf-sys" }
 #embuild = { path = "../embuild" }
 

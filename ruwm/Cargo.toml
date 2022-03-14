@@ -20,7 +20,9 @@ experimental = ["embedded-svc/experimental"]
 anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
-embedded-hal = "0.2"
-embedded-svc = "0.17.3"
+embedded-hal = { version = "0.2.7", features = [ "unproven" ] }
+embedded-svc = "0.17.4"
 embedded-graphics = "0.7"
 profont = "0.5"
+postcard = "0.7"
+serde = { version = "1", default-features = false }

@@ -9,6 +9,8 @@ use futures::{pin_mut, select, FutureExt};
 
 use log::info;
 
+use serde::{Deserialize, Serialize};
+
 use embedded_svc::mqtt::client::Details;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
@@ -21,7 +23,7 @@ use crate::error;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum MqttCommand {
     KeepAlive(Duration),
     Valve(bool),

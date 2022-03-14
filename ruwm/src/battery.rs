@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
@@ -11,7 +13,7 @@ use embedded_svc::timer::nonblocking::PeriodicTimer;
 use crate::error;
 use crate::state_snapshot::StateSnapshot;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BatteryState {
     pub prev_voltage: Option<u16>,
     pub prev_powered: Option<bool>,

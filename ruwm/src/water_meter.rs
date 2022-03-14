@@ -4,6 +4,8 @@ use core::time::Duration;
 use futures::future::{select, Either};
 use futures::pin_mut;
 
+use serde::{Deserialize, Serialize};
+
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::PeriodicTimer;
@@ -12,7 +14,7 @@ use crate::error;
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
     pub prev_edges_count: u64,
     pub prev_armed: bool,
@@ -22,7 +24,7 @@ pub struct WaterMeterState {
     pub leaking: bool,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum WaterMeterCommand {
     Arm,
     Disarm,

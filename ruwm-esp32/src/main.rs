@@ -15,6 +15,7 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::event_bus::nonblocking::EventBus;
 use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{Output, Pull};
 use esp_idf_hal::mutex::Mutex;
@@ -22,6 +23,8 @@ use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, gpio, spi};
 
+use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
+use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
@@ -86,6 +89,16 @@ fn main() -> error::Result<()> {
         ..Default::default()
     }))?;
 
+    let (web_processor, web_acceptor) = EspHttpWsProcessor::new::<SmolUnblocker>();
+
+    let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
+
+    let mut httpd = EspHttpServer::new(&Default::default())?;
+
+    httpd
+        .ws("/ws")
+        .handler(move |receiver, sender| web_processor.lock().process(receiver, sender))?;
+
     let client_id = "water-meter-demo";
 
     let binder = binder
@@ -139,6 +152,7 @@ fn main() -> error::Result<()> {
                 },
             )?,
         )?
+        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?
         .emergency()?;
 
     smol::block_on(binder.into_future())?;
@@ -155,6 +169,7 @@ fn init() -> error::Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     esp_idf_sys::esp!(unsafe {
+        #[allow(clippy::needless_update)]
         esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
             max_fds: 5,
             ..Default::default()

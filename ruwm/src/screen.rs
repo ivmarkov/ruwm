@@ -5,6 +5,8 @@ use alloc::boxed::Box;
 
 use futures::{pin_mut, select, FutureExt};
 
+use serde::{Deserialize, Serialize};
+
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
@@ -22,7 +24,7 @@ mod adaptors;
 mod pages;
 mod shapes;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum Page {
     Summary = 0,
     Battery = 1,

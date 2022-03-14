@@ -30,7 +30,7 @@ where
     {
         let mut guard = self.0.lock();
 
-        let state = updater(&guard).map_err(error::svc)?;
+        let state = updater(&guard)?;
 
         if *guard != state {
             *guard = state.clone();

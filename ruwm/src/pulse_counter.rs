@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::error;
+use embedded_svc::errors;
 
 #[derive(Clone, Debug)]
 pub struct Data {
@@ -22,7 +22,7 @@ impl Default for Data {
 }
 
 pub trait PulseCounter {
-    type Error: error::FullError;
+    type Error: errors::Error;
 
     fn initialize(self) -> Result<Self, Self::Error>
     where

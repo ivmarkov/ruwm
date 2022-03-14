@@ -19,3 +19,5 @@ pub mod state_snapshot;
 pub mod storage;
 pub mod valve;
 pub mod water_meter;
+pub mod web;
+pub mod web_dto;

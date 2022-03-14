@@ -6,6 +6,8 @@ use futures::future::select;
 use futures::future::Either;
 use futures::pin_mut;
 
+use serde::{Deserialize, Serialize};
+
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
 use embedded_svc::timer::nonblocking::OnceTimer;
@@ -16,7 +18,7 @@ use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValveState {
     Open,
     Closed,
@@ -24,7 +26,7 @@ pub enum ValveState {
     Closing,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ValveCommand {
     Open,
     Close,

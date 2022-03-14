@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::nonblocking::{Receiver, Sender};
@@ -13,13 +15,13 @@ const DEBOUNCE_TIME_MS: u64 = 50;
 
 pub type ButtonId = u8;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
     Low,
     High,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ButtonCommand {
     Pressed(ButtonId),
 }
