@@ -3,7 +3,7 @@ use ruwm::battery::BatteryState;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-use crate::redux::{use_selector, Selector, SimpleStore, SimpleStoreAction, Store};
+use crate::redust::{use_selector, Selector, SimpleStore, SimpleStoreAction, Store};
 
 pub type BatteryStore = SimpleStore<BatteryState>;
 pub type BatteryAction = SimpleStoreAction<BatteryState>;

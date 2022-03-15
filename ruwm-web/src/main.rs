@@ -12,7 +12,7 @@ use edge_frame::wifi;
 
 mod battery;
 mod error;
-mod redux;
+mod redust;
 mod state;
 mod ws;
 
