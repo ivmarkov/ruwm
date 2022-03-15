@@ -18,9 +18,6 @@ readme = "README.md"
 lto = true
 opt-level = 'z'
 
-[patch.crates-io]
-embedded-svc = { path = "../../embedded-svc" }
-
 [dependencies]
 enumset = "1"
 anyhow = "1"
@@ -28,10 +25,12 @@ futures = "0.3"
 log = "0.4"
 wasm-logger = "0.2"
 #gloo-timers = "0.2"
+gloo-net = "0.1"
+wasm-bindgen-futures = "0.4"
 yew = { version = "0.19", default-features = false }
 yew-router = { version = "0.16" }
 serde = "1"
-postcard = "0.7"
+postcard = { version = "0.7", features = [ "alloc" ] }
 #url = "2"
 embedded-svc = { version = "0.17.4", features = ["experimental"] }
 edge-frame = { version = "0.3.1", git = "https://github.com/ivmarkov/edge-frame" }

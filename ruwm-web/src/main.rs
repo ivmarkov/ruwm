@@ -10,6 +10,12 @@ use edge_frame::frame;
 use edge_frame::plugin;
 use edge_frame::wifi;
 
+mod battery;
+mod error;
+mod redux;
+mod state;
+mod ws;
+
 #[derive(Debug, Routable, Copy, Clone, PartialEq, Eq, Hash)]
 enum Routes {
     #[at("/exit")]
