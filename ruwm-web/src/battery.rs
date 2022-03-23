@@ -1,38 +1,22 @@
-use ruwm::battery::BatteryState;
+use ruwm::battery::BatteryState as BatteryValue;
 
 use yew::prelude::*;
-use yew_router::prelude::*;
 
-use crate::redust::{use_selector, Selector, SimpleStore, SimpleStoreAction, Store};
+use edge_frame::redust::*;
 
-pub type BatteryStore = SimpleStore<BatteryState>;
-pub type BatteryAction = SimpleStoreAction<BatteryState>;
+pub type BatteryState = ValueState<BatteryValue>;
+pub type BatteryAction = ValueAction<BatteryValue>;
 
 #[derive(Properties, Clone, PartialEq)]
-pub struct BatteryProps<T: Store>
-where
-    T::Action: PartialEq,
-{
-    #[prop_or_default]
-    pub app_title: String,
-
-    #[prop_or_default]
-    pub app_url: String,
-
-    pub selector: Selector<T, BatteryStore, BatteryAction>,
-    // // TODO: Most likely should be state
-    // #[prop_or(Role::Admin)]
-    // pub active_role: Role,
+pub struct BatteryProps<R: Reducible2> {
+    pub projection: Projection<R, BatteryState, BatteryAction>,
 }
 
 #[function_component(Battery)]
-pub fn battery<S: Store>(props: &BatteryProps<S>) -> Html
-where
-    S::Action: PartialEq,
-{
-    let battery_state = use_selector(props.selector.clone());
+pub fn battery<R: Reducible2>(props: &BatteryProps<R>) -> Html {
+    let battery_store = use_projection(props.projection.clone());
 
     html! {
-        {format!("TODO: {}", battery_state.powered.unwrap_or(false))}
+        {format!("Battery Powered: {}", battery_store.powered.unwrap_or(false))}
     }
 }

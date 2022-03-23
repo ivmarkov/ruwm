@@ -101,6 +101,10 @@ impl WebResponse {
 pub enum WebEvent {
     Response(WebResponse),
 
+    AuthenticationFailed,
+
+    RoleState(Role),
+
     ValveState(Option<ValveState>),
 
     WaterMeterState(WaterMeterState),
@@ -116,6 +120,8 @@ impl WebEvent {
     pub fn role(&self) -> Role {
         match self {
             Self::Response(_) => Role::None,
+            Self::AuthenticationFailed => Role::None,
+            Self::RoleState(_) => Role::None,
             Self::ValveState(_) => Role::User,
             Self::WaterMeterState(_) => Role::User,
             Self::BatteryState(_) => Role::User,

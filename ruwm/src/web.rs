@@ -99,17 +99,21 @@ where
         };
 
         match result {
-            SelectResult::Accept(sender, receiver) => {
+            SelectResult::Accept(new_sender, new_receiver) => {
+                let role = Role::None;
+
                 let id = next_connection_id;
                 next_connection_id += 1;
 
-                ws_receivers.push(receiver);
+                ws_receivers.push(new_receiver);
 
                 sis.lock().push(SenderInfo {
                     id,
-                    role: Role::None,
-                    sender: Some(sender),
+                    role,
+                    sender: Some(new_sender),
                 });
+
+                sender.send((id, WebEvent::RoleState(role))).await?
             }
             SelectResult::Close => break,
             SelectResult::Receive(index, receive) => match receive {
@@ -191,21 +195,19 @@ where
     A: Acceptor,
 {
     if let WebRequestPayload::Authenticate(username, password) = request.payload() {
-        let response = if let Some(role) = authenticate(username, password) {
+        let event = if let Some(role) = authenticate(username, password) {
             sis.lock()
                 .iter_mut()
                 .find(|si| si.id == connection_id)
                 .unwrap()
                 .role = role;
 
-            request.accept()
+            WebEvent::RoleState(role)
         } else {
-            request.deny()
+            WebEvent::AuthenticationFailed
         };
 
-        sender
-            .send((connection_id, WebEvent::Response(response)))
-            .await?;
+        sender.send((connection_id, event)).await?;
     } else {
         let response = request.response(role);
         let accepted = response.is_accepted();

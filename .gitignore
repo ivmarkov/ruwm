@@ -2,3 +2,7 @@
 /.embuild
 /target
 /Cargo.lock
+/ruwm-web/dist
+/ruwm-web/.vscode
+/ruwm-web/target
+/ruwm-web/Cargo.lock
