@@ -1,6 +1,6 @@
-use core::convert::Infallible;
 use core::future::Future;
 
+use async_broadcast::{RecvError, SendError};
 use embedded_svc::channel::nonblocking::*;
 use embedded_svc::errors::Errors;
 
@@ -23,8 +23,11 @@ where
 #[derive(Clone)]
 struct BroadcastSender<T>(async_broadcast::Sender<T>);
 
-impl<T> Errors for BroadcastSender<T> {
-    type Error = Infallible;
+impl<T> Errors for BroadcastSender<T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    type Error = SendError<T>;
 }
 
 impl<T> Sender for BroadcastSender<T>
@@ -37,7 +40,7 @@ where
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
         async move {
-            self.0.broadcast(value).await.unwrap(); // TODO
+            self.0.broadcast(value).await?;
 
             Ok(())
         }
@@ -48,7 +51,7 @@ where
 struct BroadcastReceiver<T>(async_broadcast::Receiver<T>);
 
 impl<T> Errors for BroadcastReceiver<T> {
-    type Error = Infallible;
+    type Error = RecvError;
 }
 
 impl<T> Receiver for BroadcastReceiver<T>
@@ -64,7 +67,7 @@ where
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
-            let value = self.0.recv().await.unwrap(); // TODO
+            let value = self.0.recv().await?;
 
             Ok(value)
         }
