@@ -38,7 +38,7 @@ strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
 embedded-svc = { version = "0.18", features = ["experimental"] }
-edge-frame = "0.1.1"
+edge-frame = "0.1.2"
 ruwm = { version = "0.1", path = "../ruwm" }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by

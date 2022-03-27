@@ -93,17 +93,17 @@ fn main() -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (web_processor, web_acceptor) = EspHttpWsProcessor::new::<SmolUnblocker>();
+    // let (web_processor, web_acceptor) = EspHttpWsProcessor::new::<SmolUnblocker>();
 
-    let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
+    // let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
 
     let mut httpd = EspHttpServer::new(&Default::default())?;
 
     register(&mut httpd, &ASSETS)?;
 
-    httpd
-        .ws("/ws")
-        .handler(move |receiver, sender| web_processor.lock().process(receiver, sender))?;
+    // httpd
+    //     .ws("/ws")
+    //     .handler(move |receiver, sender| web_processor.lock().process(receiver, sender))?;
 
     let client_id = "water-meter-demo";
 
@@ -158,7 +158,7 @@ fn main() -> error::Result<()> {
                 },
             )?,
         )?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?
+        // .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?
         .emergency()?;
 
     smol::block_on(binder.into_future())?;
