@@ -99,7 +99,7 @@ fn main() -> error::Result<()> {
 
     let mut httpd = EspHttpServer::new(&Default::default())?;
 
-    //register(&mut httpd, &ASSETS)?;
+    register(&mut httpd, &ASSETS)?;
 
     httpd
         .ws("/ws")
