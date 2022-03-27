@@ -30,32 +30,36 @@ mod ws;
 enum Routes {
     #[at("/wifi")]
     Wifi,
+    #[at("/authstate")]
+    AuthState,
     #[at("/")]
     Home,
 }
 
 #[function_component(App)]
 fn app() -> Html {
-    // let ws = use_state(|| {
-    //     let (sender, receiver) = open("/ws").unwrap();
+    let ws = use_state(|| {
+        let (sender, receiver) = open(&format!(
+            "ws://{}/ws",
+            web_sys::window().unwrap().location().host().unwrap()
+        ))
+        .unwrap();
 
-    //     (
-    //         Rc::new(RefCell::new(sender)),
-    //         Rc::new(RefCell::new(receiver)),
-    //     )
-    // });
+        (
+            Rc::new(RefCell::new(sender)),
+            Rc::new(RefCell::new(receiver)),
+        )
+    });
 
-    // let request_id_gen = use_mut_ref(|| 0_usize);
+    let request_id_gen = use_mut_ref(|| 0_usize);
 
-    // let store = apply_middleware(
-    //     use_store(|| Rc::new(AppState::new())),
-    //     ws.0.clone(),
-    //     ws.1.clone(),
-    //     request_id_gen,
-    // )
-    // .unwrap();
-
-    let store = use_store(|| Rc::new(AppState::new()));
+    let store = apply_middleware(
+        use_store(|| Rc::new(AppState::new())),
+        ws.0.clone(),
+        ws.1.clone(),
+        request_id_gen,
+    )
+    .unwrap();
 
     html! {
         <ContextProvider<UseStoreHandle<AppState>> context={store.clone()}>
@@ -68,44 +72,44 @@ fn app() -> Html {
 
 fn render(route: &Routes) -> Html {
     html! {
-        <Role<AppState> role={RoleValue::User} projection={AppState::role()} auth=true>
-            <Frame
-                app_title="RUWM"
-                app_url="https://github.com/ivmarkov/edge-frame">
-                <Nav>
-                    <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
-                        <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
-                    </Role<AppState>>
-                    <Role<AppState> role={RoleValue::Admin} projection={AppState::role()}>
-                        <NavGroup text="Settings">
-                            <WifiNavItem<Routes> route={Routes::Wifi}/>
-                        </NavGroup>
-                    </Role<AppState>>
-                </Nav>
-                <Status>
-                    <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
-                        <WifiStatusItem<Routes, AppState> route={Routes::Wifi} projection={AppState::wifi()}/>
-                    </Role<AppState>>
-                </Status>
-                <Content>
-                    {
-                        match route {
-                            Routes::Home => html! {
-                                <>
+        <Frame
+            app_title="RUWM"
+            app_url="https://github.com/ivmarkov/ruwm">
+            <Nav>
+                <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
+                    <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
+                </Role<AppState>>
+                <Role<AppState> role={RoleValue::Admin} projection={AppState::role()}>
+                    <WifiNavItem<Routes> route={Routes::Wifi}/>
+                </Role<AppState>>
+            </Nav>
+            <Status>
+                <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
+                    <WifiStatusItem<Routes, AppState> route={Routes::Wifi} projection={AppState::wifi()}/>
+                </Role<AppState>>
+                <RoleLogoutStatusItem<Routes, AppState> auth_status_route={Routes::AuthState} projection={AppState::role()}/>
+            </Status>
+            <Content>
+                {
+                    match route {
+                        Routes::Home => html! {
+                            <Role<AppState> role={RoleValue::User} projection={AppState::role()} auth=true>
                                 <Valve<AppState> projection={AppState::valve()}/>
                                 <Battery<AppState> projection={AppState::battery()}/>
-                                </>
-                            },
-                            Routes::Wifi => html! {
-                                <Role<AppState> role={RoleValue::Admin} projection={AppState::role()} auth=true>
-                                    <Wifi<AppState> projection={AppState::wifi()}/>
-                                </Role<AppState>>
-                            },
-                        }
+                            </Role<AppState>>
+                        },
+                        Routes::AuthState => html! {
+                            <RoleAuthState<AppState> projection={AppState::role()}/>
+                        },
+                        Routes::Wifi => html! {
+                            <Role<AppState> role={RoleValue::Admin} projection={AppState::role()} auth=true>
+                                <Wifi<AppState> projection={AppState::wifi()}/>
+                            </Role<AppState>>
+                        },
                     }
-                </Content>
-            </Frame>
-        </Role<AppState>>
+                }
+            </Content>
+        </Frame>
     }
 }
 

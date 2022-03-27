@@ -14,6 +14,11 @@ fn main() -> anyhow::Result<()> {
     cfg.output();
     build::LinkArgs::output_propagated("ESP_IDF")?;
 
+    edge_frame::assets::prepare::run(
+        "RUWM_WEB",
+        path_buf![env::current_dir()?, "..", "ruwm-web", "dist"],
+    )?;
+
     Ok(())
 }
 

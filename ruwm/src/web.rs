@@ -10,7 +10,7 @@ use postcard::{from_bytes, to_slice};
 use embedded_svc::{
     channel::nonblocking::{Receiver, Sender},
     mutex::Mutex,
-    utils::rest::role::Role,
+    utils::role::Role,
     ws::{
         nonblocking::{Acceptor, Receiver as _, Sender as _},
         FrameType,
@@ -194,55 +194,60 @@ async fn process_request<A>(
 where
     A: Acceptor,
 {
-    if let WebRequestPayload::Authenticate(username, password) = request.payload() {
-        let event = if let Some(role) = authenticate(username, password) {
-            sis.lock()
-                .iter_mut()
-                .find(|si| si.id == connection_id)
-                .unwrap()
-                .role = role;
+    let response = request.response(role);
+    let accepted = response.is_accepted();
 
-            WebEvent::RoleState(role)
-        } else {
-            WebEvent::AuthenticationFailed
-        };
+    if accepted {
+        match request.payload() {
+            WebRequestPayload::Authenticate(username, password) => {
+                let event = if let Some(role) = authenticate(username, password) {
+                    sis.lock()
+                        .iter_mut()
+                        .find(|si| si.id == connection_id)
+                        .unwrap()
+                        .role = role;
 
-        sender.send((connection_id, event)).await?;
-    } else {
-        let response = request.response(role);
-        let accepted = response.is_accepted();
+                    WebEvent::RoleState(role)
+                } else {
+                    WebEvent::AuthenticationFailed
+                };
 
-        sender
-            .send((connection_id, WebEvent::Response(response)))
-            .await?;
-
-        if accepted {
-            match request.payload() {
-                WebRequestPayload::Authenticate(_, _) => unreachable!(),
-                WebRequestPayload::ValveCommand(command) => valve_command.send(*command).await?,
-                WebRequestPayload::ValveStateRequest => {
-                    sender
-                        .send((connection_id, WebEvent::ValveState(valve_state.get())))
-                        .await?
-                }
-                WebRequestPayload::WaterMeterCommand(command) => {
-                    water_meter_command.send(*command).await?
-                }
-                WebRequestPayload::WaterMeterStateRequest => {
-                    sender
-                        .send((
-                            connection_id,
-                            WebEvent::WaterMeterState(water_meter_state.get()),
-                        ))
-                        .await?
-                }
-                WebRequestPayload::BatteryStateRequest => {
-                    sender
-                        .send((connection_id, WebEvent::BatteryState(battery_state.get())))
-                        .await?
-                }
-                WebRequestPayload::WifiStatusRequest => todo!(),
+                sender.send((connection_id, event)).await?;
             }
+            WebRequestPayload::Logout => {
+                sis.lock()
+                    .iter_mut()
+                    .find(|si| si.id == connection_id)
+                    .unwrap()
+                    .role = Role::None;
+
+                sender
+                    .send((connection_id, WebEvent::RoleState(Role::None)))
+                    .await?
+            }
+            WebRequestPayload::ValveCommand(command) => valve_command.send(*command).await?,
+            WebRequestPayload::ValveStateRequest => {
+                sender
+                    .send((connection_id, WebEvent::ValveState(valve_state.get())))
+                    .await?
+            }
+            WebRequestPayload::WaterMeterCommand(command) => {
+                water_meter_command.send(*command).await?
+            }
+            WebRequestPayload::WaterMeterStateRequest => {
+                sender
+                    .send((
+                        connection_id,
+                        WebEvent::WaterMeterState(water_meter_state.get()),
+                    ))
+                    .await?
+            }
+            WebRequestPayload::BatteryStateRequest => {
+                sender
+                    .send((connection_id, WebEvent::BatteryState(battery_state.get())))
+                    .await?
+            }
+            WebRequestPayload::WifiStatusRequest => todo!(),
         }
     }
 
@@ -250,7 +255,7 @@ where
 }
 
 fn authenticate(username: &str, password: &str) -> Option<Role> {
-    Some(Role::User) // TODO
+    Some(Role::Admin) // TODO
 }
 
 async fn web_send_all<A>(

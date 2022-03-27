@@ -31,6 +31,8 @@ use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::wifi::EspWifi;
 
+use edge_frame::assets::serve::*;
+
 use pulse_counter::PulseCounter;
 
 use ruwm::broadcast_binder;
@@ -53,6 +55,8 @@ mod pulse_counter;
 
 const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
+
+const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 fn main() -> error::Result<()> {
     init()?;
@@ -94,6 +98,8 @@ fn main() -> error::Result<()> {
     let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
 
     let mut httpd = EspHttpServer::new(&Default::default())?;
+
+    //register(&mut httpd, &ASSETS)?;
 
     httpd
         .ws("/ws")

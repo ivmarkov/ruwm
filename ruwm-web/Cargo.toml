@@ -15,7 +15,8 @@ readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
 [patch.crates-io]
-edge-frame = { path = "../edge-frame" }
+embedded-svc = { path = "../../embedded-svc" }
+
 
 [profile.release]
 lto = true
@@ -36,10 +37,9 @@ gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
-#url = "2"
-embedded-svc = { version = "0.17.4", features = ["experimental"] }
-edge-frame = { version = "0.3.2" } #, git = "https://github.com/ivmarkov/edge-frame" }
-ruwm = { version = "0.1", path = "../ruwm/ruwm" }
+embedded-svc = { version = "0.18", features = ["experimental"] }
+edge-frame = "0.1.1"
+ruwm = { version = "0.1", path = "../ruwm" }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

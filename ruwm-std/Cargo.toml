@@ -19,5 +19,5 @@ log = "0.4"
 smol = "1.2"
 async-broadcast = "0.3.4"
 futures = {version = "0.3", features = ["async-await"] }
-embedded-svc = "0.17.4"
+embedded-svc = "0.18"
 ruwm = { path = "../ruwm" }

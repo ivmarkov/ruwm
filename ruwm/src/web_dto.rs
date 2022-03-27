@@ -3,7 +3,7 @@ use alloc::string::String;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::{utils::rest::role::Role, wifi::Status};
+use embedded_svc::{utils::role::Role, wifi::Status};
 
 use crate::{
     battery::BatteryState,
@@ -52,6 +52,7 @@ impl WebRequest {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum WebRequestPayload {
     Authenticate(String, String),
+    Logout,
 
     ValveCommand(ValveCommand),
     ValveStateRequest,
@@ -68,6 +69,7 @@ impl WebRequestPayload {
     pub fn role(&self) -> Role {
         match self {
             Self::Authenticate(_, _) => Role::None,
+            Self::Logout => Role::None,
             Self::ValveStateRequest => Role::User,
             Self::WaterMeterStateRequest => Role::User,
             Self::BatteryStateRequest => Role::User,
