@@ -17,6 +17,6 @@ pub fn battery<R: Reducible2>(props: &BatteryProps<R>) -> Html {
     let battery_store = use_projection(props.projection.clone());
 
     html! {
-        {format!("Battery Powered: {}", battery_store.powered.unwrap_or(false))}
+        {format!("Battery Powered: {}, mV: {:?}", battery_store.powered.unwrap_or(false), battery_store.voltage)}
     }
 }

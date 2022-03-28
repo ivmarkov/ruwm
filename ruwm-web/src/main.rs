@@ -1,6 +1,5 @@
 #![recursion_limit = "1024"]
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use log::*;
@@ -17,7 +16,6 @@ use crate::battery::*;
 use crate::middleware::apply_middleware;
 use crate::state::*;
 use crate::valve::*;
-use crate::ws::open;
 
 mod battery;
 mod error;
@@ -38,28 +36,7 @@ enum Routes {
 
 #[function_component(App)]
 fn app() -> Html {
-    let ws = use_state(|| {
-        let (sender, receiver) = open(&format!(
-            "ws://{}/ws",
-            web_sys::window().unwrap().location().host().unwrap()
-        ))
-        .unwrap();
-
-        (
-            Rc::new(RefCell::new(sender)),
-            Rc::new(RefCell::new(receiver)),
-        )
-    });
-
-    let request_id_gen = use_mut_ref(|| 0_usize);
-
-    let store = apply_middleware(
-        use_store(|| Rc::new(AppState::new())),
-        ws.0.clone(),
-        ws.1.clone(),
-        request_id_gen,
-    )
-    .unwrap();
+    let store = apply_middleware(use_store(|| Rc::new(AppState::new()))).unwrap();
 
     html! {
         <ContextProvider<UseStoreHandle<AppState>> context={store.clone()}>
@@ -76,18 +53,19 @@ fn render(route: &Routes) -> Html {
             app_title="RUWM"
             app_url="https://github.com/ivmarkov/ruwm">
             <Nav>
-                <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
-                    <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
-                </Role<AppState>>
+                // <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
+                //     <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
+                // </Role<AppState>>
                 <Role<AppState> role={RoleValue::Admin} projection={AppState::role()}>
+                    <RouteNavItem<Routes> text="Home" icon="fa-solid fa-droplet" route={Routes::Home}/>
                     <WifiNavItem<Routes> route={Routes::Wifi}/>
                 </Role<AppState>>
             </Nav>
             <Status>
                 <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
                     <WifiStatusItem<Routes, AppState> route={Routes::Wifi} projection={AppState::wifi()}/>
+                    <RoleLogoutStatusItem<Routes, AppState> auth_status_route={Routes::AuthState} projection={AppState::role()}/>
                 </Role<AppState>>
-                <RoleLogoutStatusItem<Routes, AppState> auth_status_route={Routes::AuthState} projection={AppState::role()}/>
             </Status>
             <Content>
                 {
@@ -99,7 +77,7 @@ fn render(route: &Routes) -> Html {
                             </Role<AppState>>
                         },
                         Routes::AuthState => html! {
-                            <RoleAuthState<AppState> projection={AppState::role()}/>
+                            <RoleAuthState<Routes, AppState> home={Some(Routes::Home)} projection={AppState::role()}/>
                         },
                         Routes::Wifi => html! {
                             <Role<AppState> role={RoleValue::Admin} projection={AppState::role()} auth=true>

@@ -82,19 +82,26 @@ where
                 .map(|(index, ws_receiver)| web_receive::<A>(ws_receiver, index))
                 .collect::<FuturesUnordered<_>>();
 
-            let ws_acceptor = ws_acceptor.accept().fuse();
-            let ws_receiver = ws_receiver.next().fuse();
+            if ws_receiver.is_empty() {
+                ws_acceptor.accept().await.map_err(error::svc)?.map_or_else(
+                    || SelectResult::Close,
+                    |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
+                )
+            } else {
+                let ws_acceptor = ws_acceptor.accept().fuse();
+                let ws_receiver = ws_receiver.next().fuse();
 
-            pin_mut!(ws_acceptor, ws_receiver);
+                pin_mut!(ws_acceptor, ws_receiver);
 
-            select! {
-                accept = ws_acceptor => accept
-                    .map_err(error::svc)?
-                    .map_or_else(|| SelectResult::Close, |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver)),
-                ws_receive = ws_receiver => match ws_receive {
-                    Some(ws_receive) => ws_receive.map(|(index, receive)| SelectResult::Receive(index, receive))?,
-                    None => SelectResult::Empty,
-                },
+                select! {
+                    accept = ws_acceptor => accept
+                        .map_err(error::svc)?
+                        .map_or_else(|| SelectResult::Close, |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver)),
+                    ws_receive = ws_receiver => match ws_receive {
+                        Some(ws_receive) => ws_receive.map(|(index, receive)| SelectResult::Receive(index, receive))?,
+                        None => SelectResult::Empty,
+                    },
+                }
             }
         };
 
@@ -113,7 +120,15 @@ where
                     sender: Some(new_sender),
                 });
 
-                sender.send((id, WebEvent::RoleState(role))).await?
+                process_initial_response(
+                    &mut sender,
+                    id,
+                    role,
+                    &valve_state,
+                    &water_meter_state,
+                    &battery_state,
+                )
+                .await?;
             }
             SelectResult::Close => break,
             SelectResult::Receive(index, receive) => match receive {
@@ -200,19 +215,27 @@ where
     if accepted {
         match request.payload() {
             WebRequestPayload::Authenticate(username, password) => {
-                let event = if let Some(role) = authenticate(username, password) {
+                if let Some(role) = authenticate(username, password) {
                     sis.lock()
                         .iter_mut()
                         .find(|si| si.id == connection_id)
                         .unwrap()
                         .role = role;
 
-                    WebEvent::RoleState(role)
+                    process_initial_response(
+                        sender,
+                        connection_id,
+                        role,
+                        valve_state,
+                        water_meter_state,
+                        battery_state,
+                    )
+                    .await?;
                 } else {
-                    WebEvent::AuthenticationFailed
-                };
-
-                sender.send((connection_id, event)).await?;
+                    sender
+                        .send((connection_id, WebEvent::AuthenticationFailed))
+                        .await?;
+                }
             }
             WebRequestPayload::Logout => {
                 sis.lock()
@@ -248,6 +271,30 @@ where
                     .await?
             }
             WebRequestPayload::WifiStatusRequest => todo!(),
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_initial_response(
+    sender: &mut impl Sender<Data = (ConnectionId, WebEvent)>,
+    connection_id: ConnectionId,
+    role: Role,
+    valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
+) -> error::Result<()> {
+    let events = [
+        WebEvent::RoleState(role),
+        WebEvent::ValveState(valve_state.get()),
+        WebEvent::WaterMeterState(water_meter_state.get()),
+        WebEvent::BatteryState(battery_state.get()),
+    ];
+
+    for event in events {
+        if role >= event.role() {
+            sender.send((connection_id, event)).await?;
         }
     }
 
@@ -336,7 +383,7 @@ where
 }
 
 fn from_ws_frame(frame_type: FrameType, frame_buf: &[u8]) -> WebFrame {
-    if frame_type.is_partial() {
+    if frame_type.is_fragmented() {
         WebFrame::Unknown
     } else {
         match frame_type {

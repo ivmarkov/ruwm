@@ -1,22 +1,21 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use edge_frame::role::Credentials;
-use edge_frame::role::RoleAction;
-use edge_frame::role::RoleStateValue;
-use log::Level;
+use log::{info, Level};
 
-use ruwm::web_dto::RequestId;
-use ruwm::web_dto::WebRequestPayload;
-use yew::use_effect;
-use yew::use_effect_with_deps;
+use yew::prelude::*;
 
 use wasm_bindgen_futures::spawn_local;
 
 use edge_frame::redust::*;
+use edge_frame::role::Credentials;
+use edge_frame::role::RoleAction;
+use edge_frame::role::RoleStateValue;
 
+use ruwm::web_dto::RequestId;
 use ruwm::web_dto::WebEvent;
 use ruwm::web_dto::WebRequest;
+use ruwm::web_dto::WebRequestPayload;
 
 use crate::battery::BatteryAction;
 use crate::error;
@@ -26,15 +25,27 @@ use crate::ws::*;
 
 pub fn apply_middleware(
     store: UseStoreHandle<AppState>,
-    sender: Rc<RefCell<WebSender>>,
-    receiver: Rc<RefCell<WebReceiver>>,
-    request_id_gen: Rc<RefCell<RequestId>>,
 ) -> error::Result<UseStoreHandle<AppState>> {
+    let ws = use_ref(|| {
+        let (sender, receiver) = open(&format!(
+            "ws://{}/ws",
+            web_sys::window().unwrap().location().host().unwrap()
+        ))
+        .unwrap();
+
+        (
+            Rc::new(RefCell::new(sender)),
+            Rc::new(RefCell::new(receiver)),
+        )
+    });
+
+    let request_id_gen = use_mut_ref(|| 0_usize);
+
     let store = store.apply(log(Level::Info));
 
-    receive(receiver, store.clone());
+    receive(ws.1.clone(), store.clone());
 
-    let store = store.apply(send(sender, request_id_gen));
+    let store = store.apply(send(ws.0.clone(), request_id_gen));
 
     Ok(store)
 }
@@ -45,14 +56,12 @@ fn send(
 ) -> impl Fn(StoreProvider<AppState>, AppAction, Rc<dyn Fn(StoreProvider<AppState>, AppAction)>) {
     move |store, action, dispatcher| {
         if let Some(request) = to_request(&action, &mut request_id_gen.borrow_mut()) {
+            info!("Sending request: {:?}", request);
+
             let sender = sender.clone();
 
-            use_effect(move || {
-                spawn_local(async move {
-                    sender.borrow_mut().send(&request).await.unwrap();
-                });
-
-                || ()
+            spawn_local(async move {
+                sender.borrow_mut().send(&request).await.unwrap();
             });
         }
 
@@ -61,29 +70,34 @@ fn send(
 }
 
 fn receive(receiver: Rc<RefCell<WebReceiver>>, store: UseStoreHandle<AppState>) {
-    use_effect_with_deps(
-        move |store| {
-            let store = store.clone();
+    let store_ref = use_mut_ref(|| None);
 
+    *store_ref.borrow_mut() = Some(store);
+
+    use_effect_with_deps(
+        move |_| {
             spawn_local(async move {
-                receive_async(&mut receiver.borrow_mut(), store)
+                receive_async(&mut receiver.borrow_mut(), store_ref)
                     .await
                     .unwrap();
             });
 
             || ()
         },
-        store,
+        1, // Will only ever be called once
     );
 }
 
 async fn receive_async(
     receiver: &mut WebReceiver,
-    store: UseStoreHandle<AppState>,
+    store_ref: Rc<RefCell<Option<UseStoreHandle<AppState>>>>,
 ) -> error::Result<()> {
     loop {
         let event = receiver.recv().await?;
 
+        info!("Received event: {:?}", event);
+
+        let store = store_ref.borrow().as_ref().unwrap().clone();
         if let Some(action) = to_action(&event, &store) {
             store.dispatch(action);
         }
