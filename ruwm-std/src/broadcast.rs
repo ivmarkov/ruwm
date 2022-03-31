@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use async_broadcast::{RecvError, SendError};
-use embedded_svc::channel::nonblocking::*;
+use embedded_svc::channel::asyncs::*;
 use embedded_svc::errors::Errors;
 
 use ruwm::error;

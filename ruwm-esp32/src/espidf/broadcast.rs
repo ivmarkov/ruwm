@@ -1,11 +1,11 @@
 use core::future::Future;
 
-use embedded_svc::channel::nonblocking::*;
+use embedded_svc::channel::asyncs::*;
 use embedded_svc::errors::Errors;
-use embedded_svc::event_bus::nonblocking::*;
-use embedded_svc::utils::nonblocking::event_bus::*;
-use embedded_svc::utils::nonblocking::Asyncify;
-use embedded_svc::utils::nonblocking::UnblockingAsyncify;
+use embedded_svc::event_bus::asyncs::*;
+use embedded_svc::utils::asyncify::event_bus::*;
+use embedded_svc::utils::asyncify::Asyncify;
+use embedded_svc::utils::asyncify::UnblockingAsyncify;
 
 use esp_idf_hal::mutex::Condvar;
 

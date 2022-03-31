@@ -8,11 +8,11 @@ use futures::{pin_mut, select, stream::FuturesUnordered, FutureExt, StreamExt};
 use postcard::{from_bytes, to_slice};
 
 use embedded_svc::{
-    channel::nonblocking::{Receiver, Sender},
+    channel::asyncs::{Receiver, Sender},
     mutex::Mutex,
     utils::role::Role,
     ws::{
-        nonblocking::{Acceptor, Receiver as _, Sender as _},
+        asyncs::{Acceptor, Receiver as _, Sender as _},
         FrameType,
     },
 };

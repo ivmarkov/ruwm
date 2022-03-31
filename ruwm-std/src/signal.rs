@@ -3,9 +3,9 @@ use core::future::Future;
 
 use std::sync::Mutex;
 
-use embedded_svc::channel::nonblocking::*;
+use embedded_svc::channel::asyncs::*;
 use embedded_svc::errors::Errors;
-use embedded_svc::utils::nonblocking::signal;
+use embedded_svc::utils::asyncs::signal;
 
 use ruwm::broadcast_binder;
 use ruwm::error;

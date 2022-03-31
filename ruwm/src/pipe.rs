@@ -1,4 +1,4 @@
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::channel::asyncs::{Receiver, Sender};
 
 use crate::error;
 

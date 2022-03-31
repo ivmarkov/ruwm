@@ -8,9 +8,9 @@ use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::nonblocking::OnceTimer;
+use embedded_svc::timer::asyncs::OnceTimer;
 
 use embedded_hal::digital::v2::OutputPin;
 

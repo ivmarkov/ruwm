@@ -1,7 +1,7 @@
 use futures::future::{select, Either};
 use futures::pin_mut;
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::channel::asyncs::{Receiver, Sender};
 
 use crate::battery::BatteryState;
 use crate::error;

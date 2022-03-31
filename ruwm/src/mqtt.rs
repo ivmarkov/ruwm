@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use embedded_svc::mqtt::client::Details;
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::mqtt::client::nonblocking::{
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mqtt::client::asyncs::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 

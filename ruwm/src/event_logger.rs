@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use log::info;
 
-use embedded_svc::channel::nonblocking::Receiver;
+use embedded_svc::channel::asyncs::Receiver;
 
 use crate::error;
 

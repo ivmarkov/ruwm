@@ -6,9 +6,9 @@ use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
+use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::nonblocking::PeriodicTimer;
+use embedded_svc::timer::asyncs::PeriodicTimer;
 
 use crate::error;
 use crate::pulse_counter::PulseCounter;

@@ -1,4 +1,4 @@
-use embedded_svc::mqtt::client::nonblocking::MessageId;
+use embedded_svc::mqtt::client::asyncs::MessageId;
 use serde::{Deserialize, Serialize};
 
 use crate::battery::BatteryState;

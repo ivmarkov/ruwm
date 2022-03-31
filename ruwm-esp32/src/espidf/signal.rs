@@ -1,9 +1,9 @@
 use core::convert::Infallible;
 use core::future::Future;
 
-use embedded_svc::channel::nonblocking::*;
+use embedded_svc::channel::asyncs::*;
 use embedded_svc::errors::Errors;
-use embedded_svc::utils::nonblocking::signal;
+use embedded_svc::utils::asyncs::signal;
 
 use esp_idf_hal::mutex::Mutex;
 

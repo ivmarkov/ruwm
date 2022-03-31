@@ -1,7 +1,7 @@
 extern crate alloc;
 use alloc::sync::Arc;
 
-use embedded_svc::channel::nonblocking::Sender;
+use embedded_svc::channel::asyncs::Sender;
 use embedded_svc::mutex::Mutex;
 
 use crate::error;

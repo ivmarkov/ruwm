@@ -2,9 +2,9 @@ use core::convert::Infallible;
 use core::future::Future;
 use core::time::Duration;
 
-use embedded_svc::channel::nonblocking::Receiver;
+use embedded_svc::channel::asyncs::Receiver;
 use embedded_svc::errors::Errors;
-use embedded_svc::timer::nonblocking::*;
+use embedded_svc::timer::asyncs::*;
 
 use ruwm::error;
 

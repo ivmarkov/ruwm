@@ -1,5 +1,5 @@
-use embedded_svc::timer::nonblocking::*;
-use embedded_svc::utils::nonblocking::Asyncify;
+use embedded_svc::timer::asyncs::*;
+use embedded_svc::utils::asyncify::Asyncify;
 
 use esp_idf_svc::timer::*;
 

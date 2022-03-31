@@ -16,13 +16,13 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_hal::adc;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
-use embedded_svc::mqtt::client::nonblocking::{Client, Connection, Publish};
+use embedded_svc::mqtt::client::asyncs::{Client, Connection, Publish};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::unblocker::nonblocking::Unblocker;
+use embedded_svc::unblocker::asyncs::Unblocker;
 use embedded_svc::{
-    channel::nonblocking::{Receiver, Sender},
-    timer::nonblocking::TimerService,
-    utils::nonblocking::channel::adapt,
+    channel::asyncs::{Receiver, Sender},
+    timer::asyncs::TimerService,
+    utils::asyncs::channel::adapt,
 };
 
 use crate::pulse_counter::PulseCounter;
@@ -173,7 +173,7 @@ where
         BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     >
     where
-        A: ws::nonblocking::Acceptor + 'static,
+        A: ws::asyncs::Acceptor + 'static,
         M: Mutex<Data = Vec<SenderInfo<A>>> + 'static,
     {
         let sis = web::sis::<A, M>();

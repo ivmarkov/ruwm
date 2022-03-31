@@ -12,8 +12,8 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
 
-use embedded_svc::event_bus::nonblocking::EventBus;
-use embedded_svc::utils::nonblocking::Asyncify;
+use embedded_svc::event_bus::asyncs::EventBus;
+use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
 
@@ -43,13 +43,16 @@ use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm_std::unblocker::SmolUnblocker;
 
 #[cfg(feature = "espidf")]
-use crate::espidf::*;
+use crate::espidf::broadcast;
 
 #[cfg(not(feature = "espidf"))]
-use ruwm_std::*;
+use ruwm_std::broadcast;
 
-#[cfg(feature = "espidf")]
+use crate::espidf::signal;
+use crate::espidf::timer;
+
 mod espidf;
+
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 

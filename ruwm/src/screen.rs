@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::unblocker::nonblocking::Unblocker;
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::unblocker::asyncs::Unblocker;
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;

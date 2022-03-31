@@ -7,10 +7,10 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::rc::Rc;
 
-use embedded_svc::event_bus::nonblocking::Postbox;
+use embedded_svc::event_bus::asyncs::Postbox;
 use embedded_svc::sys_time;
 use embedded_svc::timer;
-use embedded_svc::timer::nonblocking::{Periodic, Timer};
+use embedded_svc::timer::asyncs::{Periodic, Timer};
 
 use crate::pulse_counter::*;
 use crate::storage::*;

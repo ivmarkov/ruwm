@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::nonblocking::{Receiver, Sender};
-use embedded_svc::timer::nonblocking::PeriodicTimer;
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::timer::asyncs::PeriodicTimer;
 
 use crate::error;
 
