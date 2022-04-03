@@ -1,6 +1,8 @@
+use core::fmt::Debug;
 use core::future::{ready, Future, Ready};
+use core::marker::PhantomData;
 use core::pin::Pin;
-use core::{fmt::Debug, marker::PhantomData};
+use core::time::Duration;
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -25,6 +27,7 @@ use embedded_svc::{
     utils::asyncs::channel::adapt,
 };
 
+use crate::broadcast_event::WifiStatus;
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
@@ -136,13 +139,13 @@ where
     ) -> error::Result<
         BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
-        let bc_sender = self.bc_sender.clone();
         let bc_receiver = self.bc_receiver.clone();
 
-        self.bind(emergency::run(
-            adapt::sender(bc_sender, |p| {
-                Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
-            }),
+        let (sender, binder) = self
+            .signal_sender(|p| Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p))))?;
+
+        binder.bind(emergency::run(
+            sender,
             adapt::receiver(bc_receiver.clone(), Into::into),
             adapt::receiver(bc_receiver, Into::into),
         ))
@@ -151,18 +154,15 @@ where
     #[allow(clippy::type_complexity)]
     pub fn wifi(
         self,
-        wifi: impl Receiver + 'static,
+        wifi: impl Receiver<Data = impl Send + Sync + Clone + 'static> + 'static,
     ) -> error::Result<
         BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
-        let bc_sender = self.bc_sender.clone();
+        let (sender, binder) = self.signal_sender(|_| {
+            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
+        })?;
 
-        self.bind(pipe::run(
-            wifi,
-            adapt::sender(bc_sender, |_| {
-                Some(BroadcastEvent::new("WIFI", Payload::WifiStatus))
-            }),
-        ))
+        binder.bind(pipe::run(wifi, sender))
     }
 
     #[allow(clippy::type_complexity)]
@@ -185,6 +185,9 @@ where
             adapt::receiver(self.bc_receiver.clone(), Into::into),
             adapt::receiver(self.bc_receiver.clone(), Into::into),
         );
+
+        // TODO: Consider moving the commands to signal_sender for optimization
+        // (coalesce multiple commands of the same type)
 
         let web_receiver = web::run_receiver(
             sis,
@@ -221,18 +224,19 @@ where
         let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
         let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
 
+        let (sender, mut binder) =
+            self.signal_sender(|p| Some(BroadcastEvent::new("VALVE", Payload::ValveState(p))))?;
+
         let valve_events = valve::run_events(
-            self.valve_state.clone(),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::sender(self.bc_sender.clone(), |p| {
-                Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
-            }),
+            binder.valve_state.clone(),
+            adapt::receiver(binder.bc_receiver.clone(), Into::into),
+            sender,
             vsc_sender,
             vsn_receiver,
         );
 
         let valve_spin = valve::run_spin(
-            self.timers.timer()?,
+            binder.timers.timer()?,
             vsc_receiver,
             vsn_sender,
             power_pin,
@@ -240,7 +244,7 @@ where
             close_pin,
         );
 
-        self.bind(try_join(valve_events, valve_spin).map(|_| Ok(())))
+        binder.bind(try_join(valve_events, valve_spin).map(|_| Ok(())))
     }
 
     #[allow(clippy::type_complexity)]
@@ -251,16 +255,16 @@ where
         BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let timer = self.timers.timer()?;
-        let bc_sender = self.bc_sender.clone();
         let bc_receiver = self.bc_receiver.clone();
         let water_meter_state = self.water_meter_state.clone();
 
-        self.bind(water_meter::run(
+        let (sender, binder) =
+            self.signal_sender(|p| Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p))))?;
+
+        binder.bind(water_meter::run(
             water_meter_state,
             adapt::receiver(bc_receiver, Into::into),
-            adapt::sender(bc_sender, |p| {
-                Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
-            }),
+            sender,
             timer,
             pulse_counter,
         ))
@@ -281,6 +285,9 @@ where
         let timer = self.timers.timer()?;
         let bc_sender = self.bc_sender.clone();
         let battery_state = self.battery_state.clone();
+
+        // TODO: Consider moving the state to signal_sender for optimization
+        // (coalesce multiple states)
 
         self.bind(battery::run(
             battery_state,
@@ -304,6 +311,9 @@ where
     > {
         let (mqtt_client, mqtt_connection) = mqtt;
 
+        // TODO: Think what to do with publish notifications as they might block the broadcast queue
+        // when it is full
+
         let mqtt_sender = mqtt::run_sender(
             topic_prefix.into(),
             mqtt_client,
@@ -317,6 +327,9 @@ where
             adapt::receiver(self.bc_receiver.clone(), Into::into),
             adapt::receiver(self.bc_receiver.clone(), Into::into),
         );
+
+        // TODO: Consider moving the commands to signal_sender for optimization
+        // (coalesce multiple commands of the same type)
 
         let mqtt_receiver = mqtt::run_receiver(
             mqtt_connection,
@@ -342,21 +355,29 @@ where
         mut self,
         id: ButtonId,
         source: &'static str,
+        pin_edge: impl Receiver + 'static,
         pin: impl InputPin<Error = impl error::HalError + 'static> + 'static,
+        pressed_level: PressedLevel,
+        debounce_time: Option<Duration>,
     ) -> error::Result<
         BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
     > {
         let timer = self.timers.timer()?;
         let bc_sender = self.bc_sender.clone();
 
+        // TODO: Consider moving the commands to signal_sender for optimization
+        // (coalesce multiple commands of the same type)
+
         self.bind(button::run(
             id,
+            pin_edge,
             pin,
             timer,
             adapt::sender(bc_sender, move |p| {
                 Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
             }),
-            PressedLevel::Low,
+            pressed_level,
+            debounce_time,
         ))
     }
 
@@ -420,5 +441,27 @@ where
 
     pub fn into_future(self) -> impl Future<Output = error::Result<()>> {
         self.joined_fut
+    }
+
+    pub fn signal_sender<P>(
+        mut self,
+        adapter: impl Fn(P) -> Option<S::Data> + 'static,
+    ) -> error::Result<(
+        impl Sender<Data = P>,
+        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
+    )>
+    where
+        P: Send + Sync + Clone + 'static,
+    {
+        // let signal_sender = adapt::sender(self.bc_sender.clone(), adapter);
+        // let binder = self;
+
+        let (signal_sender, signal_receiver) = self.signal_factory.create()?;
+
+        let sender = self.bc_sender.clone();
+
+        let binder = self.bind(pipe::run_transform(signal_receiver, sender, adapter))?;
+
+        Ok((signal_sender, binder))
     }
 }

@@ -1,5 +1,7 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
+use core::time::Duration;
+
 use std::env;
 
 extern crate alloc;
@@ -12,21 +14,25 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
 
+use embedded_svc::channel::asyncs::Receiver;
 use embedded_svc::event_bus::asyncs::EventBus;
+use embedded_svc::event_bus::{Postbox, PostboxProvider};
 use embedded_svc::utils::asyncify::Asyncify;
+use embedded_svc::utils::asyncs::channel::adapt;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
 
-use esp_idf_hal::gpio::{Output, Pull};
+use esp_idf_hal::gpio::{self, InterruptType, Output, Pull};
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
-use esp_idf_hal::{adc, delay, gpio, spi};
+use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
+use esp_idf_svc::notify::{EspBackgroundNotify, EspNotify};
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::wifi::EspWifi;
@@ -36,6 +42,7 @@ use edge_frame::assets::serve::*;
 use pulse_counter::PulseCounter;
 
 use ruwm::broadcast_binder;
+use ruwm::button::PressedLevel;
 use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
@@ -110,6 +117,8 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
+    let mut notify = EspNotify::new(&Default::default())?;
+
     let binder = binder
         .event_logger()?
         .wifi(wifi.as_async().subscribe()?)?
@@ -123,25 +132,52 @@ fn main() -> error::Result<()> {
                 peripherals.adc1,
                 adc::config::Config::new().calibration(true),
             )?,
-            peripherals.pins.gpio35.into_analog_atten_11db()?,
+            peripherals.pins.gpio33.into_analog_atten_11db()?,
             peripherals.pins.gpio14.into_input()?,
         )?
         .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
         .button(
             1,
-            "BUTON1",
-            peripherals.pins.gpio25.into_input()?.into_pull_up()?,
+            "BUTTON1",
+            pin_edge(&mut notify, 1)?,
+            unsafe {
+                peripherals
+                    .pins
+                    .gpio35
+                    .into_subscribed(pin_callback(&mut notify, 1)?, InterruptType::NegEdge)?
+            }
+            /*.into_pull_up()?*/,
+            PressedLevel::Low,
+            Some(Duration::from_millis(50)),
         )?
         .button(
             2,
-            "BUTON2",
-            peripherals.pins.gpio26.into_input()?.into_pull_up()?,
+            "BUTTON2",
+            pin_edge(&mut notify, 2)?,
+            unsafe {
+                peripherals
+                    .pins
+                    .gpio0
+                    .into_subscribed(pin_callback(&mut notify, 2)?, InterruptType::NegEdge)?
+            }
+            .into_pull_up()?,
+            PressedLevel::Low,
+            Some(Duration::from_millis(50)),
         )?
-        .button(
-            3,
-            "BUTON3",
-            peripherals.pins.gpio27.into_input()?.into_pull_up()?,
-        )?
+        // .button(
+        //     3,
+        //     "BUTTON3",
+        //     pin_edge(&mut notify, 3)?,
+        //     unsafe {
+        //         peripherals
+        //             .pins
+        //             .gpio27
+        //             .into_subscribed(pin_callback(&mut notify, 3)?, InterruptType::NegEdge)?
+        //     }
+        //     .into_pull_up()?,
+        //     PressedLevel::Low,
+        //     Some(Duration::from_millis(20)),
+        // )?
         .screen(display(
             peripherals.pins.gpio4.into_output()?.degrade(),
             peripherals.pins.gpio16.into_output()?.degrade(),
@@ -162,7 +198,8 @@ fn main() -> error::Result<()> {
             )?,
         )?
         .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?
-        .emergency()?;
+        //.emergency()?
+        ;
 
     smol::block_on(binder.into_future())?;
 
@@ -231,4 +268,27 @@ fn display(
     ));
 
     Ok(display)
+}
+
+fn pin_edge(notify: &mut EspBackgroundNotify, id: u32) -> error::Result<impl Receiver<Data = ()>> {
+    let id_bit = 1 << (id - 1);
+
+    let receiver = adapt::receiver(notify.as_async().subscribe()?, move |bits| {
+        ((bits & id_bit) != 0).then(|| ())
+    });
+
+    Ok(receiver)
+}
+
+fn pin_callback(
+    notify: &mut EspBackgroundNotify,
+    id: u32,
+) -> error::Result<impl FnMut() + Send + 'static> {
+    let mut postbox = notify.postbox()?;
+
+    let id_bit = 1 << (id - 1);
+
+    Ok(move || {
+        postbox.post(&id_bit, None).unwrap();
+    })
 }

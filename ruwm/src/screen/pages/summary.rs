@@ -54,7 +54,7 @@ impl Summary {
                     as u8
             });
 
-            shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
+            // TODO shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
         }
 
         Ok(())

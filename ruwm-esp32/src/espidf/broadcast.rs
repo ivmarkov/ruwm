@@ -48,7 +48,7 @@ where
 
 #[derive(Clone)]
 struct BroadcastSender<D, T>(
-    AsyncPostbox<SmolUnblocker, T, EspTypedEventLoop<D, T, EspBackgroundEventLoop>>,
+    AsyncPostbox<SmolUnblocker, T, EspTypedPostbox<D, T, User<Background>>>,
 );
 
 impl<D, T> Errors for BroadcastSender<D, T> {

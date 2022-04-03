@@ -27,8 +27,8 @@ futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.19" }
 esp-idf-sys = { version = "0.31", features = ["binstart"] }
-esp-idf-svc = { version = "0.39" }
-esp-idf-hal = { version = "0.35" }
+esp-idf-svc = { version = "0.39.1" }
+esp-idf-hal = { version = "0.35.1" }
 embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"

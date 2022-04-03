@@ -1,17 +1,18 @@
 use core::fmt::Debug;
+use core::future::pending;
 use core::time::Duration;
+
+use futures::future::{select, Either};
+use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::timer::asyncs::PeriodicTimer;
+use embedded_svc::timer::asyncs::OnceTimer;
 
 use crate::error;
-
-const POLLING_TIME_MS: u64 = 10;
-const DEBOUNCE_TIME_MS: u64 = 50;
 
 pub type ButtonId = u8;
 
@@ -28,33 +29,56 @@ pub enum ButtonCommand {
 
 pub async fn run(
     id: ButtonId,
+    mut pin_edge: impl Receiver,
     pin: impl InputPin<Error = impl error::HalError>,
-    mut timer: impl PeriodicTimer,
+    mut timer: impl OnceTimer,
     mut notif: impl Sender<Data = ButtonCommand>,
     pressed_level: PressedLevel,
+    debounce_time: Option<Duration>,
 ) -> error::Result<()> {
-    let mut debounce = 0;
-
-    let mut clock = timer
-        .every(Duration::from_millis(POLLING_TIME_MS))
-        .map_err(error::svc)?;
+    let mut debounce = false;
 
     loop {
-        clock.recv().await.map_err(error::svc)?;
+        let pin_edge = pin_edge.recv();
 
-        let pressed = pin.is_high().map_err(error::hal)? == (pressed_level == PressedLevel::High);
+        let timer = if debounce {
+            Either::Left(timer.after(debounce_time.unwrap()).map_err(error::svc)?)
+        } else {
+            Either::Right(pending())
+        };
 
-        if debounce > 0 {
-            debounce -= 1;
+        pin_mut!(pin_edge, timer);
 
-            if debounce == 0 && pressed {
+        let check = match select(pin_edge, timer).await {
+            Either::Left(_) => {
+                if debounce_time.is_some() {
+                    debounce = true;
+                    false
+                } else {
+                    true
+                }
+            }
+            Either::Right(_) => {
+                if debounce {
+                    debounce = false;
+
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if check {
+            let pressed =
+                pin.is_high().map_err(error::hal)? == (pressed_level == PressedLevel::High);
+
+            if pressed {
                 notif
                     .send(ButtonCommand::Pressed(id))
                     .await
                     .map_err(error::svc)?;
             }
-        } else if pressed {
-            debounce = (DEBOUNCE_TIME_MS / POLLING_TIME_MS) as u32;
         }
     }
 }

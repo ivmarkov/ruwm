@@ -1,5 +1,4 @@
 use embedded_svc::mqtt::client::asyncs::MessageId;
-use serde::{Deserialize, Serialize};
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
@@ -9,7 +8,13 @@ use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web::ConnectionId;
 use crate::web_dto::WebEvent;
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct WifiStatus;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct Quit;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct BroadcastEvent {
     source: &'static str,
     payload: Payload,
@@ -29,7 +34,7 @@ impl BroadcastEvent {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Payload {
     ValveCommand(ValveCommand),
     ValveState(Option<ValveState>),
@@ -41,12 +46,14 @@ pub enum Payload {
 
     ButtonCommand(ButtonCommand),
 
-    WifiStatus,
+    WifiStatus(WifiStatus),
 
     MqttPublishNotification(MessageId),
     MqttClientNotification(MqttClientNotification),
 
     WebResponse(ConnectionId, WebEvent),
+
+    Quit(Quit),
 }
 
 impl From<BroadcastEvent> for Option<ValveCommand> {
@@ -103,10 +110,19 @@ impl From<BroadcastEvent> for Option<ButtonCommand> {
     }
 }
 
-impl From<BroadcastEvent> for Option<()> {
+impl From<BroadcastEvent> for Option<WifiStatus> {
     fn from(event: BroadcastEvent) -> Self {
         match event.payload() {
-            Payload::WifiStatus => Some(()),
+            Payload::WifiStatus(value) => Some(*value),
+            _ => None,
+        }
+    }
+}
+
+impl From<BroadcastEvent> for Option<Quit> {
+    fn from(event: BroadcastEvent) -> Self {
+        match event.payload() {
+            Payload::Quit(value) => Some(*value),
             _ => None,
         }
     }
