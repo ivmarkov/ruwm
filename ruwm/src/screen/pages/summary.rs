@@ -1,8 +1,14 @@
-use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor};
+use embedded_graphics::{
+    draw_target::DrawTarget,
+    prelude::{Point, RgbColor, Size},
+};
 
 use crate::{
     battery::BatteryState,
-    screen::shapes::{self, BatteryChargedText},
+    screen::{
+        shapes::{self, BatteryChargedText},
+        DrawTargetRef, RotateAngle, TransformingAdaptor,
+    },
     valve::ValveState,
     water_meter::WaterMeterState,
 };
@@ -54,7 +60,17 @@ impl Summary {
                     as u8
             });
 
-            // TODO shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
+            let battery_shape = shapes::Battery::new(percentage, BatteryChargedText::No, false);
+
+            let bbox = target.bounding_box();
+
+            let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
+                //.translate(Point::new(40, 0))
+                .scale(Size::new(50, 50))
+                .translate(Point::new(bbox.size.width as i32 - 50, 0))
+                .rotate(RotateAngle::Degrees270);
+
+            battery_shape.draw(&mut target)?;
         }
 
         Ok(())

@@ -128,6 +128,24 @@ impl From<BroadcastEvent> for Option<Quit> {
     }
 }
 
+impl From<BroadcastEvent> for Option<MqttClientNotification> {
+    fn from(event: BroadcastEvent) -> Self {
+        match event.payload() {
+            Payload::MqttClientNotification(value) => Some(*value),
+            _ => None,
+        }
+    }
+}
+
+impl From<BroadcastEvent> for Option<MessageId> {
+    fn from(event: BroadcastEvent) -> Self {
+        match event.payload() {
+            Payload::MqttPublishNotification(value) => Some(*value),
+            _ => None,
+        }
+    }
+}
+
 impl From<BroadcastEvent> for Option<(ConnectionId, WebEvent)> {
     fn from(event: BroadcastEvent) -> Self {
         match event.payload() {

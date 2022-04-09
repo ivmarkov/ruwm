@@ -14,6 +14,7 @@ pub mod event_logger;
 pub mod mqtt;
 pub mod pipe;
 pub mod pulse_counter;
+pub mod quit;
 pub mod screen;
 pub mod state_snapshot;
 pub mod storage;

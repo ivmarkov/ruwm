@@ -24,3 +24,35 @@ pub fn display(e: impl Display) -> Error {
 pub fn debug(e: impl Debug) -> Error {
     anyhow::anyhow!("Error: {:?}", e)
 }
+
+#[allow(unused_macros)]
+macro_rules! check {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => Some(value),
+            Err(err) => {
+                log::error!("Failed: {}", err);
+                None
+            }
+        }
+    };
+}
+
+#[allow(unused_macros)]
+macro_rules! checkd {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => Some(value),
+            Err(err) => {
+                log::error!("Failed: {:?}", err);
+                None
+            }
+        }
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use check;
+
+#[allow(unused_imports)]
+pub(crate) use checkd;

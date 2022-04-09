@@ -3,5 +3,6 @@
 
 pub mod broadcast;
 pub mod signal;
+pub mod spawner;
 pub mod timer;
 pub mod unblocker;

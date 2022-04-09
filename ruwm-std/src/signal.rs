@@ -12,25 +12,31 @@ use ruwm::error;
 
 pub struct SignalFactory;
 
-impl broadcast_binder::SignalFactory for SignalFactory {
-    type Sender<D> = impl Sender<Data = D>;
+impl<'a> broadcast_binder::SignalFactory<'a> for SignalFactory {
+    type Sender<D>
+    where
+        D: 'a,
+    = impl Sender<Data = D>;
 
-    type Receiver<D> = impl Receiver<Data = D>;
+    type Receiver<D>
+    where
+        D: 'a,
+    = impl Receiver<Data = D>;
 
     fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
-        D: Send + Sync + Clone + 'static,
+        D: Send + Sync + Clone + 'a,
     {
         signal()
     }
 }
 
-pub fn signal<T>() -> error::Result<(
+pub fn signal<'a, T>() -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>
 where
-    T: Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'a,
 {
     let signal = signal::Signal::<Mutex<signal::State<T>>, T>::new();
 
@@ -46,11 +52,14 @@ impl<T: Send> Errors for SignalSender<T> {
 
 impl<T> Sender for SignalSender<T>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync,
 {
     type Data = T;
 
-    type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>>;
+    type SendFuture<'a>
+    where
+        T: 'a,
+    = impl Future<Output = Result<(), Self::Error>>;
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
         async move {
@@ -70,7 +79,7 @@ impl<T: Send> Errors for SignalReceiver<T> {
 
 impl<T> Receiver for SignalReceiver<T>
 where
-    T: Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync,
 {
     type Data = T;
 

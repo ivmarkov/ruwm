@@ -1,17 +1,13 @@
 use core::fmt::Debug;
-use core::future::{ready, Future, Ready};
+use core::future::Future;
 use core::marker::PhantomData;
-use core::pin::Pin;
 use core::time::Duration;
 
 extern crate alloc;
-use alloc::boxed::Box;
 use alloc::string::String;
 
 use alloc::vec::Vec;
 use embedded_svc::ws;
-use futures::future::try_join;
-use futures::FutureExt;
 
 use embedded_graphics::prelude::RgbColor;
 
@@ -32,7 +28,7 @@ use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 use crate::web::SenderInfo;
-use crate::{battery, emergency, error, event_logger, mqtt, pipe, valve, water_meter, web};
+use crate::{battery, emergency, error, event_logger, mqtt, pipe, quit, valve, water_meter, web};
 use crate::{
     battery::BatteryState,
     broadcast_event::{BroadcastEvent, Payload},
@@ -42,16 +38,24 @@ use crate::{
     water_meter::WaterMeterState,
 };
 
-pub trait SignalFactory {
-    type Sender<D>: Sender<Data = D>;
-    type Receiver<D>: Receiver<Data = D>;
+pub trait SignalFactory<'a> {
+    type Sender<D>: Sender<Data = D>
+    where
+        D: 'a;
+    type Receiver<D>: Receiver<Data = D>
+    where
+        D: 'a;
 
     fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
-        D: Send + Sync + Clone + 'static;
+        D: Send + Sync + Clone + 'a;
 }
 
-pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, F> {
+pub trait Spawner<'a> {
+    fn spawn(&mut self, fut: impl Future<Output = error::Result<()>> + 'a) -> error::Result<()>;
+}
+
+pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
     _unblocker: PhantomData<U>,
     bc_sender: S,
     bc_receiver: R,
@@ -60,21 +64,22 @@ pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, F> {
     valve_state: StateSnapshot<MV>,
     water_meter_state: StateSnapshot<MW>,
     battery_state: StateSnapshot<MB>,
-    joined_fut: F,
+    spawner: P,
 }
 
-impl<U, MV, MW, MB, S, R, T, N> BroadcastBinder<U, MV, MW, MB, S, R, T, N, Ready<error::Result<()>>>
+impl<'a, U, MV, MW, MB, S, R, T, N, P> BroadcastBinder<U, MV, MW, MB, S, R, T, N, P>
 where
-    U: Unblocker,
-    MV: Mutex<Data = Option<ValveState>> + Send + Sync,
-    MW: Mutex<Data = WaterMeterState> + Send + Sync,
-    MB: Mutex<Data = BatteryState> + Send + Sync,
-    S: Sender<Data = BroadcastEvent> + Clone,
-    R: Receiver<Data = BroadcastEvent> + Clone,
-    T: TimerService,
-    N: SignalFactory,
+    U: Unblocker + 'a,
+    MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'a,
+    MW: Mutex<Data = WaterMeterState> + Send + Sync + 'a,
+    MB: Mutex<Data = BatteryState> + Send + Sync + 'a,
+    S: Sender<Data = BroadcastEvent> + Clone + 'a,
+    R: Receiver<Data = BroadcastEvent> + Clone + 'a,
+    T: TimerService + 'a,
+    N: SignalFactory<'a> + 'a,
+    P: Spawner<'a> + 'a,
 {
-    pub fn new(broadcast: (S, R), timers: T, signal_factory: N) -> Self {
+    pub fn new(broadcast: (S, R), timers: T, signal_factory: N, spawner: P) -> Self {
         Self {
             _unblocker: PhantomData,
             bc_sender: broadcast.0,
@@ -84,24 +89,10 @@ where
             valve_state: StateSnapshot::<MV>::new(),
             water_meter_state: StateSnapshot::<MW>::new(),
             battery_state: StateSnapshot::<MB>::new(),
-            joined_fut: ready(Ok(())),
+            spawner,
         }
     }
-}
 
-impl<U, MV, MW, MB, S, R, T, N, F> BroadcastBinder<U, MV, MW, MB, S, R, T, N, F>
-where
-    U: Unblocker + 'static,
-    MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'static,
-    MW: Mutex<Data = WaterMeterState> + Send + Sync + 'static,
-    MB: Mutex<Data = BatteryState> + Send + Sync + 'static,
-    S: Sender<Data = BroadcastEvent> + Clone + 'static,
-    R: Receiver<Data = BroadcastEvent> + Clone + 'static,
-    T: TimerService + 'static,
-    N: SignalFactory + 'static,
-    F: Future<Output = error::Result<()>> + 'static,
-    Self: Sized,
-{
     pub fn valve_state(&self) -> &StateSnapshot<MV> {
         &self.valve_state
     }
@@ -114,76 +105,44 @@ where
         &self.battery_state
     }
 
-    pub fn bc_sender(&self) -> &impl Sender<Data = BroadcastEvent> {
-        &self.bc_sender
+    pub fn event_logger(&mut self) -> error::Result<&mut Self> {
+        self.spawn(event_logger::run(self.bc_receiver.clone()))
     }
 
-    pub fn bc_receiver(&self) -> &impl Receiver<Data = BroadcastEvent> {
-        &self.bc_receiver
-    }
+    pub fn emergency(&mut self) -> error::Result<&mut Self> {
+        let signal =
+            self.signal(|p| Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p))))?;
 
-    #[allow(clippy::type_complexity)]
-    pub fn event_logger(
-        self,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
-        let bc_receiver = self.bc_receiver.clone();
-
-        self.bind(event_logger::run(bc_receiver))
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn emergency(
-        self,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
-        let bc_receiver = self.bc_receiver.clone();
-
-        let (sender, binder) = self
-            .signal_sender(|p| Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p))))?;
-
-        binder.bind(emergency::run(
-            sender,
-            adapt::receiver(bc_receiver.clone(), Into::into),
-            adapt::receiver(bc_receiver, Into::into),
+        self.spawn(emergency::run(
+            signal,
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
         ))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn wifi(
-        self,
-        wifi: impl Receiver<Data = impl Send + Sync + Clone + 'static> + 'static,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
-        let (sender, binder) = self.signal_sender(|_| {
-            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
-        })?;
+        &mut self,
+        wifi: impl Receiver<Data = impl Send + Sync + Clone + 'a> + 'a,
+    ) -> error::Result<&mut Self> {
+        let signal =
+            self.signal(|_| Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus))))?;
 
-        binder.bind(pipe::run(wifi, sender))
+        self.spawn(pipe::run(wifi, signal))
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn web<A, M>(
-        self,
-        web: A,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    >
+    pub fn web<A, M>(&mut self, web: A) -> error::Result<&mut Self>
     where
-        A: ws::asyncs::Acceptor + 'static,
-        M: Mutex<Data = Vec<SenderInfo<A>>> + 'static,
+        A: ws::asyncs::Acceptor + 'a,
+        M: Mutex<Data = Vec<SenderInfo<A>>> + 'a,
     {
         let sis = web::sis::<A, M>();
 
         let web_sender = web::run_sender(
             sis.clone(),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
         );
 
         // TODO: Consider moving the commands to signal_sender for optimization
@@ -192,16 +151,14 @@ where
         let web_receiver = web::run_receiver(
             sis,
             web,
-            adapt::sender(self.bc_sender.clone(), |(connection_id, event)| {
+            self.adapt_bc_sender(|(connection_id, event)| {
                 Some(BroadcastEvent::new(
                     "WEB",
                     Payload::WebResponse(connection_id, event),
                 ))
             }),
-            adapt::sender(self.bc_sender.clone(), |p| {
-                Some(BroadcastEvent::new("WEB", Payload::ValveCommand(p)))
-            }),
-            adapt::sender(self.bc_sender.clone(), |p| {
+            self.adapt_bc_sender(|p| Some(BroadcastEvent::new("WEB", Payload::ValveCommand(p)))),
+            self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new("WEB", Payload::WaterMeterCommand(p)))
             }),
             self.valve_state.clone(),
@@ -209,34 +166,28 @@ where
             self.battery_state.clone(),
         );
 
-        self.bind(try_join(web_sender, web_receiver).map(|_| Ok(())))
+        self.spawn(web_sender)?.spawn(web_receiver)
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn valve(
-        mut self,
-        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
-        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
-        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + 'static,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
+        &mut self,
+        power_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
+        open_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
+        close_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
+    ) -> error::Result<&mut Self> {
         let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
         let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
 
-        let (sender, mut binder) =
-            self.signal_sender(|p| Some(BroadcastEvent::new("VALVE", Payload::ValveState(p))))?;
-
         let valve_events = valve::run_events(
-            binder.valve_state.clone(),
-            adapt::receiver(binder.bc_receiver.clone(), Into::into),
-            sender,
+            self.valve_state.clone(),
+            self.adapt_bc_receiver_into(),
+            self.signal(|p| Some(BroadcastEvent::new("VALVE", Payload::ValveState(p))))?,
             vsc_sender,
             vsn_receiver,
         );
 
         let valve_spin = valve::run_spin(
-            binder.timers.timer()?,
+            self.timers.timer()?,
             vsc_receiver,
             vsn_sender,
             power_pin,
@@ -244,54 +195,43 @@ where
             close_pin,
         );
 
-        binder.bind(try_join(valve_events, valve_spin).map(|_| Ok(())))
+        self.spawn(valve_events)?.spawn(valve_spin)
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn water_meter(
-        mut self,
-        pulse_counter: impl PulseCounter + 'static,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
+        &mut self,
+        pulse_counter: impl PulseCounter + 'a,
+    ) -> error::Result<&mut Self> {
+        let signal =
+            self.signal(|p| Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p))))?;
         let timer = self.timers.timer()?;
-        let bc_receiver = self.bc_receiver.clone();
-        let water_meter_state = self.water_meter_state.clone();
 
-        let (sender, binder) =
-            self.signal_sender(|p| Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p))))?;
-
-        binder.bind(water_meter::run(
-            water_meter_state,
-            adapt::receiver(bc_receiver, Into::into),
-            sender,
+        self.spawn(water_meter::run(
+            self.water_meter_state.clone(),
+            self.adapt_bc_receiver_into(),
+            signal,
             timer,
             pulse_counter,
         ))
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn battery<ADC: 'static, BP>(
-        mut self,
-        one_shot: impl adc::OneShot<ADC, u16, BP> + 'static,
+    pub fn battery<ADC: 'a, BP>(
+        &mut self,
+        one_shot: impl adc::OneShot<ADC, u16, BP> + 'a,
         battery_pin: BP,
-        power_pin: impl InputPin<Error = impl error::HalError + 'static> + 'static,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    >
+        power_pin: impl InputPin<Error = impl error::HalError + 'a> + 'a,
+    ) -> error::Result<&mut Self>
     where
-        BP: adc::Channel<ADC> + 'static,
+        BP: adc::Channel<ADC> + 'a,
     {
-        let timer = self.timers.timer()?;
-        let bc_sender = self.bc_sender.clone();
-        let battery_state = self.battery_state.clone();
-
         // TODO: Consider moving the state to signal_sender for optimization
         // (coalesce multiple states)
 
-        self.bind(battery::run(
-            battery_state,
-            adapt::sender(bc_sender, |p| {
+        let timer = self.timers.timer()?;
+
+        self.spawn(battery::run(
+            self.battery_state.clone(),
+            self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
             }),
             timer,
@@ -301,14 +241,11 @@ where
         ))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn mqtt(
-        self,
+        &mut self,
         topic_prefix: impl Into<String>,
-        mqtt: (impl Client + Publish + 'static, impl Connection + 'static),
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
+        mqtt: (impl Client + Publish + 'a, impl Connection + 'a),
+    ) -> error::Result<&mut Self> {
         let (mqtt_client, mqtt_connection) = mqtt;
 
         // TODO: Think what to do with publish notifications as they might block the broadcast queue
@@ -317,15 +254,16 @@ where
         let mqtt_sender = mqtt::run_sender(
             topic_prefix.into(),
             mqtt_client,
-            adapt::sender(self.bc_sender.clone(), |p| {
+            self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new(
                     "MQTT",
                     Payload::MqttPublishNotification(p),
                 ))
             }),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
         );
 
         // TODO: Consider moving the commands to signal_sender for optimization
@@ -333,47 +271,41 @@ where
 
         let mqtt_receiver = mqtt::run_receiver(
             mqtt_connection,
-            adapt::sender(self.bc_sender.clone(), |p| {
+            self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new(
                     "MQTT",
                     Payload::MqttClientNotification(p),
                 ))
             }),
-            adapt::sender(self.bc_sender.clone(), |p| {
-                Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))
-            }),
-            adapt::sender(self.bc_sender.clone(), |p| {
+            self.adapt_bc_sender(|p| Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))),
+            self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new("MQTT", Payload::WaterMeterCommand(p)))
             }),
         );
 
-        self.bind(try_join(mqtt_sender, mqtt_receiver).map(|_| Ok(())))
+        self.spawn(mqtt_sender)?.spawn(mqtt_receiver)
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn button(
-        mut self,
+        &mut self,
         id: ButtonId,
         source: &'static str,
-        pin_edge: impl Receiver + 'static,
-        pin: impl InputPin<Error = impl error::HalError + 'static> + 'static,
+        pin_edge: impl Receiver + 'a,
+        pin: impl InputPin<Error = impl error::HalError + 'a> + 'a,
         pressed_level: PressedLevel,
         debounce_time: Option<Duration>,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
-        let timer = self.timers.timer()?;
-        let bc_sender = self.bc_sender.clone();
-
+    ) -> error::Result<&mut Self> {
         // TODO: Consider moving the commands to signal_sender for optimization
         // (coalesce multiple commands of the same type)
 
-        self.bind(button::run(
+        let timer = self.timers.timer()?;
+
+        self.spawn(button::run(
             id,
             pin_edge,
             pin,
             timer,
-            adapt::sender(bc_sender, move |p| {
+            self.adapt_bc_sender(move |p| {
                 Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
             }),
             pressed_level,
@@ -381,20 +313,17 @@ where
         ))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn screen(
-        mut self,
+        &mut self,
         display: impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + Send + 'static,
-    ) -> error::Result<
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    > {
+    ) -> error::Result<&mut Self> {
         let (de_sender, de_receiver) = self.signal_factory.create()?;
 
         let screen = screen::run_screen(
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
-            adapt::receiver(self.bc_receiver.clone(), Into::into),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
+            self.adapt_bc_receiver_into(),
             self.valve_state.get(),
             self.water_meter_state.get(),
             self.battery_state.get(),
@@ -403,65 +332,60 @@ where
 
         let draw_engine = screen::run_draw_engine::<U, _, _>(de_receiver, display);
 
-        self.bind(try_join(screen, draw_engine).map(|_| Ok(())))
+        self.spawn(screen)?.spawn(draw_engine)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn bind(
-        self,
-        fut: impl Future<Output = error::Result<()>> + 'static,
-    ) -> error::Result<
-        // TODO: Results in an extremely slow build BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-        BroadcastBinder<
-            U,
-            MV,
-            MW,
-            MB,
-            S,
-            R,
-            T,
-            N,
-            Pin<Box<dyn Future<Output = error::Result<()>>>>,
-        >,
-    > {
-        let joined_fut = self.joined_fut;
+    pub fn finish(self) -> error::Result<(impl Future<Output = error::Result<()>>, P)> {
+        let quit = quit::run(self.adapt_bc_receiver_into());
 
-        Ok(BroadcastBinder {
-            _unblocker: PhantomData,
-            bc_sender: self.bc_sender,
-            bc_receiver: self.bc_receiver,
-            timers: self.timers,
-            signal_factory: self.signal_factory,
-            valve_state: self.valve_state,
-            water_meter_state: self.water_meter_state,
-            battery_state: self.battery_state,
-            joined_fut: Box::pin(try_join(joined_fut, fut).map(|_| Ok(()))),
-        })
+        Ok((quit, self.spawner))
     }
 
-    pub fn into_future(self) -> impl Future<Output = error::Result<()>> {
-        self.joined_fut
+    fn adapt_bc_sender<Q>(
+        &self,
+        adapter: impl Fn(Q) -> Option<BroadcastEvent>,
+    ) -> impl Sender<Data = Q> {
+        adapt::sender(self.bc_sender.clone(), adapter)
     }
 
-    pub fn signal_sender<P>(
-        mut self,
-        adapter: impl Fn(P) -> Option<S::Data> + 'static,
-    ) -> error::Result<(
-        impl Sender<Data = P>,
-        BroadcastBinder<U, MV, MW, MB, S, R, T, N, impl Future<Output = error::Result<()>>>,
-    )>
+    fn adapt_bc_receiver<Q>(
+        &self,
+        adapter: impl Fn(BroadcastEvent) -> Option<Q>,
+    ) -> impl Receiver<Data = Q> {
+        adapt::receiver(self.bc_receiver.clone(), adapter)
+    }
+
+    fn adapt_bc_receiver_into<Q>(&self) -> impl Receiver<Data = Q>
     where
-        P: Send + Sync + Clone + 'static,
+        Option<Q>: From<BroadcastEvent>,
     {
-        // let signal_sender = adapt::sender(self.bc_sender.clone(), adapter);
-        // let binder = self;
+        self.adapt_bc_receiver(Into::into)
+    }
+
+    fn signal<D>(
+        &mut self,
+        adapter: impl Fn(D) -> Option<S::Data> + 'a,
+    ) -> error::Result<impl Sender<Data = D> + 'a>
+    where
+        D: Send + Sync + Clone + 'a,
+    {
+        // let signal_sender = adapt::sender(self.bc_sender(), adapter);
 
         let (signal_sender, signal_receiver) = self.signal_factory.create()?;
 
         let sender = self.bc_sender.clone();
 
-        let binder = self.bind(pipe::run_transform(signal_receiver, sender, adapter))?;
+        self.spawn(pipe::run_transform(signal_receiver, sender, adapter))?;
 
-        Ok((signal_sender, binder))
+        Ok(signal_sender)
+    }
+
+    fn spawn(
+        &mut self,
+        fut: impl Future<Output = error::Result<()>> + 'a,
+    ) -> error::Result<&mut Self> {
+        self.spawner.spawn(fut)?;
+
+        Ok(self)
     }
 }

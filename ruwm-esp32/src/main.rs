@@ -39,6 +39,7 @@ use esp_idf_svc::wifi::EspWifi;
 
 use edge_frame::assets::serve::*;
 
+use futures::task::LocalSpawnExt;
 use pulse_counter::PulseCounter;
 
 use ruwm::broadcast_binder;
@@ -47,6 +48,7 @@ use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 
+use ruwm_std::spawner::{FuturesLocalSpawner, SmolLocalSpawner};
 use ruwm_std::unblocker::SmolUnblocker;
 
 #[cfg(feature = "espidf")]
@@ -79,18 +81,6 @@ fn main() -> error::Result<()> {
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
 
-    let binder = broadcast_binder::BroadcastBinder::<
-        SmolUnblocker,
-        Mutex<_>,
-        Mutex<_>,
-        Mutex<_>,
-        _,
-        _,
-        _,
-        _,
-        _,
-    >::new(broadcast, timer::timers()?, signal::SignalFactory);
-
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
     let nvs_stack = Arc::new(EspDefaultNvs::new()?);
@@ -119,8 +109,27 @@ fn main() -> error::Result<()> {
 
     let mut notify = EspNotify::new(&Default::default())?;
 
-    let binder = binder
+    let mut binder = broadcast_binder::BroadcastBinder::<
+        SmolUnblocker,
+        Mutex<_>,
+        Mutex<_>,
+        Mutex<_>,
+        _,
+        _,
+        _,
+        _,
+        _,
+    >::new(
+        broadcast,
+        timer::timers()?,
+        signal::SignalFactory,
+        //SmolLocalSpawner::new(smol::LocalExecutor::new()),
+        FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
+    );
+
+    binder
         .event_logger()?
+        .emergency()?
         .wifi(wifi.as_async().subscribe()?)?
         .valve(
             peripherals.pins.gpio10.into_output()?,
@@ -145,8 +154,7 @@ fn main() -> error::Result<()> {
                     .pins
                     .gpio35
                     .into_subscribed(pin_callback(&mut notify, 1)?, InterruptType::NegEdge)?
-            }
-            /*.into_pull_up()?*/,
+            }, /*.into_pull_up()?*/
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
         )?
@@ -164,20 +172,20 @@ fn main() -> error::Result<()> {
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
         )?
-        // .button(
-        //     3,
-        //     "BUTTON3",
-        //     pin_edge(&mut notify, 3)?,
-        //     unsafe {
-        //         peripherals
-        //             .pins
-        //             .gpio27
-        //             .into_subscribed(pin_callback(&mut notify, 3)?, InterruptType::NegEdge)?
-        //     }
-        //     .into_pull_up()?,
-        //     PressedLevel::Low,
-        //     Some(Duration::from_millis(20)),
-        // )?
+        .button(
+            3,
+            "BUTTON3",
+            pin_edge(&mut notify, 3)?,
+            unsafe {
+                peripherals
+                    .pins
+                    .gpio27
+                    .into_subscribed(pin_callback(&mut notify, 3)?, InterruptType::NegEdge)?
+            }
+            .into_pull_up()?,
+            PressedLevel::Low,
+            Some(Duration::from_millis(20)),
+        )?
         .screen(display(
             peripherals.pins.gpio4.into_output()?.degrade(),
             peripherals.pins.gpio16.into_output()?.degrade(),
@@ -197,11 +205,19 @@ fn main() -> error::Result<()> {
                 },
             )?,
         )?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?
-        //.emergency()?
-        ;
+        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
-    smol::block_on(binder.into_future())?;
+    let (quit, mut spawner) = binder.finish()?;
+
+    //let quit = binder.spawner().executor().spawn(quit);
+    let quit = spawner.pool().spawner().spawn_local_with_handle(quit)?;
+
+    log::info!("Starting execution");
+
+    //smol::block_on(binder.spawner().executor().run(quit))?;
+    spawner.pool().run_until(quit)?;
+
+    log::info!("Finished execution");
 
     Ok(())
 }

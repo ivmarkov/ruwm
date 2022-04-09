@@ -37,15 +37,14 @@ pub async fn run_sender(
     topic_prefix: impl AsRef<str>,
     mut mqtt: impl Client + Publish,
     mut pubq: impl Sender<Data = MessageId>,
+    mut mqtt_status: impl Receiver<Data = MqttClientNotification>,
     mut valve_status: impl Receiver<Data = Option<ValveState>>,
     mut wm_status: impl Receiver<Data = WaterMeterState>,
     mut battery_status: impl Receiver<Data = BatteryState>,
 ) -> error::Result<()> {
-    let topic_prefix = topic_prefix.as_ref();
+    let mut connected = false;
 
-    mqtt.subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
-        .await
-        .map_err(error::svc)?;
+    let topic_prefix = topic_prefix.as_ref();
 
     let topic_valve = format!("{}/valve", topic_prefix);
 
@@ -60,19 +59,38 @@ pub async fn run_sender(
     let topic_powered = format!("{}/powered", topic_prefix);
 
     loop {
-        let (valve_state, wm_state, battery_state) = {
+        let (mqtt_state, valve_state, wm_state, battery_state) = {
+            let mqtt = mqtt_status.recv().fuse();
             let valve = valve_status.recv().fuse();
             let wm = wm_status.recv().fuse();
             let battery = battery_status.recv().fuse();
 
-            pin_mut!(valve, wm, battery);
+            pin_mut!(mqtt, valve, wm, battery);
 
             select! {
-                valve_state = valve => (Some(valve_state.map_err(error::svc)?), None, None),
-                wm_state = wm => (None, Some(wm_state.map_err(error::svc)?), None),
-                battery_state = battery => (None, None, Some(battery_state.map_err(error::svc)?)),
+                mqtt_state = mqtt => (Some(mqtt_state.map_err(error::svc)?), None, None, None),
+                valve_state = valve => (None, Some(valve_state.map_err(error::svc)?), None, None),
+                wm_state = wm => (None, None, Some(wm_state.map_err(error::svc)?), None),
+                battery_state = battery => (None, None, None, Some(battery_state.map_err(error::svc)?)),
             }
         };
+
+        if let Some(mqtt_state) = mqtt_state {
+            match mqtt_state {
+                Ok(Event::Connected(_)) => {
+                    error::check!(mqtt
+                        .subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
+                        .await
+                        .map_err(error::svc));
+
+                    connected = true;
+                }
+                Ok(Event::Disconnected) => {
+                    connected = false;
+                }
+                _ => {}
+            }
+        }
 
         if let Some(valve_state) = valve_state {
             let status = match valve_state {
@@ -84,6 +102,7 @@ pub async fn run_sender(
             };
 
             publish(
+                connected,
                 &mut mqtt,
                 &mut pubq,
                 &topic_valve,
@@ -99,6 +118,7 @@ pub async fn run_sender(
                 let num_slice: &[u8] = &num;
 
                 publish(
+                    connected,
                     &mut mqtt,
                     &mut pubq,
                     &topic_meter_edges,
@@ -110,6 +130,7 @@ pub async fn run_sender(
 
             if wm_state.prev_armed != wm_state.armed {
                 publish(
+                    connected,
                     &mut mqtt,
                     &mut pubq,
                     &topic_meter_armed,
@@ -121,6 +142,7 @@ pub async fn run_sender(
 
             if wm_state.prev_leaking != wm_state.leaking {
                 publish(
+                    connected,
                     &mut mqtt,
                     &mut pubq,
                     &topic_meter_leak,
@@ -138,6 +160,7 @@ pub async fn run_sender(
                     let num_slice: &[u8] = &num;
 
                     publish(
+                        connected,
                         &mut mqtt,
                         &mut pubq,
                         &topic_battery_voltage,
@@ -157,6 +180,7 @@ pub async fn run_sender(
                             };
 
                             publish(
+                                connected,
                                 &mut mqtt,
                                 &mut pubq,
                                 &topic_battery_low,
@@ -176,6 +200,7 @@ pub async fn run_sender(
                             };
 
                             publish(
+                                connected,
                                 &mut mqtt,
                                 &mut pubq,
                                 &topic_battery_charged,
@@ -191,6 +216,7 @@ pub async fn run_sender(
             if battery_state.prev_powered != battery_state.powered {
                 if let Some(powered) = battery_state.powered {
                     publish(
+                        connected,
                         &mut mqtt,
                         &mut pubq,
                         &topic_powered,
@@ -205,21 +231,27 @@ pub async fn run_sender(
 }
 
 async fn publish(
+    connected: bool,
     mqtt: &mut impl Publish,
     pubq: &mut impl Sender<Data = MessageId>,
     topic: &str,
     qos: QoS,
     payload: &[u8],
 ) -> error::Result<()> {
-    let msg_id = mqtt
-        .publish(topic, qos, false, payload)
-        .await
-        .map_err(error::svc)?;
+    if connected {
+        if let Some(msg_id) = error::check!(mqtt
+            .publish(topic, qos, false, payload)
+            .await
+            .map_err(error::svc))
+        {
+            info!("Published to {}", topic);
 
-    info!("Published to {}", topic);
-
-    if qos >= QoS::AtLeastOnce {
-        pubq.send(msg_id).await.map_err(error::svc)?;
+            if qos >= QoS::AtLeastOnce {
+                pubq.send(msg_id).await.map_err(error::svc)?;
+            }
+        }
+    } else {
+        info!("Client not connected, skipping publishment to {}", topic);
     }
 
     Ok(())
