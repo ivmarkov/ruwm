@@ -65,10 +65,10 @@ impl Summary {
             let bbox = target.bounding_box();
 
             let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
-                //.translate(Point::new(40, 0))
-                .scale(Size::new(50, 50))
-                .translate(Point::new(bbox.size.width as i32 - 50, 0))
-                .rotate(RotateAngle::Degrees270);
+                .translate(Point::new(bbox.size.width as i32 - 20, 0))
+                .scale_from(shapes::Battery::SIZE, Size::new(20, 40))
+                //.rotate(RotateAngle::Degrees270)
+                ;
 
             battery_shape.draw(&mut target)?;
         }

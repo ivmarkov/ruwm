@@ -7,7 +7,7 @@ use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
 
-use profont::{PROFONT_12_POINT, PROFONT_24_POINT};
+use profont::PROFONT_24_POINT;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BatteryChargedText {
@@ -23,9 +23,13 @@ pub struct Battery {
 }
 
 impl Battery {
+    pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
+    pub const WIDTH: u32 = 100;
+    pub const HEIGHT: u32 = 200;
+
     const PADDING: u32 = 10;
-    const PADDED_WIDTH: u32 = 100 - Self::PADDING * 2;
-    const PADDED_HEIGHT: u32 = 200 - Self::PADDING * 2;
+    const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
+    const PADDED_HEIGHT: u32 = Self::HEIGHT - Self::PADDING * 2;
 
     const OUTLINE: u32 = 5;
 
