@@ -290,11 +290,15 @@ where
         &mut self,
         id: ButtonId,
         source: &'static str,
-        pin_edge: impl Receiver + 'a,
-        pin: impl InputPin<Error = impl error::HalError + 'a> + 'a,
+        pin: (
+            impl Receiver + 'a,
+            impl InputPin<Error = impl error::HalError + 'a> + 'a,
+        ),
         pressed_level: PressedLevel,
         debounce_time: Option<Duration>,
     ) -> error::Result<&mut Self> {
+        let (pin_edge, pin) = pin;
+
         // TODO: Consider moving the commands to signal_sender for optimization
         // (coalesce multiple commands of the same type)
 

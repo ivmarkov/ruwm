@@ -17,22 +17,26 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::channel::asyncs::Receiver;
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::event_bus::{Postbox, PostboxProvider};
+use embedded_svc::signal::Signal;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::channel::adapt;
+use embedded_svc::utils::asyncs::executor::LocalExecutor;
+use embedded_svc::utils::asyncs::signal::adapt::SignalReceiver;
+use embedded_svc::utils::asyncs::signal::AtomicSignal;
+use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull};
 use esp_idf_hal::mutex::Mutex;
-use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
+use esp_idf_hal::{interrupt, prelude::*};
 
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
-use esp_idf_svc::notify::{EspBackgroundNotify, EspNotify};
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::wifi::EspWifi;
@@ -54,6 +58,7 @@ use ruwm_std::unblocker::SmolUnblocker;
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
+use crate::espidf::spawner::ISRCompatibleLocalSpawner;
 
 #[cfg(not(feature = "espidf"))]
 use ruwm_std::broadcast;
@@ -70,6 +75,8 @@ const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
+
+type PinSignal = AtomicSignal<AtomicOption, ()>;
 
 fn main() -> error::Result<()> {
     init()?;
@@ -108,7 +115,12 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    let mut notify = EspNotify::new(&Default::default())?;
+    let executor = LocalExecutor::<64, _, _>::new(
+        || interrupt::task::wait_any_notification(),
+        || unsafe {
+            interrupt::task::notify(interrupt::task::current().unwrap(), 1);
+        },
+    );
 
     let mut binder = broadcast_binder::BroadcastBinder::<
         SmolUnblocker,
@@ -125,7 +137,8 @@ fn main() -> error::Result<()> {
         timer::timers()?,
         signal::SignalFactory,
         //SmolLocalSpawner::new(smol::LocalExecutor::new()),
-        FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
+        //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
+        ISRCompatibleLocalSpawner::new(executor),
     );
 
     binder
@@ -149,41 +162,56 @@ fn main() -> error::Result<()> {
         .button(
             1,
             "BUTTON1",
-            pin_edge(&mut notify, 1)?,
-            unsafe {
-                peripherals
-                    .pins
-                    .gpio35
-                    .into_subscribed(pin_callback(&mut notify, 1)?, InterruptType::NegEdge)?
-            }, /*.into_pull_up()?*/
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (SignalReceiver::new(signal.clone()), unsafe {
+                    peripherals
+                        .pins
+                        .gpio35
+                        .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
+                })
+            },
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
         )?
         .button(
             2,
             "BUTTON2",
-            pin_edge(&mut notify, 2)?,
-            unsafe {
-                peripherals
-                    .pins
-                    .gpio0
-                    .into_subscribed(pin_callback(&mut notify, 2)?, InterruptType::NegEdge)?
-            }
-            .into_pull_up()?,
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (
+                    SignalReceiver::new(signal.clone()),
+                    unsafe {
+                        peripherals
+                            .pins
+                            .gpio0
+                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
+                    }
+                    .into_pull_up()?,
+                )
+            },
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
         )?
         .button(
             3,
             "BUTTON3",
-            pin_edge(&mut notify, 3)?,
-            unsafe {
-                peripherals
-                    .pins
-                    .gpio27
-                    .into_subscribed(pin_callback(&mut notify, 3)?, InterruptType::NegEdge)?
-            }
-            .into_pull_up()?,
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (
+                    SignalReceiver::new(signal.clone()),
+                    unsafe {
+                        peripherals
+                            .pins
+                            .gpio27
+                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
+                    }
+                    .into_pull_up()?,
+                )
+            },
             PressedLevel::Low,
             Some(Duration::from_millis(20)),
         )?
@@ -210,13 +238,15 @@ fn main() -> error::Result<()> {
 
     let (quit, mut spawner) = binder.finish()?;
 
-    //let quit = binder.spawner().executor().spawn(quit);
-    let quit = spawner.pool().spawner().spawn_local_with_handle(quit)?;
+    //let quit = spawner().executor().spawn(quit);
+    //let quit = spawner.pool().spawner().spawn_local_with_handle(quit)?;
+    let quit = spawner.executor().spawn(quit);
 
     log::info!("Starting execution");
 
     //smol::block_on(binder.spawner().executor().run(quit))?;
-    spawner.pool().run_until(quit)?;
+    //spawner.pool().run_until(quit)?;
+    spawner.executor().run(quit)?;
 
     log::info!("Finished execution");
 
@@ -285,27 +315,4 @@ fn display(
     ));
 
     Ok(display)
-}
-
-fn pin_edge(notify: &mut EspBackgroundNotify, id: u32) -> error::Result<impl Receiver<Data = ()>> {
-    let id_bit = 1 << (id - 1);
-
-    let receiver = adapt::receiver(notify.as_async().subscribe()?, move |bits| {
-        ((bits & id_bit) != 0).then(|| ())
-    });
-
-    Ok(receiver)
-}
-
-fn pin_callback(
-    notify: &mut EspBackgroundNotify,
-    id: u32,
-) -> error::Result<impl FnMut() + Send + 'static> {
-    let mut postbox = notify.postbox()?;
-
-    let id_bit = 1 << (id - 1);
-
-    Ok(move || {
-        postbox.post(&id_bit, None).unwrap();
-    })
 }
