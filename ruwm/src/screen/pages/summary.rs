@@ -48,7 +48,18 @@ impl Summary {
         if self.water_meter_state != Some(water_meter_state) {
             self.water_meter_state = Some(water_meter_state);
 
-            // TODO
+            let wm_shape = shapes::WaterMeterClassic::<8>::new(
+                self.water_meter_state.map(|wm| wm.edges_count),
+                1,
+                true,
+            );
+
+            //let bbox = target.bounding_box();
+
+            let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
+                .translate(Point::new(0, 30));
+
+            wm_shape.draw(&mut target)?;
         }
 
         if self.battery_state != Some(battery_state) {
@@ -65,10 +76,9 @@ impl Summary {
             let bbox = target.bounding_box();
 
             let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
-                .translate(Point::new(bbox.size.width as i32 - 20, 0))
+                .translate(Point::new(bbox.size.width as i32 - 40, 0))
                 .scale_from(shapes::Battery::SIZE, Size::new(20, 40))
-                //.rotate(RotateAngle::Degrees270)
-                ;
+                .rotate(RotateAngle::Degrees270);
 
             battery_shape.draw(&mut target)?;
         }

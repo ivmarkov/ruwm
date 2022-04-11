@@ -77,8 +77,7 @@ fn main() -> error::Result<()> {
     let peripherals = Peripherals::take().unwrap();
 
     #[cfg(feature = "espidf")]
-    let (bsender, breceiver, mut l) =
-        broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
+    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
 
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
@@ -122,22 +121,12 @@ fn main() -> error::Result<()> {
         _,
         _,
     >::new(
-        (bsender, breceiver),
+        broadcast,
         timer::timers()?,
         signal::SignalFactory,
         //SmolLocalSpawner::new(smol::LocalExecutor::new()),
         FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
     );
-
-    unsafe {
-        peripherals.pins.gpio35.into_subscribed(
-            move || {
-                l.post(&BroadcastEvent::new("ISR", Payload::Quit(Quit)), None)
-                    .unwrap();
-            },
-            InterruptType::NegEdge,
-        )?;
-    }
 
     binder
         .event_logger()?
@@ -157,19 +146,19 @@ fn main() -> error::Result<()> {
             peripherals.pins.gpio14.into_input()?,
         )?
         .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
-        // .button(
-        //     1,
-        //     "BUTTON1",
-        //     pin_edge(&mut notify, 1)?,
-        //     unsafe {
-        //         peripherals
-        //             .pins
-        //             .gpio35
-        //             .into_subscribed(pin_callback(&mut notify, 1)?, InterruptType::NegEdge)?
-        //     }, /*.into_pull_up()?*/
-        //     PressedLevel::Low,
-        //     Some(Duration::from_millis(50)),
-        // )?
+        .button(
+            1,
+            "BUTTON1",
+            pin_edge(&mut notify, 1)?,
+            unsafe {
+                peripherals
+                    .pins
+                    .gpio35
+                    .into_subscribed(pin_callback(&mut notify, 1)?, InterruptType::NegEdge)?
+            }, /*.into_pull_up()?*/
+            PressedLevel::Low,
+            Some(Duration::from_millis(50)),
+        )?
         .button(
             2,
             "BUTTON2",

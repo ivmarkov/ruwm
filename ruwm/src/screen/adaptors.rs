@@ -576,7 +576,7 @@ impl<D, T> TransformingAdaptor<D, T> {
         D: DrawTarget + Dimensions,
         T: Fn(Point) -> Point,
     {
-        let bbox = self.transform_rect(&self.display.bounding_box());
+        let bbox = self.display.bounding_box();
 
         TransformingAdaptor::new(self, move |point: Point| match angle {
             RotateAngle::Degrees90 => Point::new(
@@ -599,7 +599,7 @@ impl<D, T> TransformingAdaptor<D, T> {
         D: DrawTarget + Dimensions,
         T: Fn(Point) -> Point,
     {
-        let bbox = self.transform_rect(&self.display.bounding_box());
+        let bbox = self.display.bounding_box();
 
         TransformingAdaptor::new(self, move |point: Point| {
             Point::new(
@@ -622,7 +622,7 @@ impl<D, T> TransformingAdaptor<D, T> {
         D: DrawTarget + Dimensions,
         T: Fn(Point) -> Point,
     {
-        let bbox = self.transform_rect(&self.display.bounding_box());
+        let bbox = self.display.bounding_box();
 
         self.scale_from(bbox.size, to)
     }
@@ -636,7 +636,7 @@ impl<D, T> TransformingAdaptor<D, T> {
         D: DrawTarget + Dimensions,
         T: Fn(Point) -> Point,
     {
-        let bbox = self.transform_rect(&self.display.bounding_box());
+        let bbox = self.display.bounding_box();
 
         TransformingAdaptor::new(self, move |point: Point| {
             Point::new(

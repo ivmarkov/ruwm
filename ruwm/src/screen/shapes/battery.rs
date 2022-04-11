@@ -1,13 +1,11 @@
 use core::str;
 
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
-use embedded_graphics::mono_font::MonoTextStyleBuilder;
+use embedded_graphics::mono_font::*;
 use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, RgbColor, Size};
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
-
-use profont::PROFONT_24_POINT;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BatteryChargedText {
@@ -26,6 +24,8 @@ impl Battery {
     pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
     pub const WIDTH: u32 = 100;
     pub const HEIGHT: u32 = 200;
+
+    const FONT: MonoFont<'static> = profont::PROFONT_24_POINT;
 
     const PADDING: u32 = 10;
     const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
@@ -46,20 +46,13 @@ impl Battery {
         }
     }
 
-    pub fn size(&self) -> Size {
-        Size::new(
-            Self::PADDED_WIDTH + Self::PADDING * 2,
-            Self::PADDED_HEIGHT + Self::PADDING * 2,
-        )
-    }
-
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget,
         D::Color: RgbColor,
     {
         // Clear the area
-        Rectangle::new(Point::new(0, 0), self.size())
+        Rectangle::new(Point::new(0, 0), Self::SIZE)
             .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
             .draw(target)?;
 
@@ -263,7 +256,7 @@ impl Battery {
         D::Color: RgbColor,
     {
         let character_style = MonoTextStyleBuilder::new()
-            .font(&PROFONT_24_POINT)
+            .font(&Self::FONT)
             .text_color(color)
             .build();
 

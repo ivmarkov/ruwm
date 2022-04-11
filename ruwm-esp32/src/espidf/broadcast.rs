@@ -22,7 +22,6 @@ pub fn broadcast<D, T>(
 ) -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
-    EspTypedEventLoop<D, T, EspBackgroundEventLoop>,
 )>
 where
     T: Send + Sync + Clone + 'static,
@@ -34,8 +33,6 @@ where
     })?
     .into_typed::<D, _>();
 
-    let b = blocking_event_bus.clone();
-
     let postbox = blocking_event_bus
         .as_async_with_unblocker::<SmolUnblocker>()
         .postbox()?;
@@ -46,7 +43,6 @@ where
     Ok((
         BroadcastSender(postbox),
         BroadcastReceiver(event_bus, subscription),
-        b,
     ))
 }
 
