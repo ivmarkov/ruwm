@@ -83,7 +83,8 @@ fn main() -> error::Result<()> {
     let peripherals = Peripherals::take().unwrap();
 
     #[cfg(feature = "espidf")]
-    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
+    let broadcast =
+        broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(SmolUnblocker, 100)?;
 
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;

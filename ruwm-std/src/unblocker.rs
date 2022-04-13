@@ -28,6 +28,8 @@ impl Unblocker for SmolUnblocker {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
+        // TODO: Need to box or else we get rustc error:
+        // "type parameter `F` is part of concrete type but not used in parameter list for the `impl Trait` type alias"
         let boxed: Box<dyn FnOnce() -> T + Send + 'static> = Box::new(f);
         smol::unblock(boxed)
     }

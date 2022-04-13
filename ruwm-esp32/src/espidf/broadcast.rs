@@ -3,6 +3,7 @@ use core::future::Future;
 use embedded_svc::channel::asyncs::*;
 use embedded_svc::errors::Errors;
 use embedded_svc::event_bus::asyncs::*;
+use embedded_svc::unblocker::asyncs::Unblocker;
 use embedded_svc::utils::asyncify::event_bus::*;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncify::UnblockingAsyncify;
@@ -15,17 +16,17 @@ use esp_idf_sys::*;
 
 use ruwm::error;
 
-use ruwm_std::unblocker::SmolUnblocker;
-
-pub fn broadcast<D, T>(
+pub fn broadcast<D, T, U>(
+    unblocker: U,
     cap: usize,
 ) -> error::Result<(
     impl Sender<Data = T> + Clone,
     impl Receiver<Data = T> + Clone,
 )>
 where
-    T: Send + Sync + Clone + 'static,
     D: EspTypedEventSerializer<T> + EspTypedEventDeserializer<T> + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
+    U: Unblocker + Clone + 'static,
 {
     let mut blocking_event_bus = EspBackgroundEventLoop::new(&BackgroundLoopConfiguration {
         queue_size: cap,
@@ -34,7 +35,7 @@ where
     .into_typed::<D, _>();
 
     let postbox = blocking_event_bus
-        .as_async_with_unblocker(SmolUnblocker)
+        .as_async_with_unblocker(unblocker)
         .postbox()?;
 
     let mut event_bus = blocking_event_bus.into_async();
@@ -47,18 +48,17 @@ where
 }
 
 #[derive(Clone)]
-struct BroadcastSender<D, T>(
-    AsyncPostbox<SmolUnblocker, T, EspTypedPostbox<D, T, User<Background>>>,
-);
+struct BroadcastSender<D, T, U>(AsyncPostbox<U, T, EspTypedPostbox<D, T, User<Background>>>);
 
-impl<D, T> Errors for BroadcastSender<D, T> {
+impl<D, T, U> Errors for BroadcastSender<D, T, U> {
     type Error = EspError;
 }
 
-impl<D, T> Sender for BroadcastSender<D, T>
+impl<D, T, U> Sender for BroadcastSender<D, T, U>
 where
-    T: Clone + Send + Sync + 'static,
     D: EspTypedEventSerializer<T> + 'static,
+    T: Clone + Send + Sync + 'static,
+    U: Unblocker + 'static,
 {
     type Data = T;
 

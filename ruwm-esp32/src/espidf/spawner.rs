@@ -1,4 +1,5 @@
 use embedded_svc::utils::asyncs::executor::{LocalExecutor, Notifier, Waiter};
+
 use ruwm::broadcast_binder::Spawner;
 
 pub struct ISRCompatibleLocalSpawner<'a, const S: usize, W, N>(LocalExecutor<'a, S, W, N>);
