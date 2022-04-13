@@ -50,8 +50,19 @@ pub trait SignalFactory<'a> {
         D: Send + Sync + Clone + 'a;
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TaskPriority {
+    High,
+    Medium,
+    Low,
+}
+
 pub trait Spawner<'a> {
-    fn spawn(&mut self, fut: impl Future<Output = error::Result<()>> + 'a) -> error::Result<()>;
+    fn spawn(
+        &mut self,
+        priority: TaskPriority,
+        fut: impl Future<Output = error::Result<()>> + 'a,
+    ) -> error::Result<()>;
 }
 
 pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
@@ -105,28 +116,36 @@ where
     }
 
     pub fn event_logger(&mut self) -> error::Result<&mut Self> {
-        self.spawn(event_logger::run(self.bc_receiver.clone()))
+        self.spawn(
+            TaskPriority::Medium,
+            event_logger::run(self.bc_receiver.clone()),
+        )
     }
 
     pub fn emergency(&mut self) -> error::Result<&mut Self> {
-        let signal =
-            self.signal(|p| Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p))))?;
+        let signal = self.signal(TaskPriority::High, |p| {
+            Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
+        })?;
 
-        self.spawn(emergency::run(
-            signal,
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-        ))
+        self.spawn(
+            TaskPriority::High,
+            emergency::run(
+                signal,
+                self.adapt_bc_receiver_into(),
+                self.adapt_bc_receiver_into(),
+            ),
+        )
     }
 
     pub fn wifi(
         &mut self,
         wifi: impl Receiver<Data = impl Send + Sync + Clone + 'a> + 'a,
     ) -> error::Result<&mut Self> {
-        let signal =
-            self.signal(|_| Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus))))?;
+        let signal = self.signal(TaskPriority::Medium, |_| {
+            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
+        })?;
 
-        self.spawn(pipe::run(wifi, signal))
+        self.spawn(TaskPriority::Medium, pipe::run(wifi, signal))
     }
 
     pub fn web<A, M>(&mut self, web: A) -> error::Result<&mut Self>
@@ -165,7 +184,8 @@ where
             self.battery_state.clone(),
         );
 
-        self.spawn(web_sender)?.spawn(web_receiver)
+        self.spawn(TaskPriority::Medium, web_sender)?
+            .spawn(TaskPriority::Medium, web_receiver)
     }
 
     pub fn valve(
@@ -180,7 +200,9 @@ where
         let valve_events = valve::run_events(
             self.valve_state.clone(),
             self.adapt_bc_receiver_into(),
-            self.signal(|p| Some(BroadcastEvent::new("VALVE", Payload::ValveState(p))))?,
+            self.signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
+            })?,
             vsc_sender,
             vsn_receiver,
         );
@@ -194,24 +216,29 @@ where
             close_pin,
         );
 
-        self.spawn(valve_events)?.spawn(valve_spin)
+        self.spawn(TaskPriority::High, valve_events)?
+            .spawn(TaskPriority::High, valve_spin)
     }
 
     pub fn water_meter(
         &mut self,
         pulse_counter: impl PulseCounter + 'a,
     ) -> error::Result<&mut Self> {
-        let signal =
-            self.signal(|p| Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p))))?;
+        let signal = self.signal(TaskPriority::High, |p| {
+            Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
+        })?;
         let timer = self.timers.timer()?;
 
-        self.spawn(water_meter::run(
-            self.water_meter_state.clone(),
-            self.adapt_bc_receiver_into(),
-            signal,
-            timer,
-            pulse_counter,
-        ))
+        self.spawn(
+            TaskPriority::High,
+            water_meter::run(
+                self.water_meter_state.clone(),
+                self.adapt_bc_receiver_into(),
+                signal,
+                timer,
+                pulse_counter,
+            ),
+        )
     }
 
     pub fn battery<ADC: 'a, BP>(
@@ -228,16 +255,19 @@ where
 
         let timer = self.timers.timer()?;
 
-        self.spawn(battery::run(
-            self.battery_state.clone(),
-            self.adapt_bc_sender(|p| {
-                Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
-            }),
-            timer,
-            one_shot,
-            battery_pin,
-            power_pin,
-        ))
+        self.spawn(
+            TaskPriority::High,
+            battery::run(
+                self.battery_state.clone(),
+                self.adapt_bc_sender(|p| {
+                    Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
+                }),
+                timer,
+                one_shot,
+                battery_pin,
+                power_pin,
+            ),
+        )
     }
 
     pub fn mqtt(
@@ -282,7 +312,8 @@ where
             }),
         );
 
-        self.spawn(mqtt_sender)?.spawn(mqtt_receiver)
+        self.spawn(TaskPriority::Low, mqtt_sender)?
+            .spawn(TaskPriority::Medium, mqtt_receiver)
     }
 
     pub fn button(
@@ -303,17 +334,20 @@ where
 
         let timer = self.timers.timer()?;
 
-        self.spawn(button::run(
-            id,
-            pin_edge,
-            pin,
-            timer,
-            self.adapt_bc_sender(move |p| {
-                Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
-            }),
-            pressed_level,
-            debounce_time,
-        ))
+        self.spawn(
+            TaskPriority::High,
+            button::run(
+                id,
+                pin_edge,
+                pin,
+                timer,
+                self.adapt_bc_sender(move |p| {
+                    Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
+                }),
+                pressed_level,
+                debounce_time,
+            ),
+        )
     }
 
     pub fn screen(
@@ -335,7 +369,8 @@ where
 
         let draw_engine = screen::run_draw_engine(self.unblocker.clone(), de_receiver, display);
 
-        self.spawn(screen)?.spawn(draw_engine)
+        self.spawn(TaskPriority::Medium, screen)?
+            .spawn(TaskPriority::Low, draw_engine)
     }
 
     pub fn finish(self) -> error::Result<(impl Future<Output = error::Result<()>>, P)> {
@@ -367,6 +402,7 @@ where
 
     fn signal<D>(
         &mut self,
+        priority: TaskPriority,
         adapter: impl Fn(D) -> Option<S::Data> + 'a,
     ) -> error::Result<impl Sender<Data = D> + 'a>
     where
@@ -378,16 +414,20 @@ where
 
         let sender = self.bc_sender.clone();
 
-        self.spawn(pipe::run_transform(signal_receiver, sender, adapter))?;
+        self.spawn(
+            priority,
+            pipe::run_transform(signal_receiver, sender, adapter),
+        )?;
 
         Ok(signal_sender)
     }
 
     fn spawn(
         &mut self,
+        priority: TaskPriority,
         fut: impl Future<Output = error::Result<()>> + 'a,
     ) -> error::Result<&mut Self> {
-        self.spawner.spawn(fut)?;
+        self.spawner.spawn(priority, fut)?;
 
         Ok(self)
     }

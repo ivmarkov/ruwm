@@ -77,14 +77,26 @@ const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 type PinSignal = AtomicSignal<AtomicOption, ()>;
 
+pub struct UnsafeTaskHandle(esp_idf_sys::TaskHandle_t);
+
+unsafe impl Send for UnsafeTaskHandle {}
+
+impl Clone for UnsafeTaskHandle {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
+
 fn main() -> error::Result<()> {
     init()?;
 
     let peripherals = Peripherals::take().unwrap();
 
+    let unblocker = SmolUnblocker;
+
     #[cfg(feature = "espidf")]
     let broadcast =
-        broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(SmolUnblocker, 100)?;
+        broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(unblocker.clone(), 100)?;
 
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
@@ -101,7 +113,7 @@ fn main() -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (web_processor, web_acceptor) = EspHttpWsProcessor::new(SmolUnblocker, 4096);
+    let (web_processor, web_acceptor) = EspHttpWsProcessor::new(unblocker.clone(), 4096);
 
     let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
 
@@ -115,18 +127,19 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    let main_task = interrupt::task::current().unwrap();
+    let main_task = UnsafeTaskHandle(interrupt::task::current().unwrap());
 
-    let executor = LocalExecutor::<64, _, _>::new(
+    let executor = LocalExecutor::new(
+        64,
         || interrupt::task::wait_any_notification(),
         move || unsafe {
-            interrupt::task::notify(main_task, 1);
+            interrupt::task::notify(main_task.0, 1);
         },
     );
 
     let mut binder =
         broadcast_binder::BroadcastBinder::<_, Mutex<_>, Mutex<_>, Mutex<_>, _, _, _, _, _>::new(
-            SmolUnblocker,
+            unblocker.clone(),
             broadcast,
             timer::timers()?,
             signal::SignalFactory,
@@ -218,17 +231,17 @@ fn main() -> error::Result<()> {
             peripherals.pins.gpio19.into_output()?.degrade(),
             Some(peripherals.pins.gpio5.into_output()?.degrade()),
         )?)?
-        .mqtt(
-            client_id,
-            EspMqttClient::new_async(
-                SmolUnblocker,
-                "mqtt://broker.emqx.io:1883",
-                MqttClientConfiguration {
-                    client_id: Some(client_id),
-                    ..Default::default()
-                },
-            )?,
-        )?
+        // .mqtt(
+        //     client_id,
+        //     EspMqttClient::new_async(
+        //         unblocker,
+        //         "mqtt://broker.emqx.io:1883",
+        //         MqttClientConfiguration {
+        //             client_id: Some(client_id),
+        //             ..Default::default()
+        //         },
+        //     )?,
+        // )?
         .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
     let (quit, mut spawner) = binder.finish()?;

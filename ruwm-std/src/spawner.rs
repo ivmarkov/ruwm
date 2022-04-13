@@ -1,5 +1,5 @@
 use futures::{executor::LocalPool, task::LocalSpawnExt, FutureExt};
-use ruwm::broadcast_binder::Spawner;
+use ruwm::broadcast_binder::{Spawner, TaskPriority};
 use smol::LocalExecutor;
 
 pub struct SmolLocalSpawner<'a>(LocalExecutor<'a>);
@@ -17,6 +17,7 @@ impl<'a> SmolLocalSpawner<'a> {
 impl<'a> Spawner<'a> for SmolLocalSpawner<'a> {
     fn spawn(
         &mut self,
+        _priority: TaskPriority,
         fut: impl futures::Future<Output = ruwm::error::Result<()>> + 'a,
     ) -> ruwm::error::Result<()> {
         self.0.spawn(fut).detach();
@@ -40,6 +41,7 @@ impl FuturesLocalSpawner {
 impl Spawner<'static> for FuturesLocalSpawner {
     fn spawn(
         &mut self,
+        _priority: TaskPriority,
         fut: impl futures::Future<Output = ruwm::error::Result<()>> + 'static,
     ) -> ruwm::error::Result<()> {
         self.0.spawner().spawn_local(fut.map(|r| r.unwrap()))?;

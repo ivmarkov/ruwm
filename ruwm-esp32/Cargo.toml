@@ -12,11 +12,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [features]
-default = ["experimental", "espidf"]
-#default = ["experimental"]
+default = ["espidf"]
+#default = []
 
 espidf = []
-experimental = ["esp-idf-hal/experimental", "esp-idf-svc/experimental", "embedded-svc/experimental"]
 
 [dependencies]
 anyhow = "1"
@@ -25,10 +24,10 @@ futures = {version = "0.3", features = ["async-await"] }
 async-broadcast = "0.3.4"
 smol = "1.2"
 embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.19.1" }
+embedded-svc = { version = "0.19.1", features = ["experimental", "isr-async-executor"] }
 esp-idf-sys = { version = "0.31", features = ["binstart"] }
-esp-idf-svc = { version = "0.39.2" }
-esp-idf-hal = { version = "0.35.2" }
+esp-idf-svc = { version = "0.39.2", features = ["experimental"] }
+esp-idf-hal = { version = "0.35.2", features = ["experimental"] }
 embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"
