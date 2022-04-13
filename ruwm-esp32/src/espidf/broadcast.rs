@@ -34,7 +34,7 @@ where
     .into_typed::<D, _>();
 
     let postbox = blocking_event_bus
-        .as_async_with_unblocker::<SmolUnblocker>()
+        .as_async_with_unblocker(SmolUnblocker)
         .postbox()?;
 
     let mut event_bus = blocking_event_bus.into_async();

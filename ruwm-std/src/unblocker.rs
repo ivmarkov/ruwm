@@ -1,11 +1,15 @@
 use core::future::Future;
 
+extern crate alloc;
+use alloc::boxed::Box;
+
 use embedded_svc::unblocker::asyncs::{Blocker, Unblocker};
 
+#[derive(Clone)]
 pub struct SmolBlocker;
 
-impl Blocker for SmolBlocker {
-    fn block<F>(f: F) -> F::Output
+impl Blocker<'static> for SmolBlocker {
+    fn block_on<F>(&self, f: F) -> F::Output
     where
         F: Future,
     {
@@ -13,22 +17,18 @@ impl Blocker for SmolBlocker {
     }
 }
 
+#[derive(Clone)]
 pub struct SmolUnblocker;
-
-// TODO: Need to change the Unblocker trait to take self
-// pub fn unblocker() -> impl Unblocker {
-//     // env::set_var("BLOCKING_MAX_THREADS", "2");
-
-//     SmolUnblocker
-// }
 
 impl Unblocker for SmolUnblocker {
     type UnblockFuture<T> = impl Future<Output = T>;
 
-    fn unblock<T>(f: Box<dyn FnOnce() -> T + Send + 'static>) -> Self::UnblockFuture<T>
+    fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
     where
+        F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        smol::unblock(f)
+        let boxed: Box<dyn FnOnce() -> T + Send + 'static> = Box::new(f);
+        smol::unblock(boxed)
     }
 }

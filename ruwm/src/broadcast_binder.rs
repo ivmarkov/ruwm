@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 use core::future::Future;
-use core::marker::PhantomData;
 use core::time::Duration;
 
 extern crate alloc;
@@ -56,7 +55,7 @@ pub trait Spawner<'a> {
 }
 
 pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
-    _unblocker: PhantomData<U>,
+    unblocker: U,
     bc_sender: S,
     bc_receiver: R,
     timers: T,
@@ -69,7 +68,7 @@ pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
 
 impl<'a, U, MV, MW, MB, S, R, T, N, P> BroadcastBinder<U, MV, MW, MB, S, R, T, N, P>
 where
-    U: Unblocker + 'a,
+    U: Unblocker + Clone + 'a,
     MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'a,
     MW: Mutex<Data = WaterMeterState> + Send + Sync + 'a,
     MB: Mutex<Data = BatteryState> + Send + Sync + 'a,
@@ -79,9 +78,9 @@ where
     N: SignalFactory<'a> + 'a,
     P: Spawner<'a> + 'a,
 {
-    pub fn new(broadcast: (S, R), timers: T, signal_factory: N, spawner: P) -> Self {
+    pub fn new(unblocker: U, broadcast: (S, R), timers: T, signal_factory: N, spawner: P) -> Self {
         Self {
-            _unblocker: PhantomData,
+            unblocker,
             bc_sender: broadcast.0,
             bc_receiver: broadcast.1,
             timers,
@@ -334,7 +333,7 @@ where
             de_sender,
         );
 
-        let draw_engine = screen::run_draw_engine::<U, _, _>(de_receiver, display);
+        let draw_engine = screen::run_draw_engine(self.unblocker.clone(), de_receiver, display);
 
         self.spawn(screen)?.spawn(draw_engine)
     }

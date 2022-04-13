@@ -3,8 +3,6 @@ use alloc::sync::Arc;
 
 use embedded_svc::channel::asyncs::*;
 use embedded_svc::utils::asyncs::signal;
-use embedded_svc::utils::asyncs::signal::adapt::SignalReceiver;
-use embedded_svc::utils::asyncs::signal::adapt::SignalSender;
 
 use esp_idf_hal::mutex::Mutex;
 
@@ -32,17 +30,14 @@ impl<'a> broadcast_binder::SignalFactory<'a> for SignalFactory {
     }
 }
 
-pub fn signal<'a, T>() -> error::Result<(
-    impl Sender<Data = T> + Clone,
-    impl Receiver<Data = T> + Clone,
-)>
+pub fn signal<'a, T>() -> error::Result<(impl Sender<Data = T>, impl Receiver<Data = T>)>
 where
     T: Send + Sync + Clone + 'a,
 {
     let signal = Arc::new(signal::MutexSignal::<Mutex<signal::State<T>>, T>::new());
 
     Ok((
-        SignalSender::new(signal.clone()),
-        SignalReceiver::new(signal),
+        signal::adapt::into_sender(signal.clone()),
+        signal::adapt::into_receiver(signal),
     ))
 }

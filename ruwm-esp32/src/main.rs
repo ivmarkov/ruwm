@@ -17,12 +17,11 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::channel::asyncs::Receiver;
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::event_bus::{Postbox, PostboxProvider};
-use embedded_svc::signal::Signal;
+use embedded_svc::signal::asyncs::Signal;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::channel::adapt;
 use embedded_svc::utils::asyncs::executor::LocalExecutor;
-use embedded_svc::utils::asyncs::signal::adapt::SignalReceiver;
-use embedded_svc::utils::asyncs::signal::AtomicSignal;
+use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
@@ -101,7 +100,7 @@ fn main() -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (web_processor, web_acceptor) = EspHttpWsProcessor::new::<SmolUnblocker>(4096);
+    let (web_processor, web_acceptor) = EspHttpWsProcessor::new(SmolUnblocker, 4096);
 
     let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
 
@@ -115,31 +114,25 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
+    let main_task = interrupt::task::current().unwrap();
+
     let executor = LocalExecutor::<64, _, _>::new(
         || interrupt::task::wait_any_notification(),
-        || unsafe {
-            interrupt::task::notify(interrupt::task::current().unwrap(), 1);
+        move || unsafe {
+            interrupt::task::notify(main_task, 1);
         },
     );
 
-    let mut binder = broadcast_binder::BroadcastBinder::<
-        SmolUnblocker,
-        Mutex<_>,
-        Mutex<_>,
-        Mutex<_>,
-        _,
-        _,
-        _,
-        _,
-        _,
-    >::new(
-        broadcast,
-        timer::timers()?,
-        signal::SignalFactory,
-        //SmolLocalSpawner::new(smol::LocalExecutor::new()),
-        //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
-        ISRCompatibleLocalSpawner::new(executor),
-    );
+    let mut binder =
+        broadcast_binder::BroadcastBinder::<_, Mutex<_>, Mutex<_>, Mutex<_>, _, _, _, _, _>::new(
+            SmolUnblocker,
+            broadcast,
+            timer::timers()?,
+            signal::SignalFactory,
+            //SmolLocalSpawner::new(smol::LocalExecutor::new()),
+            //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
+            ISRCompatibleLocalSpawner::new(executor),
+        );
 
     binder
         .event_logger()?
@@ -165,7 +158,7 @@ fn main() -> error::Result<()> {
             {
                 let signal = Arc::new(PinSignal::new());
 
-                (SignalReceiver::new(signal.clone()), unsafe {
+                (signal_adapt::into_receiver(signal.clone()), unsafe {
                     peripherals
                         .pins
                         .gpio35
@@ -182,7 +175,7 @@ fn main() -> error::Result<()> {
                 let signal = Arc::new(PinSignal::new());
 
                 (
-                    SignalReceiver::new(signal.clone()),
+                    signal_adapt::into_receiver(signal.clone()),
                     unsafe {
                         peripherals
                             .pins
@@ -202,7 +195,7 @@ fn main() -> error::Result<()> {
                 let signal = Arc::new(PinSignal::new());
 
                 (
-                    SignalReceiver::new(signal.clone()),
+                    signal_adapt::into_receiver(signal.clone()),
                     unsafe {
                         peripherals
                             .pins
@@ -226,7 +219,8 @@ fn main() -> error::Result<()> {
         )?)?
         .mqtt(
             client_id,
-            EspMqttClient::new_async::<SmolUnblocker, _>(
+            EspMqttClient::new_async(
+                SmolUnblocker,
                 "mqtt://broker.emqx.io:1883",
                 MqttClientConfiguration {
                     client_id: Some(client_id),

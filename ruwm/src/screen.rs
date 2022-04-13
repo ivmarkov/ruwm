@@ -1,8 +1,5 @@
 use core::fmt::Debug;
 
-extern crate alloc;
-use alloc::boxed::Box;
-
 use futures::{pin_mut, select, FutureExt};
 
 use serde::{Deserialize, Serialize};
@@ -122,7 +119,11 @@ enum PageDrawable {
     Battery(pages::Battery),
 }
 
-pub async fn run_draw_engine<U, R, D>(mut draw_notif: R, mut display: D) -> error::Result<()>
+pub async fn run_draw_engine<U, R, D>(
+    unblocker: U,
+    mut draw_notif: R,
+    mut display: D,
+) -> error::Result<()>
 where
     U: Unblocker,
     R: Receiver<Data = DrawRequest>,
@@ -135,8 +136,9 @@ where
     loop {
         let draw_request = draw_notif.recv().await.map_err(error::svc)?;
 
-        let result =
-            U::unblock(Box::new(move || draw(display, page_drawable, draw_request))).await?;
+        let result = unblocker
+            .unblock(move || draw(display, page_drawable, draw_request))
+            .await?;
 
         display = result.0;
         page_drawable = result.1;
