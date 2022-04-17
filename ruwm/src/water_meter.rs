@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::asyncs::PeriodicTimer;
+use embedded_svc::timer::asyncs::OnceTimer;
 
 use crate::error;
 use crate::pulse_counter::PulseCounter;
@@ -34,18 +34,16 @@ pub async fn run(
     state: StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     mut command: impl Receiver<Data = WaterMeterCommand>,
     mut notif: impl Sender<Data = WaterMeterState>,
-    mut timer: impl PeriodicTimer,
+    mut timer: impl OnceTimer,
     mut pulse_counter: impl PulseCounter,
 ) -> error::Result<()> {
     pulse_counter.start().map_err(error::svc)?;
 
-    let mut clock = timer
-        .every(Duration::from_secs(2) /*Duration::from_millis(200)*/)
-        .map_err(error::svc)?;
-
     loop {
         let command = command.recv();
-        let tick = clock.recv();
+        let tick = timer
+            .after(Duration::from_secs(2) /*Duration::from_millis(200)*/)
+            .map_err(error::svc)?;
 
         pin_mut!(command, tick);
 

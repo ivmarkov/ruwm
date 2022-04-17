@@ -1,6 +1,8 @@
 use futures::{executor::LocalPool, task::LocalSpawnExt, FutureExt};
-use ruwm::broadcast_binder::{Spawner, TaskPriority};
+
 use smol::LocalExecutor;
+
+use ruwm::broadcast_binder::{Spawner, TaskPriority};
 
 pub struct SmolLocalSpawner<'a>(LocalExecutor<'a>);
 

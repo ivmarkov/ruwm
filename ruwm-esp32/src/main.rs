@@ -2,8 +2,6 @@
 #![feature(type_alias_impl_trait)]
 use core::time::Duration;
 
-use std::env;
-
 extern crate alloc;
 use alloc::sync::Arc;
 
@@ -14,13 +12,10 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
 
-use embedded_svc::channel::asyncs::Receiver;
 use embedded_svc::event_bus::asyncs::EventBus;
-use embedded_svc::event_bus::{Postbox, PostboxProvider};
 use embedded_svc::signal::asyncs::Signal;
+use embedded_svc::unblocker::asyncs::blocking_unblocker;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::utils::asyncs::channel::adapt;
-use embedded_svc::utils::asyncs::executor::LocalExecutor;
 use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
@@ -28,9 +23,9 @@ use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull};
 use esp_idf_hal::mutex::Mutex;
+use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
-use esp_idf_hal::{interrupt, prelude::*};
 
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
@@ -42,18 +37,13 @@ use esp_idf_svc::wifi::EspWifi;
 
 use edge_frame::assets::serve::*;
 
-use futures::task::LocalSpawnExt;
 use pulse_counter::PulseCounter;
 
 use ruwm::broadcast_binder;
-use ruwm::broadcast_event::{BroadcastEvent, Payload, Quit};
 use ruwm::button::PressedLevel;
 use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
-
-use ruwm_std::spawner::{FuturesLocalSpawner, SmolLocalSpawner};
-use ruwm_std::unblocker::SmolUnblocker;
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
@@ -77,22 +67,12 @@ const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 type PinSignal = AtomicSignal<AtomicOption, ()>;
 
-pub struct UnsafeTaskHandle(esp_idf_sys::TaskHandle_t);
-
-unsafe impl Send for UnsafeTaskHandle {}
-
-impl Clone for UnsafeTaskHandle {
-    fn clone(&self) -> Self {
-        Self(self.0)
-    }
-}
-
 fn main() -> error::Result<()> {
     init()?;
 
     let peripherals = Peripherals::take().unwrap();
 
-    let unblocker = SmolUnblocker;
+    let unblocker = blocking_unblocker();
 
     #[cfg(feature = "espidf")]
     let broadcast =
@@ -127,16 +107,6 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    let main_task = UnsafeTaskHandle(interrupt::task::current().unwrap());
-
-    let executor = LocalExecutor::new(
-        64,
-        || interrupt::task::wait_any_notification(),
-        move || unsafe {
-            interrupt::task::notify(main_task.0, 1);
-        },
-    );
-
     let mut binder =
         broadcast_binder::BroadcastBinder::<_, Mutex<_>, Mutex<_>, Mutex<_>, _, _, _, _, _>::new(
             unblocker.clone(),
@@ -145,7 +115,7 @@ fn main() -> error::Result<()> {
             signal::SignalFactory,
             //SmolLocalSpawner::new(smol::LocalExecutor::new()),
             //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
-            ISRCompatibleLocalSpawner::new(executor),
+            ISRCompatibleLocalSpawner::new(64, 64, 64),
         );
 
     binder
@@ -231,30 +201,35 @@ fn main() -> error::Result<()> {
             peripherals.pins.gpio19.into_output()?.degrade(),
             Some(peripherals.pins.gpio5.into_output()?.degrade()),
         )?)?
-        // .mqtt(
-        //     client_id,
-        //     EspMqttClient::new_async(
-        //         unblocker,
-        //         "mqtt://broker.emqx.io:1883",
-        //         MqttClientConfiguration {
-        //             client_id: Some(client_id),
-        //             ..Default::default()
-        //         },
-        //     )?,
-        // )?
+        .mqtt(
+            client_id,
+            EspMqttClient::new_async(
+                unblocker,
+                "mqtt://broker.emqx.io:1883",
+                MqttClientConfiguration {
+                    client_id: Some(client_id),
+                    ..Default::default()
+                },
+            )?,
+        )?
         .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
-    let (quit, mut spawner) = binder.finish()?;
+    let (hquit, mquit, lquit) = (binder.quit()?, binder.quit()?, binder.quit()?);
 
-    //let quit = spawner().executor().spawn(quit);
-    //let quit = spawner.pool().spawner().spawn_local_with_handle(quit)?;
-    let quit = spawner.executor().spawn(quit);
+    let (mut high, mut mid, mut low) = binder.finish()?.release();
 
     log::info!("Starting execution");
 
-    //smol::block_on(binder.spawner().executor().run(quit))?;
-    //spawner.pool().run_until(quit)?;
-    spawner.executor().run(quit)?;
+    let (hquit, mquit, lquit) = (high.spawn(hquit), mid.spawn(mquit), low.spawn(lquit));
+
+    let med = std::thread::spawn(move || mid.run(mquit));
+    let low = std::thread::spawn(move || low.run(lquit));
+
+    let (hres, mres, lres) = (high.run(hquit), med.join(), low.join());
+
+    hres?;
+    // mres?;
+    // lres?;
 
     log::info!("Finished execution");
 
@@ -262,8 +237,6 @@ fn main() -> error::Result<()> {
 }
 
 fn init() -> error::Result<()> {
-    env::set_var("BLOCKING_MAX_THREADS", "2");
-
     esp_idf_sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities

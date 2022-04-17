@@ -12,17 +12,17 @@ pub struct SignalFactory;
 impl<'a> broadcast_binder::SignalFactory<'a> for SignalFactory {
     type Sender<D>
     where
-        D: 'a,
-    = impl Sender<Data = D>;
+        D: Send + 'a,
+    = impl Sender<Data = D> + Send;
 
     type Receiver<D>
     where
-        D: 'a,
-    = impl Receiver<Data = D>;
+        D: Send + 'a,
+    = impl Receiver<Data = D> + Send;
 
     fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
-        D: Send + Sync + Clone + 'a,
+        D: Send + Clone + 'a,
     {
         signal()
     }
@@ -30,7 +30,7 @@ impl<'a> broadcast_binder::SignalFactory<'a> for SignalFactory {
 
 pub fn signal<'a, T>() -> error::Result<(impl Sender<Data = T>, impl Receiver<Data = T>)>
 where
-    T: Send + Sync + Clone + 'a,
+    T: Send + Clone + 'a,
 {
     let signal = Arc::new(signal::MutexSignal::<Mutex<_>, T>::new());
 

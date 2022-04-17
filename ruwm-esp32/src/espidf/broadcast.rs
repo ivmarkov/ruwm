@@ -62,10 +62,10 @@ where
 {
     type Data = T;
 
-    type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>>;
+    type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
-        async move { self.0.send(value).await }
+        self.0.send(value)
     }
 }
 
@@ -101,9 +101,9 @@ where
     type RecvFuture<'a>
     where
         T: 'a,
-    = impl Future<Output = Result<T, Self::Error>>;
+    = impl Future<Output = Result<T, Self::Error>> + Send;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
-        async move { self.1.recv().await }
+        self.1.recv()
     }
 }

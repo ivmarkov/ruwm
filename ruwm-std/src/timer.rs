@@ -36,7 +36,7 @@ impl OnceTimer for SmolTimer {
     type AfterFuture<'a>
     where
         Self: 'a,
-    = impl Future<Output = Result<(), Self::Error>>;
+    = impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn after(&mut self, duration: Duration) -> Result<Self::AfterFuture<'_>, Self::Error> {
         Ok(async move {
@@ -68,7 +68,7 @@ impl Receiver for SmolInterval {
     type RecvFuture<'b>
     where
         Self: 'b,
-    = impl Future<Output = Result<Self::Data, Self::Error>>;
+    = impl Future<Output = Result<Self::Data, Self::Error>> + Send;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {

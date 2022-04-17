@@ -28,13 +28,21 @@ where
     where
         S: PartialEq + Clone,
     {
-        let mut guard = self.0.lock();
+        let state = {
+            let mut guard = self.0.lock();
 
-        let state = updater(&guard)?;
+            let state = updater(&guard)?;
 
-        if *guard != state {
-            *guard = state.clone();
+            if *guard != state {
+                *guard = state.clone();
 
+                Some(state)
+            } else {
+                None
+            }
+        };
+
+        if let Some(state) = state {
             notif.send(state).await.map_err(error::svc)?;
 
             Ok(true)
@@ -52,6 +60,7 @@ where
 
             if *guard != state {
                 *guard = state.clone();
+
                 true
             } else {
                 false

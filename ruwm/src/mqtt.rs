@@ -266,33 +266,42 @@ pub async fn run_receiver(
     let mut message_parser = MessageParser::new();
 
     loop {
-        let incoming = connection
-            .next(|message| message_parser.process(message), |error| ())
-            .await;
+        let (incoming, mp) = connection
+            .next(move |result| {
+                let result = result
+                    .as_ref()
+                    .map(|event| {
+                        event.transform_received(|message| message_parser.process(message))
+                    })
+                    .map_err(|_| ());
 
-        if let Some(incoming) = incoming {
-            mqtt_notif.send(incoming).await.map_err(error::svc)?;
+                (result, message_parser)
+            })
+            .await
+            .unwrap();
 
-            if let Ok(Event::Received(Some(cmd))) = incoming {
-                match cmd {
-                    MqttCommand::Valve(open) => valve_command
-                        .send(if open {
-                            ValveCommand::Open
-                        } else {
-                            ValveCommand::Close
-                        })
-                        .await
-                        .map_err(error::svc)?,
-                    MqttCommand::FlowWatch(enable) => wm_command
-                        .send(if enable {
-                            WaterMeterCommand::Arm
-                        } else {
-                            WaterMeterCommand::Disarm
-                        })
-                        .await
-                        .map_err(error::svc)?,
-                    _ => (),
-                }
+        message_parser = mp;
+        mqtt_notif.send(incoming).await.map_err(error::svc)?;
+
+        if let Ok(Event::Received(Some(cmd))) = incoming {
+            match cmd {
+                MqttCommand::Valve(open) => valve_command
+                    .send(if open {
+                        ValveCommand::Open
+                    } else {
+                        ValveCommand::Close
+                    })
+                    .await
+                    .map_err(error::svc)?,
+                MqttCommand::FlowWatch(enable) => wm_command
+                    .send(if enable {
+                        WaterMeterCommand::Arm
+                    } else {
+                        WaterMeterCommand::Disarm
+                    })
+                    .await
+                    .map_err(error::svc)?,
+                _ => (),
             }
         }
     }

@@ -1,30 +1,44 @@
-use embedded_svc::utils::asyncs::executor::{LocalExecutor, Notifier, Waiter};
+use esp_idf_svc::executor::asyncs::{local, sendable, EspLocalExecutor, EspSendableExecutor};
 
 use ruwm::broadcast_binder::{Spawner, TaskPriority};
 
-pub struct ISRCompatibleLocalSpawner<'a, W, N>(LocalExecutor<'a, W, N>);
+pub struct ISRCompatibleLocalSpawner<'a> {
+    high_prio: EspLocalExecutor<'a>,
+    med_prio: EspSendableExecutor<'a>,
+    low_prio: EspSendableExecutor<'a>,
+}
 
-impl<'a, W, N> ISRCompatibleLocalSpawner<'a, W, N> {
-    pub fn new(executor: LocalExecutor<'a, W, N>) -> Self {
-        Self(executor)
+impl<'a> ISRCompatibleLocalSpawner<'a> {
+    pub fn new(high_prio_tasks: usize, med_prio_tasks: usize, low_prio_tasks: usize) -> Self {
+        Self {
+            high_prio: local(high_prio_tasks),
+            med_prio: sendable(med_prio_tasks),
+            low_prio: sendable(low_prio_tasks),
+        }
     }
 
-    pub fn executor(&mut self) -> &mut LocalExecutor<'a, W, N> {
-        &mut self.0
+    pub fn release(
+        self,
+    ) -> (
+        EspLocalExecutor<'a>,
+        EspSendableExecutor<'a>,
+        EspSendableExecutor<'a>,
+    ) {
+        (self.high_prio, self.med_prio, self.low_prio)
     }
 }
 
-impl<'a, W, N> Spawner<'a> for ISRCompatibleLocalSpawner<'a, W, N>
-where
-    W: Waiter + 'a,
-    N: Notifier + Clone + Send + 'a,
-{
+impl<'a> Spawner<'a> for ISRCompatibleLocalSpawner<'a> {
     fn spawn(
         &mut self,
-        _priority: TaskPriority,
-        fut: impl futures::Future<Output = ruwm::error::Result<()>> + 'a,
+        priority: TaskPriority,
+        fut: impl futures::Future<Output = ruwm::error::Result<()>> + Send + 'a,
     ) -> ruwm::error::Result<()> {
-        self.0.spawn(fut).detach();
+        match priority {
+            TaskPriority::High => self.high_prio.spawn(fut).detach(),
+            TaskPriority::Medium => self.med_prio.spawn(fut).detach(),
+            TaskPriority::Low => self.low_prio.spawn(fut).detach(),
+        }
 
         Ok(())
     }

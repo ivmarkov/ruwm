@@ -38,16 +38,16 @@ use crate::{
 };
 
 pub trait SignalFactory<'a> {
-    type Sender<D>: Sender<Data = D>
+    type Sender<D>: Sender<Data = D> + Send
     where
-        D: 'a;
-    type Receiver<D>: Receiver<Data = D>
+        D: Send + 'a;
+    type Receiver<D>: Receiver<Data = D> + Send
     where
-        D: 'a;
+        D: Send + 'a;
 
     fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
     where
-        D: Send + Sync + Clone + 'a;
+        D: Send + Clone + 'a;
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -61,7 +61,7 @@ pub trait Spawner<'a> {
     fn spawn(
         &mut self,
         priority: TaskPriority,
-        fut: impl Future<Output = error::Result<()>> + 'a,
+        fut: impl Future<Output = error::Result<()>> + Send + 'a,
     ) -> error::Result<()>;
 }
 
@@ -79,15 +79,15 @@ pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
 
 impl<'a, U, MV, MW, MB, S, R, T, N, P> BroadcastBinder<U, MV, MW, MB, S, R, T, N, P>
 where
-    U: Unblocker + Clone + 'a,
-    MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'a,
-    MW: Mutex<Data = WaterMeterState> + Send + Sync + 'a,
-    MB: Mutex<Data = BatteryState> + Send + Sync + 'a,
-    S: Sender<Data = BroadcastEvent> + Clone + 'a,
-    R: Receiver<Data = BroadcastEvent> + Clone + 'a,
-    T: TimerService + 'a,
-    N: SignalFactory<'a> + 'a,
-    P: Spawner<'a> + 'a,
+    U: Unblocker + Clone + Send + Sync + 'static,
+    MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'static,
+    MW: Mutex<Data = WaterMeterState> + Send + Sync + 'static,
+    MB: Mutex<Data = BatteryState> + Send + Sync + 'static,
+    S: Sender<Data = BroadcastEvent> + Clone + Send + 'static,
+    R: Receiver<Data = BroadcastEvent> + Clone + Send + 'static,
+    T: TimerService + 'static,
+    N: SignalFactory<'static> + 'static,
+    P: Spawner<'static> + 'static,
 {
     pub fn new(unblocker: U, broadcast: (S, R), timers: T, signal_factory: N, spawner: P) -> Self {
         Self {
@@ -139,7 +139,7 @@ where
 
     pub fn wifi(
         &mut self,
-        wifi: impl Receiver<Data = impl Send + Sync + Clone + 'a> + 'a,
+        wifi: impl Receiver<Data = impl Send + Sync + Clone + 'static> + Send + 'static,
     ) -> error::Result<&mut Self> {
         let signal = self.signal(TaskPriority::Medium, |_| {
             Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
@@ -150,8 +150,8 @@ where
 
     pub fn web<A, M>(&mut self, web: A) -> error::Result<&mut Self>
     where
-        A: ws::asyncs::Acceptor + 'a,
-        M: Mutex<Data = Vec<SenderInfo<A>>> + 'a,
+        A: ws::asyncs::Acceptor + Send + 'static,
+        M: Mutex<Data = Vec<SenderInfo<A>>> + Send + Sync + 'static,
     {
         let sis = web::sis::<A, M>();
 
@@ -190,9 +190,9 @@ where
 
     pub fn valve(
         &mut self,
-        power_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
-        open_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
-        close_pin: impl OutputPin<Error = impl error::HalError + 'a> + 'a,
+        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
     ) -> error::Result<&mut Self> {
         let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
         let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
@@ -222,7 +222,7 @@ where
 
     pub fn water_meter(
         &mut self,
-        pulse_counter: impl PulseCounter + 'a,
+        pulse_counter: impl PulseCounter + Send + 'static,
     ) -> error::Result<&mut Self> {
         let signal = self.signal(TaskPriority::High, |p| {
             Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
@@ -241,14 +241,14 @@ where
         )
     }
 
-    pub fn battery<ADC: 'a, BP>(
+    pub fn battery<ADC: 'static, BP>(
         &mut self,
-        one_shot: impl adc::OneShot<ADC, u16, BP> + 'a,
+        one_shot: impl adc::OneShot<ADC, u16, BP> + Send + 'static,
         battery_pin: BP,
-        power_pin: impl InputPin<Error = impl error::HalError + 'a> + 'a,
+        power_pin: impl InputPin<Error = impl error::HalError + Send + 'static> + Send + 'static,
     ) -> error::Result<&mut Self>
     where
-        BP: adc::Channel<ADC> + 'a,
+        BP: adc::Channel<ADC> + Send + 'static,
     {
         // TODO: Consider moving the state to signal_sender for optimization
         // (coalesce multiple states)
@@ -273,7 +273,10 @@ where
     pub fn mqtt(
         &mut self,
         topic_prefix: impl Into<String>,
-        mqtt: (impl Client + Publish + 'a, impl Connection + 'a),
+        mqtt: (
+            impl Client + Publish + Send + 'static,
+            impl Connection + Send + 'static,
+        ),
     ) -> error::Result<&mut Self> {
         let (mqtt_client, mqtt_connection) = mqtt;
 
@@ -321,8 +324,8 @@ where
         id: ButtonId,
         source: &'static str,
         pin: (
-            impl Receiver + 'a,
-            impl InputPin<Error = impl error::HalError + 'a> + 'a,
+            impl Receiver + Send + 'static,
+            impl InputPin<Error = impl error::HalError + 'static> + Send + 'static,
         ),
         pressed_level: PressedLevel,
         debounce_time: Option<Duration>,
@@ -373,28 +376,37 @@ where
             .spawn(TaskPriority::Low, draw_engine)
     }
 
-    pub fn finish(self) -> error::Result<(impl Future<Output = error::Result<()>>, P)> {
-        let quit = quit::run(self.adapt_bc_receiver_into());
+    pub fn quit(&mut self) -> error::Result<impl Future<Output = error::Result<()>>> {
+        Ok(quit::run(self.adapt_bc_receiver_into()))
+    }
 
-        Ok((quit, self.spawner))
+    pub fn finish(self) -> error::Result<P> {
+        Ok(self.spawner)
     }
 
     fn adapt_bc_sender<Q>(
         &self,
-        adapter: impl Fn(Q) -> Option<BroadcastEvent>,
-    ) -> impl Sender<Data = Q> {
+        adapter: impl Fn(Q) -> Option<BroadcastEvent> + Send + Sync,
+    ) -> impl Sender<Data = Q>
+    where
+        Q: Send,
+    {
         adapt::sender(self.bc_sender.clone(), adapter)
     }
 
     fn adapt_bc_receiver<Q>(
         &self,
-        adapter: impl Fn(BroadcastEvent) -> Option<Q>,
-    ) -> impl Receiver<Data = Q> {
+        adapter: impl Fn(BroadcastEvent) -> Option<Q> + Send + Sync,
+    ) -> impl Receiver<Data = Q>
+    where
+        Q: Send,
+    {
         adapt::receiver(self.bc_receiver.clone(), adapter)
     }
 
-    fn adapt_bc_receiver_into<Q>(&self) -> impl Receiver<Data = Q>
+    fn adapt_bc_receiver_into<Q>(&self) -> impl Receiver<Data = Q> + Send
     where
+        Q: Send,
         Option<Q>: From<BroadcastEvent>,
     {
         self.adapt_bc_receiver(Into::into)
@@ -403,10 +415,10 @@ where
     fn signal<D>(
         &mut self,
         priority: TaskPriority,
-        adapter: impl Fn(D) -> Option<S::Data> + 'a,
-    ) -> error::Result<impl Sender<Data = D> + 'a>
+        adapter: impl Fn(D) -> Option<S::Data> + Send + Sync + 'static,
+    ) -> error::Result<impl Sender<Data = D> + 'static>
     where
-        D: Send + Sync + Clone + 'a,
+        D: Send + Sync + Clone + 'static,
     {
         // let signal_sender = adapt::sender(self.bc_sender(), adapter);
 
@@ -425,7 +437,7 @@ where
     fn spawn(
         &mut self,
         priority: TaskPriority,
-        fut: impl Future<Output = error::Result<()>> + 'a,
+        fut: impl Future<Output = error::Result<()>> + Send + 'static,
     ) -> error::Result<&mut Self> {
         self.spawner.spawn(priority, fut)?;
 

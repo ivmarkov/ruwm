@@ -38,8 +38,8 @@ gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
-embedded-svc = { version = "0.19", features = ["experimental"] }
-edge-frame = "0.1.4"
+embedded-svc = { version = "0.20.2", features = ["experimental"] }
+edge-frame = "0.1.5"
 ruwm = { version = "0.1", path = "../ruwm" }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
