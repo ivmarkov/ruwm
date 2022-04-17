@@ -2,13 +2,13 @@ use esp_idf_svc::executor::asyncs::{local, sendable, EspLocalExecutor, EspSendab
 
 use ruwm::broadcast_binder::{Spawner, TaskPriority};
 
-pub struct ISRCompatibleLocalSpawner<'a> {
+pub struct EspSpawner<'a> {
     high_prio: EspLocalExecutor<'a>,
     med_prio: EspSendableExecutor<'a>,
     low_prio: EspSendableExecutor<'a>,
 }
 
-impl<'a> ISRCompatibleLocalSpawner<'a> {
+impl<'a> EspSpawner<'a> {
     pub fn new(high_prio_tasks: usize, med_prio_tasks: usize, low_prio_tasks: usize) -> Self {
         Self {
             high_prio: local(high_prio_tasks),
@@ -28,7 +28,7 @@ impl<'a> ISRCompatibleLocalSpawner<'a> {
     }
 }
 
-impl<'a> Spawner<'a> for ISRCompatibleLocalSpawner<'a> {
+impl<'a> Spawner<'a> for EspSpawner<'a> {
     fn spawn(
         &mut self,
         priority: TaskPriority,
