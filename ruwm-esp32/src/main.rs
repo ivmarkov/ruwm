@@ -47,7 +47,7 @@ use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
-use crate::espidf::spawner::ISRCompatibleLocalSpawner;
+use crate::espidf::spawner::EspSpawner;
 
 #[cfg(not(feature = "espidf"))]
 use ruwm_std::broadcast;
@@ -115,7 +115,7 @@ fn main() -> error::Result<()> {
             signal::SignalFactory,
             //SmolLocalSpawner::new(smol::LocalExecutor::new()),
             //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
-            ISRCompatibleLocalSpawner::new(64, 64, 64),
+            EspSpawner::new(64, 64, 64),
         );
 
     binder
