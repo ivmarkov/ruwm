@@ -2,7 +2,9 @@ use embedded_svc::mqtt::client::asyncs::MessageId;
 
 use crate::battery::BatteryState;
 use crate::button::ButtonCommand;
+use crate::keepalive::RemainingTime;
 use crate::mqtt::MqttClientNotification;
+use crate::quit::Quit;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web::ConnectionId;
@@ -10,9 +12,6 @@ use crate::web_dto::WebEvent;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct WifiStatus;
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub struct Quit;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct BroadcastEvent {
@@ -53,6 +52,7 @@ pub enum Payload {
 
     WebResponse(ConnectionId, WebEvent),
 
+    RemainingTime(RemainingTime),
     Quit(Quit),
 }
 
@@ -114,6 +114,15 @@ impl From<BroadcastEvent> for Option<WifiStatus> {
     fn from(event: BroadcastEvent) -> Self {
         match event.payload() {
             Payload::WifiStatus(value) => Some(*value),
+            _ => None,
+        }
+    }
+}
+
+impl From<BroadcastEvent> for Option<RemainingTime> {
+    fn from(event: BroadcastEvent) -> Self {
+        match event.payload() {
+            Payload::RemainingTime(value) => Some(*value),
             _ => None,
         }
     }

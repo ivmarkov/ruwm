@@ -38,9 +38,9 @@ pub async fn run_sender(
     mut mqtt: impl Client + Publish,
     mut pubq: impl Sender<Data = MessageId>,
     mut mqtt_status: impl Receiver<Data = MqttClientNotification>,
-    mut valve_status: impl Receiver<Data = Option<ValveState>>,
-    mut wm_status: impl Receiver<Data = WaterMeterState>,
-    mut battery_status: impl Receiver<Data = BatteryState>,
+    mut valve: impl Receiver<Data = Option<ValveState>>,
+    mut wm: impl Receiver<Data = WaterMeterState>,
+    mut battery: impl Receiver<Data = BatteryState>,
 ) -> error::Result<()> {
     let mut connected = false;
 
@@ -61,9 +61,9 @@ pub async fn run_sender(
     loop {
         let (mqtt_state, valve_state, wm_state, battery_state) = {
             let mqtt = mqtt_status.recv().fuse();
-            let valve = valve_status.recv().fuse();
-            let wm = wm_status.recv().fuse();
-            let battery = battery_status.recv().fuse();
+            let valve = valve.recv().fuse();
+            let wm = wm.recv().fuse();
+            let battery = battery.recv().fuse();
 
             pin_mut!(mqtt, valve, wm, battery);
 

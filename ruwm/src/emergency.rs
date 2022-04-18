@@ -5,37 +5,57 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 
 use crate::battery::BatteryState;
 use crate::error;
-use crate::valve::ValveCommand;
+use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
 pub async fn run(
     mut notif: impl Sender<Data = ValveCommand>,
-    mut wm_status: impl Receiver<Data = WaterMeterState>,
-    mut battery_status: impl Receiver<Data = BatteryState>,
+    mut valve: impl Receiver<Data = Option<ValveState>>,
+    mut wm: impl Receiver<Data = WaterMeterState>,
+    mut battery: impl Receiver<Data = BatteryState>,
 ) -> error::Result<()> {
+    let mut valve_state = None;
+
     loop {
-        let wm = wm_status.recv();
-        let battery = battery_status.recv();
+        let valve = valve.recv();
+        let wm = wm.recv();
+        let battery = battery.recv();
 
-        pin_mut!(wm, battery);
+        pin_mut!(valve, wm, battery);
 
-        let emergency_close = match select(wm, battery).await {
-            Either::Left((wm_state, _)) => {
-                let wm_state = wm_state.map_err(error::svc)?;
+        let emergency_close = match select(valve, select(wm, battery)).await {
+            Either::Left((valve, _)) => {
+                let valve = valve.map_err(error::svc)?;
 
-                wm_state.leaking
+                valve_state = valve;
+
+                false
             }
-            Either::Right((battery_state, _)) => {
-                let battery_state = battery_state.map_err(error::svc)?;
+            Either::Right((Either::Left((wm, _)), _)) => {
+                let wm = wm.map_err(error::svc)?;
 
-                battery_state
+                wm.leaking
+            }
+            Either::Right((Either::Right((battery, _)), _)) => {
+                let battery = battery.map_err(error::svc)?;
+
+                let battery_low = battery
                     .voltage
                     .map(|voltage| voltage <= BatteryState::LOW_VOLTAGE)
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+
+                let powered = battery.powered.unwrap_or(false);
+
+                battery_low && !powered
             }
         };
 
-        if emergency_close {
+        if emergency_close
+            && !matches!(
+                valve_state,
+                Some(ValveState::Closing) | Some(ValveState::Closed)
+            )
+        {
             notif.send(ValveCommand::Close).await.map_err(error::svc)?;
         }
     }

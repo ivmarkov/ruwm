@@ -6,6 +6,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use alloc::vec::Vec;
+use embedded_svc::sys_time::SystemTime;
 use embedded_svc::ws;
 
 use embedded_graphics::prelude::RgbColor;
@@ -27,7 +28,9 @@ use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 use crate::web::SenderInfo;
-use crate::{battery, emergency, error, event_logger, mqtt, pipe, quit, valve, water_meter, web};
+use crate::{
+    battery, emergency, error, event_logger, keepalive, mqtt, pipe, quit, valve, water_meter, web,
+};
 use crate::{
     battery::BatteryState,
     broadcast_event::{BroadcastEvent, Payload},
@@ -123,29 +126,49 @@ where
     }
 
     pub fn emergency(&mut self) -> error::Result<&mut Self> {
-        let signal = self.signal(TaskPriority::High, |p| {
-            Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
-        })?;
+        let fut = emergency::run(
+            self.sender_signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("EMERGENCY", Payload::ValveCommand(p)))
+            })?,
+            self.receiver_signal_into(TaskPriority::High)?,
+            self.receiver_signal_into(TaskPriority::High)?,
+            self.receiver_signal_into(TaskPriority::High)?,
+        );
 
-        self.spawn(
-            TaskPriority::High,
-            emergency::run(
-                signal,
-                self.adapt_bc_receiver_into(),
-                self.adapt_bc_receiver_into(),
-            ),
-        )
+        self.spawn(TaskPriority::High, fut)
+    }
+
+    pub fn keepalive(
+        &mut self,
+        system_time: impl SystemTime + Send + 'static,
+    ) -> error::Result<&mut Self> {
+        let fut = keepalive::run(
+            self.bc_receiver.clone(),
+            self.timers.timer()?,
+            system_time,
+            self.sender_signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("KEEPALIVE", Payload::RemainingTime(p)))
+            })?,
+            self.sender_signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("KEEPALIVE", Payload::Quit(p)))
+            })?,
+        );
+
+        self.spawn(TaskPriority::High, fut)
     }
 
     pub fn wifi(
         &mut self,
         wifi: impl Receiver<Data = impl Send + Sync + Clone + 'static> + Send + 'static,
     ) -> error::Result<&mut Self> {
-        let signal = self.signal(TaskPriority::Medium, |_| {
-            Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
-        })?;
+        let fut = pipe::run(
+            wifi,
+            self.sender_signal(TaskPriority::Medium, |_| {
+                Some(BroadcastEvent::new("WIFI", Payload::WifiStatus(WifiStatus)))
+            })?,
+        );
 
-        self.spawn(TaskPriority::Medium, pipe::run(wifi, signal))
+        self.spawn(TaskPriority::Medium, fut)
     }
 
     pub fn web<A, M>(&mut self, web: A) -> error::Result<&mut Self>
@@ -158,13 +181,10 @@ where
         let web_sender = web::run_sender(
             sis.clone(),
             self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
         );
-
-        // TODO: Consider moving the commands to signal_sender for optimization
-        // (coalesce multiple commands of the same type)
 
         let web_receiver = web::run_receiver(
             sis,
@@ -175,10 +195,12 @@ where
                     Payload::WebResponse(connection_id, event),
                 ))
             }),
-            self.adapt_bc_sender(|p| Some(BroadcastEvent::new("WEB", Payload::ValveCommand(p)))),
-            self.adapt_bc_sender(|p| {
+            self.sender_signal(TaskPriority::Medium, |p| {
+                Some(BroadcastEvent::new("WEB", Payload::ValveCommand(p)))
+            })?,
+            self.sender_signal(TaskPriority::Medium, |p| {
                 Some(BroadcastEvent::new("WEB", Payload::WaterMeterCommand(p)))
-            }),
+            })?,
             self.valve_state.clone(),
             self.water_meter_state.clone(),
             self.battery_state.clone(),
@@ -199,8 +221,8 @@ where
 
         let valve_events = valve::run_events(
             self.valve_state.clone(),
-            self.adapt_bc_receiver_into(),
-            self.signal(TaskPriority::High, |p| {
+            self.receiver_signal_into(TaskPriority::High)?,
+            self.sender_signal(TaskPriority::High, |p| {
                 Some(BroadcastEvent::new("VALVE", Payload::ValveState(p)))
             })?,
             vsc_sender,
@@ -224,21 +246,17 @@ where
         &mut self,
         pulse_counter: impl PulseCounter + Send + 'static,
     ) -> error::Result<&mut Self> {
-        let signal = self.signal(TaskPriority::High, |p| {
-            Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
-        })?;
-        let timer = self.timers.timer()?;
+        let fut = water_meter::run(
+            self.water_meter_state.clone(),
+            self.receiver_signal_into(TaskPriority::High)?,
+            self.sender_signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("WM", Payload::WaterMeterState(p)))
+            })?,
+            self.timers.timer()?,
+            pulse_counter,
+        );
 
-        self.spawn(
-            TaskPriority::High,
-            water_meter::run(
-                self.water_meter_state.clone(),
-                self.adapt_bc_receiver_into(),
-                signal,
-                timer,
-                pulse_counter,
-            ),
-        )
+        self.spawn(TaskPriority::High, fut)
     }
 
     pub fn battery<ADC: 'static, BP>(
@@ -250,24 +268,18 @@ where
     where
         BP: adc::Channel<ADC> + Send + 'static,
     {
-        // TODO: Consider moving the state to signal_sender for optimization
-        // (coalesce multiple states)
+        let fut = battery::run(
+            self.battery_state.clone(),
+            self.sender_signal(TaskPriority::High, |p| {
+                Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
+            })?,
+            self.timers.timer()?,
+            one_shot,
+            battery_pin,
+            power_pin,
+        );
 
-        let timer = self.timers.timer()?;
-
-        self.spawn(
-            TaskPriority::High,
-            battery::run(
-                self.battery_state.clone(),
-                self.adapt_bc_sender(|p| {
-                    Some(BroadcastEvent::new("BATTERY", Payload::BatteryState(p)))
-                }),
-                timer,
-                one_shot,
-                battery_pin,
-                power_pin,
-            ),
-        )
+        self.spawn(TaskPriority::High, fut)
     }
 
     pub fn mqtt(
@@ -292,14 +304,11 @@ where
                     Payload::MqttPublishNotification(p),
                 ))
             }),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
         );
-
-        // TODO: Consider moving the commands to signal_sender for optimization
-        // (coalesce multiple commands of the same type)
 
         let mqtt_receiver = mqtt::run_receiver(
             mqtt_connection,
@@ -309,10 +318,12 @@ where
                     Payload::MqttClientNotification(p),
                 ))
             }),
-            self.adapt_bc_sender(|p| Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))),
-            self.adapt_bc_sender(|p| {
+            self.sender_signal(TaskPriority::Medium, |p| {
+                Some(BroadcastEvent::new("MQTT", Payload::ValveCommand(p)))
+            })?,
+            self.sender_signal(TaskPriority::Medium, |p| {
                 Some(BroadcastEvent::new("MQTT", Payload::WaterMeterCommand(p)))
-            }),
+            })?,
         );
 
         self.spawn(TaskPriority::Low, mqtt_sender)?
@@ -335,22 +346,19 @@ where
         // TODO: Consider moving the commands to signal_sender for optimization
         // (coalesce multiple commands of the same type)
 
-        let timer = self.timers.timer()?;
+        let fut = button::run(
+            id,
+            pin_edge,
+            pin,
+            self.timers.timer()?,
+            self.adapt_bc_sender(move |p| {
+                Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
+            }),
+            pressed_level,
+            debounce_time,
+        );
 
-        self.spawn(
-            TaskPriority::High,
-            button::run(
-                id,
-                pin_edge,
-                pin,
-                timer,
-                self.adapt_bc_sender(move |p| {
-                    Some(BroadcastEvent::new(source, Payload::ButtonCommand(p)))
-                }),
-                pressed_level,
-                debounce_time,
-            ),
-        )
+        self.spawn(TaskPriority::High, fut)
     }
 
     pub fn screen(
@@ -361,9 +369,9 @@ where
 
         let screen = screen::run_screen(
             self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
-            self.adapt_bc_receiver_into(),
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
+            self.receiver_signal_into(TaskPriority::Medium)?,
             self.valve_state.get(),
             self.water_meter_state.get(),
             self.battery_state.get(),
@@ -412,7 +420,38 @@ where
         self.adapt_bc_receiver(Into::into)
     }
 
-    fn signal<D>(
+    fn receiver_signal_into<D>(
+        &mut self,
+        priority: TaskPriority,
+    ) -> error::Result<impl Receiver<Data = D> + 'static>
+    where
+        D: Send + Sync + Clone + 'static,
+        Option<D>: From<BroadcastEvent>,
+    {
+        self.receiver_signal(priority, Into::into)
+    }
+
+    fn receiver_signal<D>(
+        &mut self,
+        priority: TaskPriority,
+        adapter: impl Fn(BroadcastEvent) -> Option<D> + Send + Sync + 'static,
+    ) -> error::Result<impl Receiver<Data = D> + 'static>
+    where
+        D: Send + Sync + Clone + 'static,
+    {
+        let (signal_sender, signal_receiver) = self.signal_factory.create()?;
+
+        let receiver = self.bc_receiver.clone();
+
+        self.spawn(
+            priority,
+            pipe::run_transform(receiver, signal_sender, adapter),
+        )?;
+
+        Ok(signal_receiver)
+    }
+
+    fn sender_signal<D>(
         &mut self,
         priority: TaskPriority,
         adapter: impl Fn(D) -> Option<S::Data> + Send + Sync + 'static,
@@ -420,8 +459,6 @@ where
     where
         D: Send + Sync + Clone + 'static,
     {
-        // let signal_sender = adapt::sender(self.bc_sender(), adapter);
-
         let (signal_sender, signal_receiver) = self.signal_factory.create()?;
 
         let sender = self.bc_sender.clone();

@@ -46,41 +46,36 @@ impl Page {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct DrawRequest {
     active_page: Page,
-    valve_state: Option<ValveState>,
-    water_meter_state: WaterMeterState,
-    battery_state: BatteryState,
+    valve: Option<ValveState>,
+    wm: WaterMeterState,
+    battery: BatteryState,
 }
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_screen(
     mut button_command: impl Receiver<Data = ButtonCommand>,
-    mut valve_state_updates: impl Receiver<Data = Option<ValveState>>,
-    mut water_meter_state_updates: impl Receiver<Data = WaterMeterState>,
-    mut battery_meter_state_updates: impl Receiver<Data = BatteryState>,
+    mut valve: impl Receiver<Data = Option<ValveState>>,
+    mut wm: impl Receiver<Data = WaterMeterState>,
+    mut battery: impl Receiver<Data = BatteryState>,
     valve_state: Option<ValveState>,
-    water_meter_state: WaterMeterState,
+    wm_state: WaterMeterState,
     battery_state: BatteryState,
     mut draw_engine: impl Sender<Data = DrawRequest>,
 ) -> error::Result<()> {
     let mut screen_state = DrawRequest {
         active_page: Page::Summary,
-        valve_state,
-        water_meter_state,
-        battery_state,
+        valve: valve_state,
+        wm: wm_state,
+        battery: battery_state,
     };
 
     loop {
         let command = button_command.recv().fuse();
-        let valve_state_updates = valve_state_updates.recv().fuse();
-        let water_meter_state_updates = water_meter_state_updates.recv().fuse();
-        let battery_meter_state_updates = battery_meter_state_updates.recv().fuse();
+        let valve = valve.recv().fuse();
+        let wm = wm.recv().fuse();
+        let battery = battery.recv().fuse();
 
-        pin_mut!(
-            command,
-            valve_state_updates,
-            water_meter_state_updates,
-            battery_meter_state_updates
-        );
+        pin_mut!(command, valve, wm, battery);
 
         let draw_request = select! {
             command = command => DrawRequest {
@@ -92,16 +87,16 @@ pub async fn run_screen(
                 },
                 ..screen_state
             },
-            valve_state = valve_state_updates => DrawRequest {
-                valve_state: valve_state.map_err(error::svc)?,
+            valve = valve => DrawRequest {
+                valve: valve.map_err(error::svc)?,
                 ..screen_state
             },
-            water_meter_state = water_meter_state_updates => DrawRequest {
-                water_meter_state: water_meter_state.map_err(error::svc)?,
+            wm = wm => DrawRequest {
+                wm: wm.map_err(error::svc)?,
                 ..screen_state
             },
-            battery_state = battery_meter_state_updates => DrawRequest {
-                battery_state: battery_state.map_err(error::svc)?,
+            battery = battery => DrawRequest {
+                battery: battery.map_err(error::svc)?,
                 ..screen_state
             }
         };
@@ -162,9 +157,9 @@ where
                     drawable
                         .draw(
                             &mut display,
-                            draw_request.valve_state,
-                            draw_request.water_meter_state,
-                            draw_request.battery_state,
+                            draw_request.valve,
+                            draw_request.wm,
+                            draw_request.battery,
                         )
                         .map_err(error::debug)?;
                     break;
@@ -175,7 +170,7 @@ where
             Page::Battery => {
                 if let Some(PageDrawable::Battery(drawable)) = &mut page_drawable {
                     drawable
-                        .draw(&mut display, draw_request.battery_state)
+                        .draw(&mut display, draw_request.battery)
                         .map_err(error::debug)?;
                     break;
                 } else {

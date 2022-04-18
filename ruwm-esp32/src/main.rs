@@ -33,6 +33,7 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
+use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::wifi::EspWifi;
 
 use edge_frame::assets::serve::*;
@@ -121,6 +122,7 @@ fn main() -> error::Result<()> {
     binder
         .event_logger()?
         .emergency()?
+        .keepalive(EspSystemTime)?
         .wifi(wifi.as_async().subscribe()?)?
         .valve(
             peripherals.pins.gpio10.into_output()?,

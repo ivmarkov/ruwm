@@ -56,7 +56,7 @@ pub async fn run_receiver<A>(
     mut ws_acceptor: A,
     mut sender: impl Sender<Data = (ConnectionId, WebEvent)>,
     mut valve_command: impl Sender<Data = ValveCommand>,
-    mut water_meter_command: impl Sender<Data = WaterMeterCommand>,
+    mut wm_command: impl Sender<Data = WaterMeterCommand>,
     valve_state: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: StateSnapshot<impl Mutex<Data = BatteryState>>,
@@ -146,7 +146,7 @@ where
                         request,
                         &mut sender,
                         &mut valve_command,
-                        &mut water_meter_command,
+                        &mut wm_command,
                         &valve_state,
                         &water_meter_state,
                         &battery_state,
@@ -169,26 +169,26 @@ where
 pub async fn run_sender<A>(
     sis: Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
     mut receiver: impl Receiver<Data = (ConnectionId, WebEvent)>,
-    mut valve_state: impl Receiver<Data = Option<ValveState>>,
-    mut water_meter_state: impl Receiver<Data = WaterMeterState>,
-    mut battery_state: impl Receiver<Data = BatteryState>,
+    mut valve: impl Receiver<Data = Option<ValveState>>,
+    mut wm: impl Receiver<Data = WaterMeterState>,
+    mut battery: impl Receiver<Data = BatteryState>,
 ) -> error::Result<()>
 where
     A: Acceptor,
 {
     loop {
         let receiver = receiver.recv().fuse();
-        let valve_state = valve_state.recv().fuse();
-        let water_meter_state = water_meter_state.recv().fuse();
-        let battery_state = battery_state.recv().fuse();
+        let valve = valve.recv().fuse();
+        let wm = wm.recv().fuse();
+        let battery = battery.recv().fuse();
 
-        pin_mut!(receiver, valve_state, water_meter_state, battery_state);
+        pin_mut!(receiver, valve, wm, battery);
 
         select! {
             state = receiver => { let (id, event) = state?; web_send_single(&sis, id, &event).await?; },
-            state = valve_state => web_send_all(&sis, &WebEvent::ValveState(state?)).await?,
-            state = water_meter_state => web_send_all(&sis, &WebEvent::WaterMeterState(state?)).await?,
-            state = battery_state => web_send_all(&sis, &WebEvent::BatteryState(state?)).await?,
+            state = valve => web_send_all(&sis, &WebEvent::ValveState(state?)).await?,
+            state = wm => web_send_all(&sis, &WebEvent::WaterMeterState(state?)).await?,
+            state = battery => web_send_all(&sis, &WebEvent::BatteryState(state?)).await?,
         }
     }
 }
@@ -201,7 +201,7 @@ async fn process_request<A>(
     request: &WebRequest,
     sender: &mut impl Sender<Data = (ConnectionId, WebEvent)>,
     valve_command: &mut impl Sender<Data = ValveCommand>,
-    water_meter_command: &mut impl Sender<Data = WaterMeterCommand>,
+    wm_command: &mut impl Sender<Data = WaterMeterCommand>,
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
@@ -254,9 +254,7 @@ where
                     .send((connection_id, WebEvent::ValveState(valve_state.get())))
                     .await?
             }
-            WebRequestPayload::WaterMeterCommand(command) => {
-                water_meter_command.send(*command).await?
-            }
+            WebRequestPayload::WaterMeterCommand(command) => wm_command.send(*command).await?,
             WebRequestPayload::WaterMeterStateRequest => {
                 sender
                     .send((
