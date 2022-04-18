@@ -13,6 +13,8 @@ use embedded_svc::timer::asyncs::OnceTimer;
 use crate::error;
 use crate::state_snapshot::StateSnapshot;
 
+const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BatteryState {
     pub prev_voltage: Option<u16>,
@@ -44,7 +46,11 @@ where
             .await
             .map_err(error::svc)?;
 
-        let voltage = one_shot.read(&mut battery_pin).ok();
+        let voltage = Some(100);
+        // let voltage = one_shot
+        //     .read(&mut battery_pin)
+        //     .ok()
+        //     .map(|voltage| voltage / ROUND_UP * ROUND_UP);
         //.map_err(error::wrap_display)?; TODO
 
         let powered = Some(power_pin.is_high().map_err(error::hal)?);

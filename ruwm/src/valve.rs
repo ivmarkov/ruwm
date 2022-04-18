@@ -18,6 +18,8 @@ use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 
+pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValveState {
     Open,
@@ -102,28 +104,17 @@ pub async fn run_spin(
     let mut current_command: Option<ValveCommand> = None;
 
     loop {
-        match current_command {
-            Some(ValveCommand::Open) => {
-                close_pin.set_low().map_err(error::hal)?;
-                open_pin.set_high().map_err(error::hal)?;
-                power_pin.set_high().map_err(error::hal)?;
-            }
-            Some(ValveCommand::Close) => {
-                open_pin.set_low().map_err(error::hal)?;
-                close_pin.set_high().map_err(error::hal)?;
-                power_pin.set_high().map_err(error::hal)?;
-            }
-            None => {
-                power_pin.set_low().map_err(error::hal)?;
-                open_pin.set_low().map_err(error::hal)?;
-                close_pin.set_low().map_err(error::hal)?;
-            }
-        };
+        start_run(
+            current_command,
+            &mut close_pin,
+            &mut open_pin,
+            &mut power_pin,
+        )?;
 
         let command = command.recv();
 
         let timer = if current_command.is_some() {
-            Either::Left(once.after(Duration::from_secs(20)).map_err(error::svc)?)
+            Either::Left(once.after(VALVE_TURN_DELAY).map_err(error::svc)?)
         } else {
             Either::Right(pending())
         };
@@ -140,4 +131,31 @@ pub async fn run_spin(
             }
         }
     }
+}
+
+pub fn start_run(
+    command: Option<ValveCommand>,
+    power_pin: &mut impl OutputPin<Error = impl error::HalError>,
+    open_pin: &mut impl OutputPin<Error = impl error::HalError>,
+    close_pin: &mut impl OutputPin<Error = impl error::HalError>,
+) -> error::Result<()> {
+    match command {
+        Some(ValveCommand::Open) => {
+            close_pin.set_low().map_err(error::hal)?;
+            open_pin.set_high().map_err(error::hal)?;
+            power_pin.set_high().map_err(error::hal)?;
+        }
+        Some(ValveCommand::Close) => {
+            open_pin.set_low().map_err(error::hal)?;
+            close_pin.set_high().map_err(error::hal)?;
+            power_pin.set_high().map_err(error::hal)?;
+        }
+        None => {
+            power_pin.set_low().map_err(error::hal)?;
+            open_pin.set_low().map_err(error::hal)?;
+            close_pin.set_low().map_err(error::hal)?;
+        }
+    };
+
+    Ok(())
 }

@@ -21,7 +21,7 @@ use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
 
-use esp_idf_hal::gpio::{self, InterruptType, Output, Pull};
+use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
@@ -38,13 +38,15 @@ use esp_idf_svc::wifi::EspWifi;
 
 use edge_frame::assets::serve::*;
 
+use esp_idf_sys::esp;
 use pulse_counter::PulseCounter;
 
-use ruwm::broadcast_binder;
 use ruwm::button::PressedLevel;
 use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
+use ruwm::valve::ValveCommand;
+use ruwm::{broadcast_binder, valve};
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
@@ -66,12 +68,36 @@ const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
+const SLEEP_TIME: Duration = Duration::from_secs(30);
+
 type PinSignal = AtomicSignal<AtomicOption, ()>;
 
 fn main() -> error::Result<()> {
+    let wakeup_reason = get_sleep_wakeup_reason()?;
+
     init()?;
 
+    log::info!("Wakeup reason: {:?}", wakeup_reason);
+
     let peripherals = Peripherals::take().unwrap();
+
+    let mut valve_power_pin = peripherals.pins.gpio10.into_output()?;
+    let mut valve_open_pin = peripherals.pins.gpio12.into_output()?;
+    let mut valve_close_pin = peripherals.pins.gpio13.into_output()?;
+
+    if wakeup_reason == SleepWakeupCause::ULP {
+        emergency_valve_close(
+            &mut valve_power_pin,
+            &mut valve_open_pin,
+            &mut valve_close_pin,
+        )?;
+    }
+
+    let button1_pin = peripherals.pins.gpio35;
+    let button2_pin = peripherals.pins.gpio0;
+    let button3_pin = peripherals.pins.gpio27;
+
+    mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
     let unblocker = blocking_unblocker();
 
@@ -124,11 +150,7 @@ fn main() -> error::Result<()> {
         .emergency()?
         .keepalive(EspSystemTime)?
         .wifi(wifi.as_async().subscribe()?)?
-        .valve(
-            peripherals.pins.gpio10.into_output()?,
-            peripherals.pins.gpio12.into_output()?,
-            peripherals.pins.gpio13.into_output()?,
-        )?
+        .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
         .battery(
             adc::PoweredAdc::new(
                 peripherals.adc1,
@@ -145,9 +167,7 @@ fn main() -> error::Result<()> {
                 let signal = Arc::new(PinSignal::new());
 
                 (signal_adapt::into_receiver(signal.clone()), unsafe {
-                    peripherals
-                        .pins
-                        .gpio35
+                    button1_pin
                         .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
                 })
             },
@@ -163,9 +183,7 @@ fn main() -> error::Result<()> {
                 (
                     signal_adapt::into_receiver(signal.clone()),
                     unsafe {
-                        peripherals
-                            .pins
-                            .gpio0
+                        button2_pin
                             .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
                     }
                     .into_pull_up()?,
@@ -183,9 +201,7 @@ fn main() -> error::Result<()> {
                 (
                     signal_adapt::into_receiver(signal.clone()),
                     unsafe {
-                        peripherals
-                            .pins
-                            .gpio27
+                        button3_pin
                             .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
                     }
                     .into_pull_up()?,
@@ -235,7 +251,9 @@ fn main() -> error::Result<()> {
 
     log::info!("Finished execution");
 
-    Ok(())
+    sleep()?;
+
+    unreachable!()
 }
 
 fn init() -> error::Result<()> {
@@ -244,13 +262,77 @@ fn init() -> error::Result<()> {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    esp_idf_sys::esp!(unsafe {
+    esp!(unsafe {
         #[allow(clippy::needless_update)]
         esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
             max_fds: 5,
             ..Default::default()
         })
     })?;
+
+    Ok(())
+}
+
+fn emergency_valve_close(
+    power_pin: &mut impl OutputPin<Error = impl error::HalError>,
+    open_pin: &mut impl OutputPin<Error = impl error::HalError>,
+    close_pin: &mut impl OutputPin<Error = impl error::HalError>,
+) -> error::Result<()> {
+    log::error!("Start: emergency closing valve due to ULP wakeup...");
+
+    valve::start_run(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
+    std::thread::sleep(valve::VALVE_TURN_DELAY);
+
+    log::error!("End: emergency closing valve due to ULP wakeup");
+
+    Ok(())
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum SleepWakeupCause {
+    Unknown,
+    ULP,
+    Button,
+    Timer,
+    Other(u32),
+}
+
+fn get_sleep_wakeup_reason() -> error::Result<SleepWakeupCause> {
+    Ok(match unsafe { esp_idf_sys::esp_sleep_get_wakeup_cause() } {
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED => SleepWakeupCause::Unknown,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => SleepWakeupCause::Button,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_COCPU => SleepWakeupCause::ULP,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => SleepWakeupCause::Timer,
+        other => SleepWakeupCause::Other(other),
+    })
+}
+
+fn mark_wakeup_pins(
+    button1_pin: &impl RTCPin,
+    button2_pin: &impl RTCPin,
+    button3_pin: &impl RTCPin,
+) -> error::Result<()> {
+    unsafe {
+        esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+            1 << button1_pin.pin(),
+            //| (1 << button2_pin.pin())
+            //| (1 << button3_pin.pin())
+            esp_idf_sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
+        ))?;
+    }
+
+    Ok(())
+}
+
+fn sleep() -> error::Result<()> {
+    unsafe {
+        esp!(esp_idf_sys::esp_sleep_enable_ulp_wakeup())?;
+        esp!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
+            SLEEP_TIME.as_micros() as u64
+        ))?;
+
+        esp_idf_sys::esp_deep_sleep_start();
+    }
 
     Ok(())
 }
