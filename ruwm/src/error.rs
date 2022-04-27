@@ -25,6 +25,7 @@ pub fn debug(e: impl Debug) -> Error {
     anyhow::anyhow!("Error: {:?}", e)
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! check {
     ($result:expr) => {
@@ -38,6 +39,7 @@ macro_rules! check {
     };
 }
 
+#[macro_export]
 #[allow(unused_macros)]
 macro_rules! checkd {
     ($result:expr) => {
@@ -52,7 +54,7 @@ macro_rules! checkd {
 }
 
 #[allow(unused_imports)]
-pub(crate) use check;
+pub use check;
 
 #[allow(unused_imports)]
-pub(crate) use checkd;
+pub use checkd;

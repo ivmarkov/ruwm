@@ -29,7 +29,7 @@ pub async fn run(
     mut notif: impl Sender<Data = RemainingTime>,
     mut quit: impl Sender<Data = Quit>,
 ) -> error::Result<()> {
-    let mut quit_time = None;
+    let mut quit_time = Some(system_time.now() + TIMEOUT);
     let mut quit_time_sent = None;
 
     loop {
@@ -53,7 +53,7 @@ pub async fn run(
                 | Payload::WaterMeterState(_)
                 | Payload::ButtonCommand(_)
                 | Payload::MqttClientNotification(_)
-                | Payload::WebResponse(_, _) => quit_time.is_some().then(|| now + TIMEOUT),
+                | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
                 Payload::BatteryState(battery_state) => {
                     battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
                 }

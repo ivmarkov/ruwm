@@ -22,14 +22,14 @@ use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
-use esp_idf_hal::mutex::Mutex;
+use esp_idf_hal::mutex::{Mutex, MutexSignalFamily};
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
-use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
+use esp_idf_svc::mqtt::client::{EspMqttAsyncClient, EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
@@ -42,11 +42,11 @@ use esp_idf_sys::esp;
 use pulse_counter::PulseCounter;
 
 use ruwm::button::PressedLevel;
-use ruwm::error;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::ValveCommand;
 use ruwm::{broadcast_binder, valve};
+use ruwm::{checkd, error};
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
@@ -55,7 +55,6 @@ use crate::espidf::spawner::EspSpawner;
 #[cfg(not(feature = "espidf"))]
 use ruwm_std::broadcast;
 
-use crate::espidf::signal;
 use crate::espidf::timer;
 
 mod espidf;
@@ -79,13 +78,21 @@ fn main() -> error::Result<()> {
 
     log::info!("Wakeup reason: {:?}", wakeup_reason);
 
+    error::check!(run(wakeup_reason));
+
+    sleep()?;
+
+    unreachable!()
+}
+
+fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     let peripherals = Peripherals::take().unwrap();
 
     let mut valve_power_pin = peripherals.pins.gpio10.into_output()?;
     let mut valve_open_pin = peripherals.pins.gpio12.into_output()?;
     let mut valve_close_pin = peripherals.pins.gpio13.into_output()?;
 
-    if wakeup_reason == SleepWakeupCause::ULP {
+    if wakeup_reason == SleepWakeupReason::ULP {
         emergency_valve_close(
             &mut valve_power_pin,
             &mut valve_open_pin,
@@ -134,126 +141,138 @@ fn main() -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    let mut binder =
-        broadcast_binder::BroadcastBinder::<_, Mutex<_>, Mutex<_>, Mutex<_>, _, _, _, _, _>::new(
+    {
+        let mut binder = broadcast_binder::BroadcastBinder::<
+            MutexSignalFamily,
+            Mutex<_>,
+            Mutex<_>,
+            Mutex<_>,
+            _,
+            _,
+            _,
+            _,
+            _,
+        >::new(
             unblocker.clone(),
             broadcast,
             timer::timers()?,
-            signal::SignalFactory,
-            //SmolLocalSpawner::new(smol::LocalExecutor::new()),
-            //FuturesLocalSpawner::new(futures::executor::LocalPool::new()),
             EspSpawner::new(64, 64, 64),
         );
 
-    binder
-        .event_logger()?
-        .emergency()?
-        .keepalive(EspSystemTime)?
-        .wifi(wifi.as_async().subscribe()?)?
-        .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
-        .battery(
-            adc::PoweredAdc::new(
-                peripherals.adc1,
-                adc::config::Config::new().calibration(true),
-            )?,
-            peripherals.pins.gpio33.into_analog_atten_11db()?,
-            peripherals.pins.gpio14.into_input()?,
-        )?
-        .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
-        .button(
-            1,
-            "BUTTON1",
-            {
-                let signal = Arc::new(PinSignal::new());
+        binder
+            .event_logger()?
+            .emergency()?
+            .keepalive(EspSystemTime)?
+            .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
+            .battery(
+                adc::PoweredAdc::new(
+                    peripherals.adc1,
+                    adc::config::Config::new().calibration(true),
+                )?,
+                peripherals.pins.gpio33.into_analog_atten_11db()?,
+                peripherals.pins.gpio14.into_input()?,
+            )?
+            .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
+            .button(
+                1,
+                "BUTTON1",
+                {
+                    let signal = Arc::new(PinSignal::new());
 
-                (signal_adapt::into_receiver(signal.clone()), unsafe {
-                    button1_pin
-                        .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                })
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(50)),
-        )?
-        .button(
-            2,
-            "BUTTON2",
-            {
-                let signal = Arc::new(PinSignal::new());
-
-                (
-                    signal_adapt::into_receiver(signal.clone()),
-                    unsafe {
-                        button2_pin
+                    (signal_adapt::into_receiver(signal.clone()), unsafe {
+                        button1_pin
                             .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                    }
-                    .into_pull_up()?,
-                )
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(50)),
-        )?
-        .button(
-            3,
-            "BUTTON3",
-            {
-                let signal = Arc::new(PinSignal::new());
-
-                (
-                    signal_adapt::into_receiver(signal.clone()),
-                    unsafe {
-                        button3_pin
-                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                    }
-                    .into_pull_up()?,
-                )
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(20)),
-        )?
-        .screen(display(
-            peripherals.pins.gpio4.into_output()?.degrade(),
-            peripherals.pins.gpio16.into_output()?.degrade(),
-            peripherals.pins.gpio23.into_output()?.degrade(),
-            peripherals.spi2,
-            peripherals.pins.gpio18.into_output()?.degrade(),
-            peripherals.pins.gpio19.into_output()?.degrade(),
-            Some(peripherals.pins.gpio5.into_output()?.degrade()),
-        )?)?
-        .mqtt(
-            client_id,
-            EspMqttClient::new_async(
-                unblocker,
-                "mqtt://broker.emqx.io:1883",
-                MqttClientConfiguration {
-                    client_id: Some(client_id),
-                    ..Default::default()
+                    })
                 },
-            )?,
-        )?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
+                PressedLevel::Low,
+                Some(Duration::from_millis(50)),
+            )?
+            .button(
+                2,
+                "BUTTON2",
+                {
+                    let signal = Arc::new(PinSignal::new());
 
-    let (hquit, mquit, lquit) = (binder.quit()?, binder.quit()?, binder.quit()?);
+                    (
+                        signal_adapt::into_receiver(signal.clone()),
+                        unsafe {
+                            button2_pin.into_subscribed(
+                                move || signal.signal(()),
+                                InterruptType::NegEdge,
+                            )?
+                        }
+                        .into_pull_up()?,
+                    )
+                },
+                PressedLevel::Low,
+                Some(Duration::from_millis(50)),
+            )?
+            .button(
+                3,
+                "BUTTON3",
+                {
+                    let signal = Arc::new(PinSignal::new());
 
-    let (mut high, mut mid, mut low) = binder.finish()?.release();
+                    (
+                        signal_adapt::into_receiver(signal.clone()),
+                        unsafe {
+                            button3_pin.into_subscribed(
+                                move || signal.signal(()),
+                                InterruptType::NegEdge,
+                            )?
+                        }
+                        .into_pull_up()?,
+                    )
+                },
+                PressedLevel::Low,
+                Some(Duration::from_millis(20)),
+            )?
+            .screen(display(
+                peripherals.pins.gpio4.into_output()?.degrade(),
+                peripherals.pins.gpio16.into_output()?.degrade(),
+                peripherals.pins.gpio23.into_output()?.degrade(),
+                peripherals.spi2,
+                peripherals.pins.gpio18.into_output()?.degrade(),
+                peripherals.pins.gpio19.into_output()?.degrade(),
+                Some(peripherals.pins.gpio5.into_output()?.degrade()),
+            )?)?
+            .wifi(wifi.as_async().subscribe()?)?
+            .mqtt(
+                client_id,
+                EspMqttAsyncClient::new(
+                    unblocker,
+                    "mqtt://broker.emqx.io:1883",
+                    MqttClientConfiguration {
+                        client_id: Some(client_id),
+                        ..Default::default()
+                    },
+                )?,
+            )?
+            .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
-    log::info!("Starting execution");
+        let (hquit, mquit, lquit) = (
+            binder.quit(broadcast_binder::TaskPriority::High)?,
+            binder.quit(broadcast_binder::TaskPriority::Medium)?,
+            binder.quit(broadcast_binder::TaskPriority::Low)?,
+        );
 
-    let (hquit, mquit, lquit) = (high.spawn(hquit), mid.spawn(mquit), low.spawn(lquit));
+        let ((mut high, mut high_tasks), (mut mid, mut mid_tasks), (mut low, mut low_tasks)) =
+            binder.finish()?.release();
 
-    let med = std::thread::spawn(move || mid.run(mquit));
-    let low = std::thread::spawn(move || low.run(lquit));
+        log::info!("Starting execution");
 
-    let (hres, mres, lres) = (high.run(hquit), med.join(), low.join());
+        // let med = std::thread::spawn(move || mid.run(mquit, Some(mid_tasks)));
+        // let low = std::thread::spawn(move || low.run(lquit, Some(low_tasks)));
 
-    hres?;
-    // mres?;
-    // lres?;
+        high.run(hquit, Some(high_tasks));
 
-    log::info!("Finished execution");
+        // checkd!(med.join());
+        // checkd!(low.join());
 
-    sleep()?;
+        log::info!("Finished execution");
+    }
 
-    unreachable!()
+    Ok(())
 }
 
 fn init() -> error::Result<()> {
@@ -282,6 +301,7 @@ fn emergency_valve_close(
 
     valve::start_run(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
     std::thread::sleep(valve::VALVE_TURN_DELAY);
+    valve::start_run(None, power_pin, open_pin, close_pin)?;
 
     log::error!("End: emergency closing valve due to ULP wakeup");
 
@@ -289,7 +309,7 @@ fn emergency_valve_close(
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-enum SleepWakeupCause {
+enum SleepWakeupReason {
     Unknown,
     ULP,
     Button,
@@ -297,13 +317,13 @@ enum SleepWakeupCause {
     Other(u32),
 }
 
-fn get_sleep_wakeup_reason() -> error::Result<SleepWakeupCause> {
+fn get_sleep_wakeup_reason() -> error::Result<SleepWakeupReason> {
     Ok(match unsafe { esp_idf_sys::esp_sleep_get_wakeup_cause() } {
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED => SleepWakeupCause::Unknown,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => SleepWakeupCause::Button,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_COCPU => SleepWakeupCause::ULP,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => SleepWakeupCause::Timer,
-        other => SleepWakeupCause::Other(other),
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED => SleepWakeupReason::Unknown,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => SleepWakeupReason::Button,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_COCPU => SleepWakeupReason::ULP,
+        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => SleepWakeupReason::Timer,
+        other => SleepWakeupReason::Other(other),
     })
 }
 
@@ -330,6 +350,8 @@ fn sleep() -> error::Result<()> {
         esp!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
             SLEEP_TIME.as_micros() as u64
         ))?;
+
+        log::info!("Going to sleep");
 
         esp_idf_sys::esp_deep_sleep_start();
     }

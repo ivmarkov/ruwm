@@ -266,7 +266,7 @@ pub async fn run_receiver(
     let mut message_parser = MessageParser::new();
 
     loop {
-        let (incoming, mp) = connection
+        let message = connection
             .next(move |result| {
                 let result = result
                     .as_ref()
@@ -277,34 +277,39 @@ pub async fn run_receiver(
 
                 (result, message_parser)
             })
-            .await
-            .unwrap();
+            .await;
 
-        message_parser = mp;
-        mqtt_notif.send(incoming).await.map_err(error::svc)?;
+        if let Some((incoming, mp)) = message {
+            message_parser = mp;
+            mqtt_notif.send(incoming).await.map_err(error::svc)?;
 
-        if let Ok(Event::Received(Some(cmd))) = incoming {
-            match cmd {
-                MqttCommand::Valve(open) => valve_command
-                    .send(if open {
-                        ValveCommand::Open
-                    } else {
-                        ValveCommand::Close
-                    })
-                    .await
-                    .map_err(error::svc)?,
-                MqttCommand::FlowWatch(enable) => wm_command
-                    .send(if enable {
-                        WaterMeterCommand::Arm
-                    } else {
-                        WaterMeterCommand::Disarm
-                    })
-                    .await
-                    .map_err(error::svc)?,
-                _ => (),
+            if let Ok(Event::Received(Some(cmd))) = incoming {
+                match cmd {
+                    MqttCommand::Valve(open) => valve_command
+                        .send(if open {
+                            ValveCommand::Open
+                        } else {
+                            ValveCommand::Close
+                        })
+                        .await
+                        .map_err(error::svc)?,
+                    MqttCommand::FlowWatch(enable) => wm_command
+                        .send(if enable {
+                            WaterMeterCommand::Arm
+                        } else {
+                            WaterMeterCommand::Disarm
+                        })
+                        .await
+                        .map_err(error::svc)?,
+                    _ => (),
+                }
             }
+        } else {
+            break;
         }
     }
+
+    Ok(())
 }
 
 #[derive(Default)]

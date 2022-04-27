@@ -1,12 +1,15 @@
 use core::fmt::Debug;
 use core::future::Future;
+use core::marker::PhantomData;
 use core::time::Duration;
 
 extern crate alloc;
-use alloc::string::String;
-
+use alloc::sync::Arc;
 use alloc::vec::Vec;
+
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
+use embedded_svc::utils::asyncs::signal;
 use embedded_svc::ws;
 
 use embedded_graphics::prelude::RgbColor;
@@ -40,19 +43,6 @@ use crate::{
     water_meter::WaterMeterState,
 };
 
-pub trait SignalFactory<'a> {
-    type Sender<D>: Sender<Data = D> + Send
-    where
-        D: Send + 'a;
-    type Receiver<D>: Receiver<Data = D> + Send
-    where
-        D: Send + 'a;
-
-    fn create<D>(&mut self) -> error::Result<(Self::Sender<D>, Self::Receiver<D>)>
-    where
-        D: Send + Clone + 'a;
-}
-
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TaskPriority {
     High,
@@ -68,40 +58,40 @@ pub trait Spawner<'a> {
     ) -> error::Result<()>;
 }
 
-pub struct BroadcastBinder<U, MV, MW, MB, S, R, T, N, P> {
+pub struct BroadcastBinder<N, MV, MW, MB, U, S, R, T, P> {
+    _signal_family: PhantomData<N>,
+    valve_state: StateSnapshot<MV>,
+    water_meter_state: StateSnapshot<MW>,
+    battery_state: StateSnapshot<MB>,
     unblocker: U,
     bc_sender: S,
     bc_receiver: R,
     timers: T,
-    signal_factory: N,
-    valve_state: StateSnapshot<MV>,
-    water_meter_state: StateSnapshot<MW>,
-    battery_state: StateSnapshot<MB>,
     spawner: P,
 }
 
-impl<'a, U, MV, MW, MB, S, R, T, N, P> BroadcastBinder<U, MV, MW, MB, S, R, T, N, P>
+impl<'a, N, MV, MW, MB, U, S, R, T, P> BroadcastBinder<N, MV, MW, MB, U, S, R, T, P>
 where
-    U: Unblocker + Clone + Send + Sync + 'static,
+    N: SendSyncSignalFamily + 'static,
     MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'static,
     MW: Mutex<Data = WaterMeterState> + Send + Sync + 'static,
     MB: Mutex<Data = BatteryState> + Send + Sync + 'static,
+    U: Unblocker + Clone + Send + Sync + 'static,
     S: Sender<Data = BroadcastEvent> + Clone + Send + 'static,
     R: Receiver<Data = BroadcastEvent> + Clone + Send + 'static,
     T: TimerService + 'static,
-    N: SignalFactory<'static> + 'static,
     P: Spawner<'static> + 'static,
 {
-    pub fn new(unblocker: U, broadcast: (S, R), timers: T, signal_factory: N, spawner: P) -> Self {
+    pub fn new(unblocker: U, broadcast: (S, R), timers: T, spawner: P) -> Self {
         Self {
+            _signal_family: PhantomData,
+            valve_state: StateSnapshot::<MV>::new(),
+            water_meter_state: StateSnapshot::<MW>::new(),
+            battery_state: StateSnapshot::<MB>::new(),
             unblocker,
             bc_sender: broadcast.0,
             bc_receiver: broadcast.1,
             timers,
-            signal_factory,
-            valve_state: StateSnapshot::<MV>::new(),
-            water_meter_state: StateSnapshot::<MW>::new(),
-            battery_state: StateSnapshot::<MB>::new(),
             spawner,
         }
     }
@@ -216,8 +206,8 @@ where
         open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
     ) -> error::Result<&mut Self> {
-        let (vsc_sender, vsc_receiver) = self.signal_factory.create()?;
-        let (vsn_sender, vsn_receiver) = self.signal_factory.create()?;
+        let (vsc_sender, vsc_receiver) = self.signal()?;
+        let (vsn_sender, vsn_receiver) = self.signal()?;
 
         let valve_events = valve::run_events(
             self.valve_state.clone(),
@@ -284,7 +274,7 @@ where
 
     pub fn mqtt(
         &mut self,
-        topic_prefix: impl Into<String>,
+        topic_prefix: impl AsRef<str> + Send + 'static,
         mqtt: (
             impl Client + Publish + Send + 'static,
             impl Connection + Send + 'static,
@@ -296,7 +286,7 @@ where
         // when it is full
 
         let mqtt_sender = mqtt::run_sender(
-            topic_prefix.into(),
+            topic_prefix,
             mqtt_client,
             self.adapt_bc_sender(|p| {
                 Some(BroadcastEvent::new(
@@ -365,7 +355,7 @@ where
         &mut self,
         display: impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + Send + 'static,
     ) -> error::Result<&mut Self> {
-        let (de_sender, de_receiver) = self.signal_factory.create()?;
+        let (de_sender, de_receiver) = self.signal()?;
 
         let screen = screen::run_screen(
             self.adapt_bc_receiver_into(),
@@ -384,38 +374,50 @@ where
             .spawn(TaskPriority::Low, draw_engine)
     }
 
-    pub fn quit(&mut self) -> error::Result<impl Future<Output = error::Result<()>>> {
-        Ok(quit::run(self.adapt_bc_receiver_into()))
+    pub fn quit(&mut self, priority: TaskPriority) -> error::Result<impl Fn() -> bool> {
+        let signal = Arc::new(N::Signal::<()>::new());
+
+        {
+            let signal = signal.clone();
+            let quit = quit::run(
+                self.adapt_bc_receiver_into(),
+                signal::adapt::into_sender(signal),
+            );
+
+            self.spawn(priority, quit)?;
+        }
+
+        Ok(move || signal.try_get().is_some())
     }
 
     pub fn finish(self) -> error::Result<P> {
         Ok(self.spawner)
     }
 
-    fn adapt_bc_sender<Q>(
+    fn adapt_bc_sender<D>(
         &self,
-        adapter: impl Fn(Q) -> Option<BroadcastEvent> + Send + Sync,
-    ) -> impl Sender<Data = Q>
+        adapter: impl Fn(D) -> Option<BroadcastEvent> + Send + Sync,
+    ) -> impl Sender<Data = D>
     where
-        Q: Send,
+        D: Send,
     {
         adapt::sender(self.bc_sender.clone(), adapter)
     }
 
-    fn adapt_bc_receiver<Q>(
+    fn adapt_bc_receiver<D>(
         &self,
-        adapter: impl Fn(BroadcastEvent) -> Option<Q> + Send + Sync,
-    ) -> impl Receiver<Data = Q>
+        adapter: impl Fn(BroadcastEvent) -> Option<D> + Send + Sync,
+    ) -> impl Receiver<Data = D>
     where
-        Q: Send,
+        D: Send,
     {
         adapt::receiver(self.bc_receiver.clone(), adapter)
     }
 
-    fn adapt_bc_receiver_into<Q>(&self) -> impl Receiver<Data = Q> + Send
+    fn adapt_bc_receiver_into<D>(&self) -> impl Receiver<Data = D> + Send
     where
-        Q: Send,
-        Option<Q>: From<BroadcastEvent>,
+        D: Send,
+        Option<D>: From<BroadcastEvent>,
     {
         self.adapt_bc_receiver(Into::into)
     }
@@ -439,7 +441,9 @@ where
     where
         D: Send + Sync + Clone + 'static,
     {
-        let (signal_sender, signal_receiver) = self.signal_factory.create()?;
+        // Ok(self.adapt_bc_receiver(adapter))
+
+        let (signal_sender, signal_receiver) = self.signal()?;
 
         let receiver = self.bc_receiver.clone();
 
@@ -459,7 +463,9 @@ where
     where
         D: Send + Sync + Clone + 'static,
     {
-        let (signal_sender, signal_receiver) = self.signal_factory.create()?;
+        // Ok(self.adapt_bc_sender(adapter))
+
+        let (signal_sender, signal_receiver) = self.signal()?;
 
         let sender = self.bc_sender.clone();
 
@@ -469,6 +475,23 @@ where
         )?;
 
         Ok(signal_sender)
+    }
+
+    fn signal<D>(
+        &mut self,
+    ) -> error::Result<(
+        impl Sender<Data = D> + 'static,
+        impl Receiver<Data = D> + 'static,
+    )>
+    where
+        D: Send + 'static,
+    {
+        let signal = Arc::new(N::Signal::<D>::new());
+
+        Ok((
+            signal::adapt::into_sender(signal.clone()),
+            signal::adapt::into_receiver(signal),
+        ))
     }
 
     fn spawn(
