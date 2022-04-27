@@ -1,8 +1,7 @@
-use futures::{executor::LocalPool, task::LocalSpawnExt, FutureExt};
+use embedded_svc::executor::asyncs::Spawner;
+use futures::{executor::LocalPool, future::RemoteHandle, task::LocalSpawnExt};
 
-use smol::LocalExecutor;
-
-use ruwm::broadcast_binder::{Spawner, TaskPriority};
+use smol::{LocalExecutor, Task};
 
 pub struct SmolLocalSpawner<'a>(LocalExecutor<'a>);
 
@@ -17,14 +16,17 @@ impl<'a> SmolLocalSpawner<'a> {
 }
 
 impl<'a> Spawner<'a> for SmolLocalSpawner<'a> {
-    fn spawn(
-        &mut self,
-        _priority: TaskPriority,
-        fut: impl futures::Future<Output = ruwm::error::Result<()>> + 'a,
-    ) -> ruwm::error::Result<()> {
-        self.0.spawn(fut).detach();
+    type Task<T>
+    where
+        T: 'a,
+    = Task<T>;
 
-        Ok(())
+    fn spawn<F, T>(&mut self, fut: F) -> Self::Task<T>
+    where
+        F: futures::Future<Output = T> + Send + 'a,
+        T: 'a,
+    {
+        self.0.spawn(fut)
     }
 }
 
@@ -41,13 +43,16 @@ impl FuturesLocalSpawner {
 }
 
 impl Spawner<'static> for FuturesLocalSpawner {
-    fn spawn(
-        &mut self,
-        _priority: TaskPriority,
-        fut: impl futures::Future<Output = ruwm::error::Result<()>> + 'static,
-    ) -> ruwm::error::Result<()> {
-        self.0.spawner().spawn_local(fut.map(|r| r.unwrap()))?;
+    type Task<T>
+    where
+        T: 'static,
+    = RemoteHandle<T>;
 
-        Ok(())
+    fn spawn<F, T>(&mut self, fut: F) -> Self::Task<T>
+    where
+        F: futures::Future<Output = T> + Send + 'static,
+        T: 'static,
+    {
+        self.0.spawner().spawn_local_with_handle(fut).unwrap()
     }
 }

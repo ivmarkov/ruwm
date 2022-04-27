@@ -13,6 +13,7 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
+use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
 use embedded_svc::signal::asyncs::Signal;
 use embedded_svc::unblocker::asyncs::blocking_unblocker;
 use embedded_svc::utils::asyncify::Asyncify;
@@ -27,9 +28,10 @@ use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
+use esp_idf_svc::executor::asyncs::{local, sendable};
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
-use esp_idf_svc::mqtt::client::{EspMqttAsyncClient, EspMqttClient, MqttClientConfiguration};
+use esp_idf_svc::mqtt::client::{EspMqttAsyncClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
@@ -50,7 +52,6 @@ use ruwm::{checkd, error};
 
 #[cfg(feature = "espidf")]
 use crate::espidf::broadcast;
-use crate::espidf::spawner::EspSpawner;
 
 #[cfg(not(feature = "espidf"))]
 use ruwm_std::broadcast;
@@ -141,136 +142,152 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    {
-        let mut binder = broadcast_binder::BroadcastBinder::<
-            MutexSignalFamily,
-            Mutex<_>,
-            Mutex<_>,
-            Mutex<_>,
-            _,
-            _,
-            _,
-            _,
-            _,
-        >::new(
-            unblocker.clone(),
-            broadcast,
-            timer::timers()?,
-            EspSpawner::new(64, 64, 64),
-        );
+    let mut executor1 = local(64);
+    let mut executor2 = sendable(64);
+    let mut executor3 = sendable(64);
 
-        binder
-            .event_logger()?
-            .emergency()?
-            .keepalive(EspSystemTime)?
-            .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
-            .battery(
-                adc::PoweredAdc::new(
-                    peripherals.adc1,
-                    adc::config::Config::new().calibration(true),
-                )?,
-                peripherals.pins.gpio33.into_analog_atten_11db()?,
-                peripherals.pins.gpio14.into_input()?,
-            )?
-            .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
-            .button(
-                1,
-                "BUTTON1",
-                {
-                    let signal = Arc::new(PinSignal::new());
+    let mut executor1_tasks = Vec::with_capacity(64);
+    let mut executor2_tasks = Vec::with_capacity(64);
+    let mut executor3_tasks = Vec::with_capacity(64);
 
-                    (signal_adapt::into_receiver(signal.clone()), unsafe {
-                        button1_pin
+    let mut binder = broadcast_binder::BroadcastBinder::<
+        MutexSignalFamily,
+        Mutex<_>,
+        Mutex<_>,
+        Mutex<_>,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    >::new(
+        unblocker.clone(),
+        broadcast,
+        timer::timers()?,
+        (&mut executor1, &mut executor1_tasks),
+        Some((&mut executor2, &mut executor2_tasks)),
+        Some((&mut executor3, &mut executor3_tasks)),
+    );
+
+    binder
+        .event_logger()?
+        .emergency()?
+        .keepalive(EspSystemTime)?
+        .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
+        .battery(
+            adc::PoweredAdc::new(
+                peripherals.adc1,
+                adc::config::Config::new().calibration(true),
+            )?,
+            peripherals.pins.gpio33.into_analog_atten_11db()?,
+            peripherals.pins.gpio14.into_input()?,
+        )?
+        .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
+        .button(
+            1,
+            "BUTTON1",
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (signal_adapt::into_receiver(signal.clone()), unsafe {
+                    button1_pin
+                        .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
+                })
+            },
+            PressedLevel::Low,
+            Some(Duration::from_millis(50)),
+        )?
+        .button(
+            2,
+            "BUTTON2",
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (
+                    signal_adapt::into_receiver(signal.clone()),
+                    unsafe {
+                        button2_pin
                             .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                    })
+                    }
+                    .into_pull_up()?,
+                )
+            },
+            PressedLevel::Low,
+            Some(Duration::from_millis(50)),
+        )?
+        .button(
+            3,
+            "BUTTON3",
+            {
+                let signal = Arc::new(PinSignal::new());
+
+                (
+                    signal_adapt::into_receiver(signal.clone()),
+                    unsafe {
+                        button3_pin
+                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
+                    }
+                    .into_pull_up()?,
+                )
+            },
+            PressedLevel::Low,
+            Some(Duration::from_millis(20)),
+        )?
+        .screen(display(
+            peripherals.pins.gpio4.into_output()?.degrade(),
+            peripherals.pins.gpio16.into_output()?.degrade(),
+            peripherals.pins.gpio23.into_output()?.degrade(),
+            peripherals.spi2,
+            peripherals.pins.gpio18.into_output()?.degrade(),
+            peripherals.pins.gpio19.into_output()?.degrade(),
+            Some(peripherals.pins.gpio5.into_output()?.degrade()),
+        )?)?
+        .wifi(wifi.as_async().subscribe()?)?
+        .mqtt(
+            client_id,
+            EspMqttAsyncClient::new(
+                unblocker,
+                "mqtt://broker.emqx.io:1883",
+                MqttClientConfiguration {
+                    client_id: Some(client_id),
+                    ..Default::default()
                 },
-                PressedLevel::Low,
-                Some(Duration::from_millis(50)),
-            )?
-            .button(
-                2,
-                "BUTTON2",
-                {
-                    let signal = Arc::new(PinSignal::new());
+            )?,
+        )?
+        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
-                    (
-                        signal_adapt::into_receiver(signal.clone()),
-                        unsafe {
-                            button2_pin.into_subscribed(
-                                move || signal.signal(()),
-                                InterruptType::NegEdge,
-                            )?
-                        }
-                        .into_pull_up()?,
-                    )
-                },
-                PressedLevel::Low,
-                Some(Duration::from_millis(50)),
-            )?
-            .button(
-                3,
-                "BUTTON3",
-                {
-                    let signal = Arc::new(PinSignal::new());
+    let (hquit, mquit, lquit) = (
+        binder.quit(broadcast_binder::TaskPriority::High)?,
+        binder.quit(broadcast_binder::TaskPriority::Medium)?,
+        binder.quit(broadcast_binder::TaskPriority::Low)?,
+    );
 
-                    (
-                        signal_adapt::into_receiver(signal.clone()),
-                        unsafe {
-                            button3_pin.into_subscribed(
-                                move || signal.signal(()),
-                                InterruptType::NegEdge,
-                            )?
-                        }
-                        .into_pull_up()?,
-                    )
-                },
-                PressedLevel::Low,
-                Some(Duration::from_millis(20)),
-            )?
-            .screen(display(
-                peripherals.pins.gpio4.into_output()?.degrade(),
-                peripherals.pins.gpio16.into_output()?.degrade(),
-                peripherals.pins.gpio23.into_output()?.degrade(),
-                peripherals.spi2,
-                peripherals.pins.gpio18.into_output()?.degrade(),
-                peripherals.pins.gpio19.into_output()?.degrade(),
-                Some(peripherals.pins.gpio5.into_output()?.degrade()),
-            )?)?
-            .wifi(wifi.as_async().subscribe()?)?
-            .mqtt(
-                client_id,
-                EspMqttAsyncClient::new(
-                    unblocker,
-                    "mqtt://broker.emqx.io:1883",
-                    MqttClientConfiguration {
-                        client_id: Some(client_id),
-                        ..Default::default()
-                    },
-                )?,
-            )?
-            .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
+    drop(binder);
 
-        let (hquit, mquit, lquit) = (
-            binder.quit(broadcast_binder::TaskPriority::High)?,
-            binder.quit(broadcast_binder::TaskPriority::Medium)?,
-            binder.quit(broadcast_binder::TaskPriority::Low)?,
-        );
+    log::info!("Starting execution");
 
-        let ((mut high, mut high_tasks), (mut mid, mut mid_tasks), (mut low, mut low_tasks)) =
-            binder.finish()?.release();
+    let executor2 = std::thread::spawn(move || {
+        executor2.with_context(|exec, ctx| {
+            exec.run(ctx, mquit, Some(executor2_tasks));
+        });
+    });
 
-        log::info!("Starting execution");
+    let executor3 = std::thread::spawn(move || {
+        executor3.with_context(|exec, ctx| {
+            exec.run(ctx, lquit, Some(executor3_tasks));
+        });
+    });
 
-        // let med = std::thread::spawn(move || mid.run(mquit, Some(mid_tasks)));
-        // let low = std::thread::spawn(move || low.run(lquit, Some(low_tasks)));
+    executor1.with_context(|exec, ctx| {
+        exec.run(ctx, hquit, Some(executor1_tasks));
+    });
 
-        high.run(hquit, Some(high_tasks));
+    checkd!(executor2.join());
+    checkd!(executor3.join());
 
-        // checkd!(med.join());
-        // checkd!(low.join());
-
-        log::info!("Finished execution");
-    }
+    log::info!("Finished execution");
 
     Ok(())
 }

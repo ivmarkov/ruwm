@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use embedded_svc::executor::asyncs::Spawner;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::utils::asyncs::signal;
@@ -50,15 +51,12 @@ pub enum TaskPriority {
     Low,
 }
 
-pub trait Spawner<'a> {
-    fn spawn(
-        &mut self,
-        priority: TaskPriority,
-        fut: impl Future<Output = error::Result<()>> + Send + 'a,
-    ) -> error::Result<()>;
-}
-
-pub struct BroadcastBinder<N, MV, MW, MB, U, S, R, T, P> {
+pub struct BroadcastBinder<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
+where
+    P1: Spawner<'a> + 'static,
+    P2: Spawner<'a> + 'static,
+    P3: Spawner<'a> + 'static,
+{
     _signal_family: PhantomData<N>,
     valve_state: StateSnapshot<MV>,
     water_meter_state: StateSnapshot<MW>,
@@ -67,10 +65,13 @@ pub struct BroadcastBinder<N, MV, MW, MB, U, S, R, T, P> {
     bc_sender: S,
     bc_receiver: R,
     timers: T,
-    spawner: P,
+    spawner1: (&'b mut P1, &'b mut Vec<P1::Task<error::Result<()>>>),
+    spawner2: Option<(&'b mut P2, &'b mut Vec<P2::Task<error::Result<()>>>)>,
+    spawner3: Option<(&'b mut P3, &'b mut Vec<P3::Task<error::Result<()>>>)>,
 }
 
-impl<'a, N, MV, MW, MB, U, S, R, T, P> BroadcastBinder<N, MV, MW, MB, U, S, R, T, P>
+impl<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
+    BroadcastBinder<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
 where
     N: SendSyncSignalFamily + 'static,
     MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'static,
@@ -80,9 +81,18 @@ where
     S: Sender<Data = BroadcastEvent> + Clone + Send + 'static,
     R: Receiver<Data = BroadcastEvent> + Clone + Send + 'static,
     T: TimerService + 'static,
-    P: Spawner<'static> + 'static,
+    P1: Spawner<'a> + 'static,
+    P2: Spawner<'a> + 'static,
+    P3: Spawner<'a> + 'static,
 {
-    pub fn new(unblocker: U, broadcast: (S, R), timers: T, spawner: P) -> Self {
+    pub fn new(
+        unblocker: U,
+        broadcast: (S, R),
+        timers: T,
+        spawner1: (&'b mut P1, &'b mut Vec<P1::Task<error::Result<()>>>),
+        spawner2: Option<(&'b mut P2, &'b mut Vec<P2::Task<error::Result<()>>>)>,
+        spawner3: Option<(&'b mut P3, &'b mut Vec<P3::Task<error::Result<()>>>)>,
+    ) -> Self {
         Self {
             _signal_family: PhantomData,
             valve_state: StateSnapshot::<MV>::new(),
@@ -92,7 +102,9 @@ where
             bc_sender: broadcast.0,
             bc_receiver: broadcast.1,
             timers,
-            spawner,
+            spawner1,
+            spawner2,
+            spawner3,
         }
     }
 
@@ -390,10 +402,6 @@ where
         Ok(move || signal.try_get().is_some())
     }
 
-    pub fn finish(self) -> error::Result<P> {
-        Ok(self.spawner)
-    }
-
     fn adapt_bc_sender<D>(
         &self,
         adapter: impl Fn(D) -> Option<BroadcastEvent> + Send + Sync,
@@ -499,7 +507,23 @@ where
         priority: TaskPriority,
         fut: impl Future<Output = error::Result<()>> + Send + 'static,
     ) -> error::Result<&mut Self> {
-        self.spawner.spawn(priority, fut)?;
+        match priority {
+            TaskPriority::High => self.spawner1.1.push(self.spawner1.0.spawn(fut)),
+            TaskPriority::Medium => {
+                if let Some(spawner2) = self.spawner2.as_mut() {
+                    spawner2.1.push(spawner2.0.spawn(fut));
+                } else {
+                    self.spawn(TaskPriority::High, fut)?;
+                }
+            }
+            TaskPriority::Low => {
+                if let Some(spawner3) = self.spawner3.as_mut() {
+                    spawner3.1.push(spawner3.0.spawn(fut));
+                } else {
+                    self.spawn(TaskPriority::Medium, fut)?;
+                }
+            }
+        }
 
         Ok(self)
     }
