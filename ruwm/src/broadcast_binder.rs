@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Display};
 use core::future::Future;
 use core::marker::PhantomData;
 use core::time::Duration;
@@ -11,7 +11,7 @@ use embedded_svc::executor::asyncs::Spawner;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::utils::asyncs::signal;
-use embedded_svc::ws;
+use embedded_svc::{errors, ws};
 
 use embedded_graphics::prelude::RgbColor;
 
@@ -28,6 +28,7 @@ use embedded_svc::{
 };
 
 use crate::broadcast_event::WifiStatus;
+use crate::mqtt::MqttCommand;
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
@@ -287,13 +288,11 @@ where
     pub fn mqtt(
         &mut self,
         topic_prefix: impl AsRef<str> + Send + 'static,
-        mqtt: (
-            impl Client + Publish + Send + 'static,
-            impl Connection + Send + 'static,
-        ),
+        mqtt_client: impl Client + Publish + Send + 'static,
+        mqtt_connection: impl Connection<Message = Option<MqttCommand>, Error = impl errors::Error>
+            + Send
+            + 'static,
     ) -> error::Result<&mut Self> {
-        let (mqtt_client, mqtt_connection) = mqtt;
-
         // TODO: Think what to do with publish notifications as they might block the broadcast queue
         // when it is full
 
@@ -386,7 +385,7 @@ where
             .spawn(TaskPriority::Low, draw_engine)
     }
 
-    pub fn quit(&mut self, priority: TaskPriority) -> error::Result<impl Fn() -> bool> {
+    pub fn quit(&mut self, priority: TaskPriority) -> error::Result<impl Fn() -> bool + Send> {
         let signal = Arc::new(N::Signal::<()>::new());
 
         {
@@ -509,20 +508,19 @@ where
     ) -> error::Result<&mut Self> {
         match priority {
             TaskPriority::High => self.spawner1.1.push(self.spawner1.0.spawn(fut)?),
-            TaskPriority::Medium => {
+            TaskPriority::Medium | TaskPriority::Low => {
                 if let Some(spawner2) = self.spawner2.as_mut() {
                     spawner2.1.push(spawner2.0.spawn(fut)?);
                 } else {
                     self.spawn(TaskPriority::High, fut)?;
                 }
-            }
-            TaskPriority::Low => {
-                if let Some(spawner3) = self.spawner3.as_mut() {
-                    spawner3.1.push(spawner3.0.spawn(fut)?);
-                } else {
-                    self.spawn(TaskPriority::Medium, fut)?;
-                }
-            }
+            } // TaskPriority::Low => {
+              //     if let Some(spawner3) = self.spawner3.as_mut() {
+              //         spawner3.1.push(spawner3.0.spawn(fut)?);
+              //     } else {
+              //         self.spawn(TaskPriority::Medium, fut)?;
+              //     }
+              // }
         }
 
         Ok(self)

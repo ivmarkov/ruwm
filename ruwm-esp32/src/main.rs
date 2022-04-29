@@ -14,9 +14,11 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
+use embedded_svc::mqtt::client::utils::ConnectionState;
 use embedded_svc::signal::asyncs::Signal;
 use embedded_svc::unblocker::asyncs::blocking_unblocker;
-use embedded_svc::utils::asyncify::Asyncify;
+use embedded_svc::utils::asyncify::mqtt::client::{AsyncConnection, AsyncPostbox};
+use embedded_svc::utils::asyncify::{Asyncify, UnblockingAsyncify};
 use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
@@ -31,7 +33,7 @@ use esp_idf_hal::{adc, delay, spi};
 use esp_idf_svc::executor::asyncs::{local, sendable};
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
-use esp_idf_svc::mqtt::client::{EspMqttAsyncClient, MqttClientConfiguration};
+use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
@@ -44,6 +46,7 @@ use esp_idf_sys::esp;
 use pulse_counter::PulseCounter;
 
 use ruwm::button::PressedLevel;
+use ruwm::mqtt::MessageParser;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::ValveCommand;
@@ -141,6 +144,23 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .handler(move |receiver, sender| web_processor.lock().process(receiver, sender))?;
 
     let client_id = "water-meter-demo";
+
+    let mqtt_conn_state = Arc::new(ConnectionState::new());
+    let mut mqtt_postbox = AsyncPostbox::new(mqtt_conn_state.clone());
+    let mut mqtt_parser = MessageParser::new();
+
+    let mqtt_client = EspMqttClient::new(
+        "mqtt://broker.emqx.io:1883",
+        &MqttClientConfiguration {
+            client_id: Some(client_id),
+            ..Default::default()
+        },
+        Some(mqtt_conn_state.clone()),
+        move |event| mqtt_postbox.post(mqtt_parser.convert(event)),
+    )?
+    .into_async_with_unblocker(unblocker.clone());
+
+    let mqtt_conn = AsyncConnection::new(mqtt_conn_state);
 
     let mut executor1 = local(64);
     let mut executor2 = sendable(64);
@@ -245,24 +265,12 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             Some(peripherals.pins.gpio5.into_output()?.degrade()),
         )?)?
         .wifi(wifi.as_async().subscribe()?)?
-        .mqtt(
-            client_id,
-            EspMqttAsyncClient::new(
-                unblocker,
-                "mqtt://broker.emqx.io:1883",
-                MqttClientConfiguration {
-                    client_id: Some(client_id),
-                    ..Default::default()
-                },
-            )?,
-        )?
+        .mqtt(client_id, mqtt_client, mqtt_conn)?
         .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
 
-    let (hquit, mquit, lquit) = (
-        binder.quit(broadcast_binder::TaskPriority::High)?,
-        binder.quit(broadcast_binder::TaskPriority::Medium)?,
-        binder.quit(broadcast_binder::TaskPriority::Low)?,
-    );
+    let quit1 = binder.quit(broadcast_binder::TaskPriority::High)?;
+    let quit2 = binder.quit(broadcast_binder::TaskPriority::Medium)?;
+    let quit3 = binder.quit(broadcast_binder::TaskPriority::Low)?;
 
     drop(binder);
 
@@ -270,22 +278,26 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     let executor2 = std::thread::spawn(move || {
         executor2.with_context(|exec, ctx| {
-            exec.run(ctx, mquit, Some(executor2_tasks));
+            exec.run(ctx, quit2, Some(executor2_tasks));
+            println!("Done2!");
         });
     });
 
-    let executor3 = std::thread::spawn(move || {
-        executor3.with_context(|exec, ctx| {
-            exec.run(ctx, lquit, Some(executor3_tasks));
-        });
-    });
+    // let executor3 = std::thread::spawn(move || {
+    //     // executor3.with_context(|exec, ctx| {
+    //     //     exec.run(ctx, quit3, Some(executor3_tasks));
+    //     //     println!("Done3!");
+    //     // });
+    // });
 
     executor1.with_context(|exec, ctx| {
-        exec.run(ctx, hquit, Some(executor1_tasks));
+        exec.run(ctx, quit1, Some(executor1_tasks));
     });
 
+    println!("Done1!");
+
     checkd!(executor2.join());
-    checkd!(executor3.join());
+    // checkd!(executor3.join());
 
     log::info!("Finished execution");
 

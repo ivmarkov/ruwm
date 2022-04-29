@@ -1,4 +1,3 @@
-use core::fmt::Display;
 use core::str;
 use core::time::Duration;
 
@@ -258,35 +257,19 @@ async fn publish(
 }
 
 pub async fn run_receiver(
-    mut connection: impl Connection<Error = impl Display>,
+    mut connection: impl Connection<Message = Option<MqttCommand>>,
     mut mqtt_notif: impl Sender<Data = MqttClientNotification>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
 ) -> error::Result<()> {
-    let mut message_parser = MessageParser::new();
-
     loop {
-        let message = connection
-            .next(move |result| {
-                let result = result
-                    .as_ref()
-                    .map(|event| {
-                        event.transform_received(|message| message_parser.process(message))
-                    })
-                    .map_err(|_| ());
+        let message = connection.next().await;
 
-                (result, message_parser)
-            })
-            .await;
-
-        if let Some((incoming, mp)) = message {
-            message_parser = mp;
-            mqtt_notif.send(incoming).await.map_err(error::svc)?;
-
-            if let Ok(Event::Received(Some(cmd))) = incoming {
+        if let Some(message) = message {
+            if let Ok(Event::Received(Some(cmd))) = &message {
                 match cmd {
                     MqttCommand::Valve(open) => valve_command
-                        .send(if open {
+                        .send(if *open {
                             ValveCommand::Open
                         } else {
                             ValveCommand::Close
@@ -294,7 +277,7 @@ pub async fn run_receiver(
                         .await
                         .map_err(error::svc)?,
                     MqttCommand::FlowWatch(enable) => wm_command
-                        .send(if enable {
+                        .send(if *enable {
                             WaterMeterCommand::Arm
                         } else {
                             WaterMeterCommand::Disarm
@@ -304,6 +287,11 @@ pub async fn run_receiver(
                     _ => (),
                 }
             }
+
+            mqtt_notif
+                .send(message.map_err(|_| ()))
+                .await
+                .map_err(error::svc)?;
         } else {
             break;
         }
@@ -313,15 +301,29 @@ pub async fn run_receiver(
 }
 
 #[derive(Default)]
-struct MessageParser {
+pub struct MessageParser {
     #[allow(clippy::type_complexity)]
     command_parser: Option<fn(&[u8]) -> Option<MqttCommand>>,
     payload_buf: [u8; 16],
 }
 
 impl MessageParser {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn convert<M, E>(
+        &mut self,
+        event: &Result<Event<M>, E>,
+    ) -> Result<Event<Option<MqttCommand>>, E>
+    where
+        M: Message,
+        E: Clone,
+    {
+        event
+            .as_ref()
+            .map(|event| event.transform_received(|message| self.process(message)))
+            .map_err(|e| e.clone())
     }
 
     fn process<M>(&mut self, message: &M) -> Option<MqttCommand>
