@@ -34,9 +34,7 @@ where
     })?
     .into_typed::<D, _>();
 
-    let postbox = blocking_event_bus
-        .as_async_with_unblocker(unblocker)
-        .postbox()?;
+    let postbox = blocking_event_bus.unblock_as_async(unblocker).postbox()?;
 
     let mut event_bus = blocking_event_bus.into_async();
     let subscription = event_bus.subscribe()?;

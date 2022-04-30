@@ -18,7 +18,7 @@ use embedded_svc::mqtt::client::utils::ConnectionState;
 use embedded_svc::signal::asyncs::Signal;
 use embedded_svc::unblocker::asyncs::blocking_unblocker;
 use embedded_svc::utils::asyncify::mqtt::client::{AsyncConnection, AsyncPostbox};
-use embedded_svc::utils::asyncify::{Asyncify, UnblockingAsyncify};
+use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
@@ -158,7 +158,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         Some(mqtt_conn_state.clone()),
         move |event| mqtt_postbox.post(mqtt_parser.convert(event)),
     )?
-    .into_async_with_unblocker(unblocker.clone());
+    .into_async();
 
     let mqtt_conn = AsyncConnection::new(mqtt_conn_state);
 
