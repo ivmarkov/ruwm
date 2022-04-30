@@ -14,9 +14,8 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
-use embedded_svc::mqtt::client::utils::ConnectionState;
+use embedded_svc::mqtt::client::utils::ConnStateGuard;
 use embedded_svc::signal::asyncs::Signal;
-use embedded_svc::unblocker::asyncs::blocking_unblocker;
 use embedded_svc::utils::asyncify::mqtt::client::{AsyncConnection, AsyncPostbox};
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
@@ -31,7 +30,7 @@ use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::executor::asyncs::{local, sendable};
-use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
+use esp_idf_svc::http::server::ws::asyncs::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
@@ -110,11 +109,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
-    let unblocker = blocking_unblocker();
-
     #[cfg(feature = "espidf")]
-    let broadcast =
-        broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(unblocker.clone(), 100)?;
+    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(
+        embedded_svc::unblocker::asyncs::blocking_unblocker(),
+        100,
+    )?;
 
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
@@ -145,22 +144,18 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     let client_id = "water-meter-demo";
 
-    let mqtt_conn_state = Arc::new(ConnectionState::new_default());
-    let mut mqtt_postbox = AsyncPostbox::new(mqtt_conn_state.clone());
     let mut mqtt_parser = MessageParser::new();
 
-    let mqtt_client = EspMqttClient::new(
+    let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
         "mqtt://broker.emqx.io:1883",
         &MqttClientConfiguration {
             client_id: Some(client_id),
             ..Default::default()
         },
-        Some(mqtt_conn_state.clone()),
-        move |event| mqtt_postbox.post(mqtt_parser.convert(event)),
-    )?
-    .into_async();
+        move |event| mqtt_parser.convert(event),
+    )?;
 
-    let mqtt_conn = AsyncConnection::new(mqtt_conn_state);
+    let mqtt_client = mqtt_client.into_async();
 
     let mut executor1 = local(64);
     let mut executor2 = sendable(64);
@@ -181,9 +176,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         _,
         _,
         _,
-        _,
     >::new(
-        unblocker.clone(),
         broadcast,
         timer::timers()?,
         (&mut executor1, &mut executor1_tasks),

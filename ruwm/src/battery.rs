@@ -46,11 +46,11 @@ where
             .await
             .map_err(error::svc)?;
 
-        let voltage = Some(100);
-        // let voltage = one_shot
-        //     .read(&mut battery_pin)
-        //     .ok()
-        //     .map(|voltage| voltage / ROUND_UP * ROUND_UP);
+        // let voltage = Some(100);
+        let voltage = one_shot
+            .read(&mut battery_pin)
+            .ok()
+            .map(|voltage| voltage / ROUND_UP * ROUND_UP);
         //.map_err(error::wrap_display)?; TODO
 
         let powered = Some(power_pin.is_high().map_err(error::hal)?);

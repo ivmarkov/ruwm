@@ -114,7 +114,7 @@ enum PageDrawable {
     Battery(pages::Battery),
 }
 
-pub async fn run_draw_engine<U, R, D>(
+pub async fn unblock_run_draw_engine<U, R, D>(
     unblocker: U,
     mut draw_notif: R,
     mut display: D,
@@ -134,6 +134,25 @@ where
         let result = unblocker
             .unblock(move || draw(display, page_drawable, draw_request))
             .await?;
+
+        display = result.0;
+        page_drawable = result.1;
+    }
+}
+
+pub async fn run_draw_engine<R, D>(mut draw_notif: R, mut display: D) -> error::Result<()>
+where
+    R: Receiver<Data = DrawRequest>,
+    D: FlushableDrawTarget + Send + 'static,
+    D::Color: RgbColor,
+    D::Error: Debug,
+{
+    let mut page_drawable = None;
+
+    loop {
+        let draw_request = draw_notif.recv().await.map_err(error::svc)?;
+
+        let result = draw(display, page_drawable, draw_request)?;
 
         display = result.0;
         page_drawable = result.1;

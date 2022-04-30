@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
 use core::future::Future;
 use core::marker::PhantomData;
 use core::time::Duration;
@@ -7,25 +7,22 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use embedded_svc::executor::asyncs::Spawner;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::utils::asyncs::signal;
-use embedded_svc::{errors, ws};
-
-use embedded_graphics::prelude::RgbColor;
-
 use embedded_hal::adc;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
+use embedded_graphics::prelude::RgbColor;
+
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::errors;
+use embedded_svc::executor::asyncs::Spawner;
 use embedded_svc::mqtt::client::asyncs::{Client, Connection, Publish};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::unblocker::asyncs::Unblocker;
-use embedded_svc::{
-    channel::asyncs::{Receiver, Sender},
-    timer::asyncs::TimerService,
-    utils::asyncs::channel::adapt,
-};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::sys_time::SystemTime;
+use embedded_svc::timer::asyncs::TimerService;
+use embedded_svc::utils::asyncs::channel::adapt;
+use embedded_svc::utils::asyncs::signal;
+use embedded_svc::ws;
 
 use crate::broadcast_event::WifiStatus;
 use crate::mqtt::MqttCommand;
@@ -52,7 +49,7 @@ pub enum TaskPriority {
     Low,
 }
 
-pub struct BroadcastBinder<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
+pub struct BroadcastBinder<'a, 'b, N, MV, MW, MB, S, R, T, P1, P2, P3>
 where
     P1: Spawner<'a> + 'static,
     P2: Spawner<'a> + 'static,
@@ -62,7 +59,6 @@ where
     valve_state: StateSnapshot<MV>,
     water_meter_state: StateSnapshot<MW>,
     battery_state: StateSnapshot<MB>,
-    unblocker: U,
     bc_sender: S,
     bc_receiver: R,
     timers: T,
@@ -71,14 +67,13 @@ where
     spawner3: Option<(&'b mut P3, &'b mut Vec<P3::Task<error::Result<()>>>)>,
 }
 
-impl<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
-    BroadcastBinder<'a, 'b, N, MV, MW, MB, U, S, R, T, P1, P2, P3>
+impl<'a, 'b, N, MV, MW, MB, S, R, T, P1, P2, P3>
+    BroadcastBinder<'a, 'b, N, MV, MW, MB, S, R, T, P1, P2, P3>
 where
     N: SendSyncSignalFamily + 'static,
     MV: Mutex<Data = Option<ValveState>> + Send + Sync + 'static,
     MW: Mutex<Data = WaterMeterState> + Send + Sync + 'static,
     MB: Mutex<Data = BatteryState> + Send + Sync + 'static,
-    U: Unblocker + Clone + Send + Sync + 'static,
     S: Sender<Data = BroadcastEvent> + Clone + Send + 'static,
     R: Receiver<Data = BroadcastEvent> + Clone + Send + 'static,
     T: TimerService + 'static,
@@ -87,7 +82,6 @@ where
     P3: Spawner<'a> + 'static,
 {
     pub fn new(
-        unblocker: U,
         broadcast: (S, R),
         timers: T,
         spawner1: (&'b mut P1, &'b mut Vec<P1::Task<error::Result<()>>>),
@@ -99,7 +93,6 @@ where
             valve_state: StateSnapshot::<MV>::new(),
             water_meter_state: StateSnapshot::<MW>::new(),
             battery_state: StateSnapshot::<MB>::new(),
-            unblocker,
             bc_sender: broadcast.0,
             bc_receiver: broadcast.1,
             timers,
@@ -379,7 +372,7 @@ where
             de_sender,
         );
 
-        let draw_engine = screen::run_draw_engine(self.unblocker.clone(), de_receiver, display);
+        let draw_engine = screen::run_draw_engine(de_receiver, display);
 
         self.spawn(TaskPriority::Medium, screen)?
             .spawn(TaskPriority::Low, draw_engine)
