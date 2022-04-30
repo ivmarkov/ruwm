@@ -131,9 +131,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (web_processor, web_acceptor) = EspHttpWsProcessor::new(unblocker.clone(), 4096);
+    let (ws_processor, ws_acceptor) = EspHttpWsProcessor::new((), 4096);
 
-    let web_processor = esp_idf_hal::mutex::Mutex::new(web_processor);
+    let ws_processor = esp_idf_hal::mutex::Mutex::new(ws_processor);
 
     let mut httpd = EspHttpServer::new(&Default::default())?;
 
@@ -141,11 +141,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     httpd
         .ws("/ws")
-        .handler(move |receiver, sender| web_processor.lock().process(receiver, sender))?;
+        .handler(move |receiver, sender| ws_processor.lock().process(receiver, sender))?;
 
     let client_id = "water-meter-demo";
 
-    let mqtt_conn_state = Arc::new(ConnectionState::new());
+    let mqtt_conn_state = Arc::new(ConnectionState::new_default());
     let mut mqtt_postbox = AsyncPostbox::new(mqtt_conn_state.clone());
     let mut mqtt_parser = MessageParser::new();
 
@@ -266,7 +266,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         )?)?
         .wifi(wifi.as_async().subscribe()?)?
         .mqtt(client_id, mqtt_client, mqtt_conn)?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>>(web_acceptor)?;
+        .web::<_, esp_idf_hal::mutex::Mutex<_>>(ws_acceptor)?;
 
     let quit1 = binder.quit(broadcast_binder::TaskPriority::High)?;
     let quit2 = binder.quit(broadcast_binder::TaskPriority::Medium)?;
