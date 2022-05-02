@@ -501,19 +501,20 @@ where
     ) -> error::Result<&mut Self> {
         match priority {
             TaskPriority::High => self.spawner1.1.push(self.spawner1.0.spawn(fut)?),
-            TaskPriority::Medium | TaskPriority::Low => {
+            TaskPriority::Medium => {
                 if let Some(spawner2) = self.spawner2.as_mut() {
                     spawner2.1.push(spawner2.0.spawn(fut)?);
                 } else {
                     self.spawn(TaskPriority::High, fut)?;
                 }
-            } // TaskPriority::Low => {
-              //     if let Some(spawner3) = self.spawner3.as_mut() {
-              //         spawner3.1.push(spawner3.0.spawn(fut)?);
-              //     } else {
-              //         self.spawn(TaskPriority::Medium, fut)?;
-              //     }
-              // }
+            }
+            TaskPriority::Low => {
+                if let Some(spawner3) = self.spawner3.as_mut() {
+                    spawner3.1.push(spawner3.0.spawn(fut)?);
+                } else {
+                    self.spawn(TaskPriority::Medium, fut)?;
+                }
+            }
         }
 
         Ok(self)

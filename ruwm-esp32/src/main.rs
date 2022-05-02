@@ -14,9 +14,7 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
-use embedded_svc::mqtt::client::utils::ConnStateGuard;
 use embedded_svc::signal::asyncs::Signal;
-use embedded_svc::utils::asyncify::mqtt::client::{AsyncConnection, AsyncPostbox};
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
 use embedded_svc::utils::atomic_swap::AtomicOption;
@@ -110,10 +108,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
     #[cfg(feature = "espidf")]
-    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _, _>(
-        embedded_svc::unblocker::asyncs::blocking_unblocker(),
-        100,
-    )?;
+    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
 
     #[cfg(not(feature = "espidf"))]
     let broadcast = broadcast::broadcast(100)?;
@@ -272,25 +267,24 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     let executor2 = std::thread::spawn(move || {
         executor2.with_context(|exec, ctx| {
             exec.run(ctx, quit2, Some(executor2_tasks));
-            println!("Done2!");
         });
     });
 
-    // let executor3 = std::thread::spawn(move || {
-    //     // executor3.with_context(|exec, ctx| {
-    //     //     exec.run(ctx, quit3, Some(executor3_tasks));
-    //     //     println!("Done3!");
-    //     // });
-    // });
+    let executor3 = std::thread::spawn(move || {
+        executor3.with_context(|exec, ctx| {
+            exec.run(ctx, quit3, Some(executor3_tasks));
+        });
+    });
 
     executor1.with_context(|exec, ctx| {
         exec.run(ctx, quit1, Some(executor1_tasks));
     });
 
-    println!("Done1!");
+    println!("Execution finished, waiting for 500ms to workaround a STD/ESP-IDF pthread (?) bug");
+    std::thread::sleep(Duration::from_millis(500));
 
     checkd!(executor2.join());
-    // checkd!(executor3.join());
+    checkd!(executor3.join());
 
     log::info!("Finished execution");
 

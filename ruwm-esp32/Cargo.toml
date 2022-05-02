@@ -25,9 +25,9 @@ async-broadcast = "0.3.4"
 smol = "1.2"
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.21", features = ["experimental"] }
-esp-idf-sys = { version = "0.31.1", features = ["binstart"] }
-esp-idf-svc = { version = "0.41", features = ["experimental", "isr-async-executor"] }
-esp-idf-hal = { version = "0.37", features = ["experimental"] }
+esp-idf-sys = { version = "0.31.5", features = ["binstart"] }
+esp-idf-svc = { version = "0.41.2", features = ["experimental", "isr-async-executor"] }
+esp-idf-hal = { version = "0.37.3", features = ["experimental"] }
 embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"
