@@ -1,21 +1,18 @@
 use core::mem;
 
 extern crate alloc;
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 
-use futures::{pin_mut, select, stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{pin_mut, select, FutureExt};
 
 use postcard::{from_bytes, to_slice};
 
-use embedded_svc::{
-    channel::asyncs::{Receiver, Sender},
-    mutex::Mutex,
-    utils::role::Role,
-    ws::{
-        asyncs::{Acceptor, Receiver as _, Sender as _},
-        FrameType,
-    },
-};
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::Mutex;
+use embedded_svc::utils::asyncs::select::select_all_hvec;
+use embedded_svc::utils::role::Role;
+use embedded_svc::ws::asyncs::{Acceptor, Receiver as _, Sender as _};
+use embedded_svc::ws::FrameType;
 
 use crate::{
     battery::BatteryState,
@@ -42,17 +39,17 @@ enum WebFrame {
     Unknown,
 }
 
-pub fn sis<A, M>() -> Arc<M>
+pub fn sis<A, M, const N: usize>() -> Arc<M>
 where
     A: Acceptor,
-    M: Mutex<Data = Vec<SenderInfo<A>>>,
+    M: Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
 {
-    Arc::new(M::new(Vec::new()))
+    Arc::new(M::new(heapless::Vec::<_, N>::new()))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run_receiver<A>(
-    sis: Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
+pub async fn run_receiver<A, const N: usize>(
+    sis: Arc<impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>>,
     mut ws_acceptor: A,
     mut sender: impl Sender<Data = (ConnectionId, WebEvent)>,
     mut valve_command: impl Sender<Data = ValveCommand>,
@@ -65,42 +62,38 @@ where
     A: Acceptor,
 {
     let mut next_connection_id: ConnectionId = 0;
-    let mut ws_receivers = Vec::new();
+    let mut ws_receivers = heapless::Vec::<_, N>::new();
 
     loop {
         enum SelectResult<A: Acceptor> {
             Accept(A::Sender, A::Receiver),
             Close,
             Receive(usize, WebFrame),
-            Empty,
         }
 
         let result: SelectResult<A> = {
-            let mut ws_receiver = ws_receivers
+            let ws_receivers = ws_receivers
                 .iter_mut()
                 .enumerate()
                 .map(|(index, ws_receiver)| web_receive::<A>(ws_receiver, index))
-                .collect::<FuturesUnordered<_>>();
+                .collect::<heapless::Vec<_, N>>();
 
-            if ws_receiver.is_empty() {
+            if ws_receivers.is_empty() {
                 ws_acceptor.accept().await.map_err(error::svc)?.map_or_else(
                     || SelectResult::Close,
                     |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
                 )
             } else {
                 let ws_acceptor = ws_acceptor.accept().fuse();
-                let ws_receiver = ws_receiver.next().fuse();
+                let ws_receivers = select_all_hvec(ws_receivers).fuse();
 
-                pin_mut!(ws_acceptor, ws_receiver);
+                pin_mut!(ws_acceptor, ws_receivers);
 
                 select! {
                     accept = ws_acceptor => accept
                         .map_err(error::svc)?
                         .map_or_else(|| SelectResult::Close, |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver)),
-                    ws_receive = ws_receiver => match ws_receive {
-                        Some(ws_receive) => ws_receive.map(|(index, receive)| SelectResult::Receive(index, receive))?,
-                        None => SelectResult::Empty,
-                    },
+                    (ws_receive, _) = ws_receivers => ws_receive.map(|(size, frame)| SelectResult::Receive(size, frame))?,
                 }
             }
         };
@@ -112,23 +105,27 @@ where
                 let id = next_connection_id;
                 next_connection_id += 1;
 
-                ws_receivers.push(new_receiver);
-
-                sis.lock().push(SenderInfo {
+                if let Err(_) = sis.lock().push(SenderInfo {
                     id,
                     role,
                     sender: Some(new_sender),
-                });
+                }) {
+                    next_connection_id -= 1;
 
-                process_initial_response(
-                    &mut sender,
-                    id,
-                    role,
-                    &valve_state,
-                    &water_meter_state,
-                    &battery_state,
-                )
-                .await?;
+                    // TODO: Close the acceptor
+                } else {
+                    ws_receivers.push(new_receiver).map_err(error::heapless)?;
+
+                    process_initial_response(
+                        &mut sender,
+                        id,
+                        role,
+                        &valve_state,
+                        &water_meter_state,
+                        &battery_state,
+                    )
+                    .await?;
+                }
             }
             SelectResult::Close => break,
             SelectResult::Receive(index, receive) => match receive {
@@ -155,19 +152,18 @@ where
                 }
                 WebFrame::Control => (),
                 WebFrame::Close | WebFrame::Unknown => {
-                    ws_receivers.remove(index);
-                    sis.lock().remove(index);
+                    ws_receivers.swap_remove(index);
+                    sis.lock().swap_remove(index);
                 }
             },
-            SelectResult::Empty => (),
         }
     }
 
     Ok(())
 }
 
-pub async fn run_sender<A>(
-    sis: Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
+pub async fn run_sender<A, const N: usize>(
+    sis: Arc<impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>>,
     mut receiver: impl Receiver<Data = (ConnectionId, WebEvent)>,
     mut valve: impl Receiver<Data = Option<ValveState>>,
     mut wm: impl Receiver<Data = WaterMeterState>,
@@ -194,8 +190,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn process_request<A>(
-    sis: &Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
+async fn process_request<A, const N: usize>(
+    sis: &Arc<impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>>,
     connection_id: ConnectionId,
     role: Role,
     request: &WebRequest,
@@ -303,8 +299,8 @@ fn authenticate(username: &str, password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 
-async fn web_send_all<A>(
-    sis: &Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
+async fn web_send_all<A, const N: usize>(
+    sis: &Arc<impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>>,
     event: &WebEvent,
 ) -> error::Result<()>
 where
@@ -315,7 +311,7 @@ where
         .iter()
         .filter(|si| si.role >= event.role())
         .map(|si| si.id)
-        .collect::<Vec<_>>();
+        .collect::<heapless::Vec<_, N>>();
 
     for id in ids {
         web_send_single(sis, id, event).await?;
@@ -324,8 +320,8 @@ where
     Ok(())
 }
 
-async fn web_send_single<A>(
-    sis: &Arc<impl Mutex<Data = Vec<SenderInfo<A>>>>,
+async fn web_send_single<A, const N: usize>(
+    sis: &Arc<impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>>,
     id: ConnectionId,
     event: &WebEvent,
 ) -> error::Result<()>

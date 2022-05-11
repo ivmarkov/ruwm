@@ -7,6 +7,8 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use heapless;
+
 use embedded_hal::adc;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
@@ -167,12 +169,13 @@ where
         self.spawn(TaskPriority::Medium, fut)
     }
 
-    pub fn web<A, M>(&mut self, web: A) -> error::Result<&mut Self>
+    pub fn web<A, M, const C: usize>(&mut self, web: A) -> error::Result<&mut Self>
     where
         A: ws::asyncs::Acceptor + Send + 'static,
-        M: Mutex<Data = Vec<SenderInfo<A>>> + Send + Sync + 'static,
+        M: Mutex<Data = heapless::Vec<SenderInfo<A>, C>> + Send + Sync + 'static,
+        for<'x> M::Guard<'x>: Send,
     {
-        let sis = web::sis::<A, M>();
+        let sis = web::sis::<A, M, C>();
 
         let web_sender = web::run_sender(
             sis.clone(),

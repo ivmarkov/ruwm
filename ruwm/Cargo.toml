@@ -11,18 +11,14 @@ repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
-[features]
-default = ["experimental"]
-
-experimental = ["embedded-svc/experimental"]
-
 [dependencies]
 anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2.7", features = [ "unproven" ] }
-embedded-svc = "0.21"
+embedded-svc = { version = "0.21", features = [ "experimental", "heapless" ] }
 embedded-graphics = "0.7"
 profont = "0.5"
 postcard = "0.7"
 serde = { version = "1", default-features = false }
+heapless = "0.7"

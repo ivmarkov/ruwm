@@ -25,6 +25,10 @@ pub fn debug(e: impl Debug) -> Error {
     anyhow::anyhow!("Error: {:?}", e)
 }
 
+pub fn heapless<T>(_value: T) -> Error {
+    anyhow::anyhow!("Out of memory")
+}
+
 #[macro_export]
 #[allow(unused_macros)]
 macro_rules! check {

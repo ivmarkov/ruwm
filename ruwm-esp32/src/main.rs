@@ -254,7 +254,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         )?)?
         .wifi(wifi.as_async().subscribe()?)?
         .mqtt(client_id, mqtt_client, mqtt_conn)?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>>(ws_acceptor)?;
+        .web::<_, esp_idf_hal::mutex::Mutex<_>, 4>(ws_acceptor)?;
 
     let quit1 = binder.quit(broadcast_binder::TaskPriority::High)?;
     let quit2 = binder.quit(broadcast_binder::TaskPriority::Medium)?;
