@@ -1,4 +1,4 @@
-use futures::future::{select, Either};
+use embedded_svc::utils::asyncs::select::{select3, Either3};
 use futures::pin_mut;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
@@ -23,20 +23,20 @@ pub async fn run(
 
         pin_mut!(valve, wm, battery);
 
-        let emergency_close = match select(valve, select(wm, battery)).await {
-            Either::Left((valve, _)) => {
+        let emergency_close = match select3(valve, wm, battery).await {
+            Either3::First(valve) => {
                 let valve = valve.map_err(error::svc)?;
 
                 valve_state = valve;
 
                 false
             }
-            Either::Right((Either::Left((wm, _)), _)) => {
+            Either3::Second(wm) => {
                 let wm = wm.map_err(error::svc)?;
 
                 wm.leaking
             }
-            Either::Right((Either::Right((battery, _)), _)) => {
+            Either3::Third(battery) => {
                 let battery = battery.map_err(error::svc)?;
 
                 let battery_low = battery

@@ -1,6 +1,6 @@
 use core::time::Duration;
 
-use futures::future::{select, Either};
+use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,7 @@ pub async fn run(
         let result = select(event, tick).await;
         let now = system_time.now();
 
-        if let Either::Left((event, _)) = result {
+        if let Either::First(event) = result {
             let event = event.map_err(error::svc)?;
 
             quit_time = match event.payload() {

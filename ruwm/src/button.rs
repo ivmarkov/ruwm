@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use futures::future::{select, Either};
+use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
@@ -42,15 +42,15 @@ pub async fn run(
         let pin_edge = pin_edge.recv();
 
         let timer = if debounce {
-            Either::Left(timer.after(debounce_time.unwrap()).map_err(error::svc)?)
+            futures::future::Either::Left(timer.after(debounce_time.unwrap()).map_err(error::svc)?)
         } else {
-            Either::Right(pending())
+            futures::future::Either::Right(pending())
         };
 
         pin_mut!(pin_edge, timer);
 
         let check = match select(pin_edge, timer).await {
-            Either::Left(_) => {
+            Either::First(_) => {
                 if debounce_time.is_some() {
                     debounce = true;
                     false
@@ -58,7 +58,7 @@ pub async fn run(
                     true
                 }
             }
-            Either::Right(_) => {
+            Either::Second(_) => {
                 if debounce {
                     debounce = false;
 

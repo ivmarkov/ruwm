@@ -3,13 +3,13 @@ use core::mem;
 extern crate alloc;
 use alloc::sync::Arc;
 
-use futures::{pin_mut, select, FutureExt};
+use futures::pin_mut;
 
 use postcard::{from_bytes, to_slice};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::Mutex;
-use embedded_svc::utils::asyncs::select::select_all_hvec;
+use embedded_svc::utils::asyncs::select::{select, select4, select_all_hvec, Either, Either4};
 use embedded_svc::utils::role::Role;
 use embedded_svc::ws::asyncs::{Acceptor, Receiver as _, Sender as _};
 use embedded_svc::ws::FrameType;
@@ -84,16 +84,19 @@ where
                     |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
                 )
             } else {
-                let ws_acceptor = ws_acceptor.accept().fuse();
-                let ws_receivers = select_all_hvec(ws_receivers).fuse();
+                let ws_acceptor = ws_acceptor.accept();
+                let ws_receivers = select_all_hvec(ws_receivers);
 
                 pin_mut!(ws_acceptor, ws_receivers);
 
-                select! {
-                    accept = ws_acceptor => accept
-                        .map_err(error::svc)?
-                        .map_or_else(|| SelectResult::Close, |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver)),
-                    (ws_receive, _) = ws_receivers => ws_receive.map(|(size, frame)| SelectResult::Receive(size, frame))?,
+                match select(ws_acceptor, ws_receivers).await {
+                    Either::First(accept) => accept.map_err(error::svc)?.map_or_else(
+                        || SelectResult::Close,
+                        |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
+                    ),
+                    Either::Second((receive, _)) => {
+                        receive.map(|(size, frame)| SelectResult::Receive(size, frame))?
+                    }
                 }
             }
         };
@@ -173,18 +176,21 @@ where
     A: Acceptor,
 {
     loop {
-        let receiver = receiver.recv().fuse();
-        let valve = valve.recv().fuse();
-        let wm = wm.recv().fuse();
-        let battery = battery.recv().fuse();
+        let receiver = receiver.recv();
+        let valve = valve.recv();
+        let wm = wm.recv();
+        let battery = battery.recv();
 
         pin_mut!(receiver, valve, wm, battery);
 
-        select! {
-            state = receiver => { let (id, event) = state?; web_send_single(&sis, id, &event).await?; },
-            state = valve => web_send_all(&sis, &WebEvent::ValveState(state?)).await?,
-            state = wm => web_send_all(&sis, &WebEvent::WaterMeterState(state?)).await?,
-            state = battery => web_send_all(&sis, &WebEvent::BatteryState(state?)).await?,
+        match select4(receiver, valve, wm, battery).await {
+            Either4::First(state) => {
+                let (id, event) = state?;
+                web_send_single(&sis, id, &event).await?;
+            }
+            Either4::Second(state) => web_send_all(&sis, &WebEvent::ValveState(state?)).await?,
+            Either4::Third(state) => web_send_all(&sis, &WebEvent::WaterMeterState(state?)).await?,
+            Either4::Fourth(state) => web_send_all(&sis, &WebEvent::BatteryState(state?)).await?,
         }
     }
 }
@@ -351,7 +357,7 @@ async fn web_send<A>(ws_sender: &mut A::Sender, event: &WebEvent) -> error::Resu
 where
     A: Acceptor,
 {
-    let mut frame_buf = [0_u8; 1024];
+    let mut frame_buf = [0_u8; 512];
 
     let (frame_type, size) = to_ws_frame(event, &mut frame_buf).unwrap();
 
@@ -367,7 +373,7 @@ async fn web_receive<A>(
 where
     A: Acceptor,
 {
-    let mut frame_buf = [0_u8; 1024];
+    let mut frame_buf = [0_u8; 512];
 
     let (frame_type, size) = ws_receiver.recv(&mut frame_buf).await?;
 

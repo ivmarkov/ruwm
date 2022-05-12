@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
-use futures::{pin_mut, select, FutureExt};
+use embedded_svc::utils::asyncs::select::{select4, Either4};
+use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
@@ -70,15 +71,15 @@ pub async fn run_screen(
     };
 
     loop {
-        let command = button_command.recv().fuse();
-        let valve = valve.recv().fuse();
-        let wm = wm.recv().fuse();
-        let battery = battery.recv().fuse();
+        let command = button_command.recv();
+        let valve = valve.recv();
+        let wm = wm.recv();
+        let battery = battery.recv();
 
         pin_mut!(command, valve, wm, battery);
 
-        let draw_request = select! {
-            command = command => DrawRequest {
+        let draw_request = match select4(command, valve, wm, battery).await {
+            Either4::First(command) => DrawRequest {
                 active_page: match command.map_err(error::svc)? {
                     ButtonCommand::Pressed(1) => screen_state.active_page.prev(),
                     ButtonCommand::Pressed(2) => screen_state.active_page.next(),
@@ -87,18 +88,18 @@ pub async fn run_screen(
                 },
                 ..screen_state
             },
-            valve = valve => DrawRequest {
+            Either4::Second(valve) => DrawRequest {
                 valve: valve.map_err(error::svc)?,
                 ..screen_state
             },
-            wm = wm => DrawRequest {
+            Either4::Third(wm) => DrawRequest {
                 wm: wm.map_err(error::svc)?,
                 ..screen_state
             },
-            battery = battery => DrawRequest {
+            Either4::Fourth(battery) => DrawRequest {
                 battery: battery.map_err(error::svc)?,
                 ..screen_state
-            }
+            },
         };
 
         if screen_state != draw_request {

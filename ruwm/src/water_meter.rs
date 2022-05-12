@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use futures::future::{select, Either};
+use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ pub async fn run(
         pin_mut!(command, tick);
 
         let data = match select(command, tick).await {
-            Either::Left((command, _)) => {
+            Either::First(command) => {
                 let command = command.map_err(error::svc)?;
 
                 let mut data = pulse_counter.get_data().map_err(error::svc)?;
@@ -62,7 +62,7 @@ pub async fn run(
 
                 pulse_counter.swap_data(&data).map_err(error::svc)?
             }
-            Either::Right(_) => {
+            Either::Second(_) => {
                 let mut data = pulse_counter.get_data().map_err(error::svc)?;
 
                 data.edges_count = 0;

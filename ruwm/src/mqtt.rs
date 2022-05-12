@@ -4,7 +4,8 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::format;
 
-use futures::{pin_mut, select, FutureExt};
+use embedded_svc::utils::asyncs::select::{select4, Either4};
+use futures::pin_mut;
 
 use log::info;
 
@@ -59,18 +60,24 @@ pub async fn run_sender(
 
     loop {
         let (mqtt_state, valve_state, wm_state, battery_state) = {
-            let mqtt = mqtt_status.recv().fuse();
-            let valve = valve.recv().fuse();
-            let wm = wm.recv().fuse();
-            let battery = battery.recv().fuse();
+            let mqtt = mqtt_status.recv();
+            let valve = valve.recv();
+            let wm = wm.recv();
+            let battery = battery.recv();
 
             pin_mut!(mqtt, valve, wm, battery);
 
-            select! {
-                mqtt_state = mqtt => (Some(mqtt_state.map_err(error::svc)?), None, None, None),
-                valve_state = valve => (None, Some(valve_state.map_err(error::svc)?), None, None),
-                wm_state = wm => (None, None, Some(wm_state.map_err(error::svc)?), None),
-                battery_state = battery => (None, None, None, Some(battery_state.map_err(error::svc)?)),
+            match select4(mqtt, valve, wm, battery).await {
+                Either4::First(mqtt_state) => {
+                    (Some(mqtt_state.map_err(error::svc)?), None, None, None)
+                }
+                Either4::Second(valve_state) => {
+                    (None, Some(valve_state.map_err(error::svc)?), None, None)
+                }
+                Either4::Third(wm_state) => (None, None, Some(wm_state.map_err(error::svc)?), None),
+                Either4::Fourth(battery_state) => {
+                    (None, None, None, Some(battery_state.map_err(error::svc)?))
+                }
             }
         };
 

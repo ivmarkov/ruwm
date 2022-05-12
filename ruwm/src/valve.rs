@@ -2,8 +2,7 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use futures::future::select;
-use futures::future::Either;
+use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
@@ -49,7 +48,7 @@ pub async fn run_events(
             pin_mut!(command, spin_notif);
 
             match select(command, spin_notif).await {
-                Either::Left((command, _)) => match command.map_err(error::svc)? {
+                Either::First(command) => match command.map_err(error::svc)? {
                     ValveCommand::Open => {
                         let state = state_snapshot.get();
 
@@ -77,7 +76,7 @@ pub async fn run_events(
                         }
                     }
                 },
-                Either::Right(_) => {
+                Either::Second(_) => {
                     let state = state_snapshot.get();
 
                     match state {
@@ -114,18 +113,18 @@ pub async fn run_spin(
         let command = command.recv();
 
         let timer = if current_command.is_some() {
-            Either::Left(once.after(VALVE_TURN_DELAY).map_err(error::svc)?)
+            futures::future::Either::Left(once.after(VALVE_TURN_DELAY).map_err(error::svc)?)
         } else {
-            Either::Right(pending())
+            futures::future::Either::Right(pending())
         };
 
         pin_mut!(command, timer);
 
         match select(command, timer).await {
-            Either::Left((command, _)) => {
+            Either::First(command) => {
                 current_command = Some(command.map_err(error::svc)?);
             }
-            Either::Right(_) => {
+            Either::Second(_) => {
                 current_command = None;
                 complete.send(()).await.map_err(error::svc)?;
             }
