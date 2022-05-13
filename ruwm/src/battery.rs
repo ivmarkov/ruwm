@@ -7,7 +7,7 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::asyncs::Sender;
-use embedded_svc::mutex::Mutex;
+use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::timer::asyncs::OnceTimer;
 
 use crate::error;
@@ -28,8 +28,51 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
+pub struct Battery<M> 
+where 
+    M: MutexFamily,
+{
+    state: StateSnapshot<M::Mutex<BatteryState>>,
+}
+
+impl<M> Battery<M> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            state: StateSnapshot::new(),
+        }
+    }
+
+    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = BatteryState>> {
+        &self.state
+    }
+    
+    pub async fn run<ADC, BP>(
+        &self, 
+        notif: impl Sender<Data = BatteryState>,
+        timer: impl OnceTimer,
+        one_shot: impl adc::OneShot<ADC, u16, BP>,
+        battery_pin: BP,
+        power_pin: impl InputPin<Error = impl error::HalError>,
+    ) -> error::Result<()>
+    where
+        BP: adc::Channel<ADC>,
+    {
+        run(
+            &self.state,
+            notif,
+            timer,
+            one_shot,
+            battery_pin,
+            power_pin,
+        ).await
+    }
+}
+
 pub async fn run<ADC, BP>(
-    state: StateSnapshot<impl Mutex<Data = BatteryState>>,
+    state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
     mut notif: impl Sender<Data = BatteryState>,
     mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,

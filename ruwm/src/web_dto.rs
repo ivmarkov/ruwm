@@ -1,17 +1,17 @@
-extern crate alloc;
-use alloc::string::String;
-
+use heapless::String;
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::{utils::role::Role, wifi::Status};
+use embedded_svc::utils::role::Role;
+use embedded_svc::wifi::Status;
 
-use crate::{
-    battery::BatteryState,
-    valve::{ValveCommand, ValveState},
-    water_meter::{WaterMeterCommand, WaterMeterState},
-};
+use crate::battery::BatteryState;
+use crate::valve::{ValveCommand, ValveState};
+use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
 pub type RequestId = usize;
+
+pub const USERNAME_MAX_LEN: usize = 32;
+pub const PASSWORD_MAX_LEN: usize = 32;
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct WebRequest {
@@ -51,7 +51,7 @@ impl WebRequest {
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum WebRequestPayload {
-    Authenticate(String, String),
+    Authenticate(String<USERNAME_MAX_LEN>, String<PASSWORD_MAX_LEN>),
     Logout,
 
     ValveCommand(ValveCommand),

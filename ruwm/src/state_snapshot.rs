@@ -1,13 +1,10 @@
-extern crate alloc;
-use alloc::sync::Arc;
-
 use embedded_svc::channel::asyncs::Sender;
 use embedded_svc::mutex::Mutex;
 
 use crate::error;
 use crate::storage::Storage;
 
-pub struct StateSnapshot<M>(Arc<M>);
+pub struct StateSnapshot<M>(M);
 
 impl<M, S> StateSnapshot<M>
 where
@@ -17,7 +14,7 @@ where
     where
         S: Default,
     {
-        Self(Arc::new(M::new(Default::default())))
+        Self(M::new(Default::default()))
     }
 
     pub async fn update_with(
@@ -82,15 +79,6 @@ where
 {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl<M> Clone for StateSnapshot<M>
-where
-    M: Send + Sync,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
     }
 }
 

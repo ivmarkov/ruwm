@@ -4,19 +4,21 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::format;
 
-use embedded_svc::utils::asyncs::select::{select4, Either4};
 use futures::pin_mut;
 
 use log::info;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::mqtt::client::Details;
-
+use embedded_svc::utils::asyncs::select::{select4, Either4};
 use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::MutexFamily;
 use embedded_svc::mqtt::client::asyncs::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
+use embedded_svc::mqtt::client::Details;
+use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
+use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -32,6 +34,100 @@ pub enum MqttCommand {
 }
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
+
+pub struct Mqtt<M> 
+where 
+    M: MutexFamily,
+{
+    pub_notif: MutexSignal<M::Mutex<State<MessageId>>, MessageId>, // TODO: Not clear if a signal is a good fit
+    mqtt_notif: MutexSignal<M::Mutex<State<MqttClientNotification>>, MqttClientNotification>, // TODO: Not clear if a signal is a good fit
+    valve_notif: MutexSignal<M::Mutex<State<Option<ValveState>>>, Option<ValveState>>,
+    wm_notif: MutexSignal<M::Mutex<State<WaterMeterState>>, WaterMeterState>,
+    battery_notif: MutexSignal<M::Mutex<State<BatteryState>>, BatteryState>,
+}
+
+impl<M> Mqtt<M> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            pub_notif: MutexSignal::new(),
+            mqtt_notif: MutexSignal::new(),
+            valve_notif: MutexSignal::new(),
+            wm_notif: MutexSignal::new(),
+            battery_notif: MutexSignal::new(),
+        }
+    }
+
+    pub fn mqtt_notif(&self) -> impl Sender<Data = MqttClientNotification> + '_ 
+    where 
+        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
+    {
+        as_sender(&self.mqtt_notif)
+    }
+
+    pub fn valve_notif(&self) -> impl Sender<Data = Option<ValveState>> + '_ 
+    where 
+        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
+    {
+        as_sender(&self.valve_notif)
+    }
+
+    pub fn wm_notif(&self) -> impl Sender<Data = WaterMeterState> + '_ 
+    where 
+        M::Mutex<State<WaterMeterState>>: Send + Sync, 
+    {
+        as_sender(&self.wm_notif)
+    }
+
+    pub fn battery_notif(&self) -> impl Sender<Data = BatteryState> + '_ 
+    where 
+        M::Mutex<State<BatteryState>>: Send + Sync, 
+    {
+        as_sender(&self.battery_notif)
+    }
+
+    pub async fn run_sender(
+        &self,
+        topic_prefix: impl AsRef<str>,
+        mqtt: impl Client + Publish,
+    ) -> error::Result<()> 
+    where 
+        M::Mutex<State<MessageId>>: Send + Sync, 
+        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
+        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
+        M::Mutex<State<WaterMeterState>>: Send + Sync, 
+        M::Mutex<State<BatteryState>>: Send + Sync, 
+    {
+        run_sender(
+            topic_prefix,
+            mqtt,
+            as_sender(&self.pub_notif),
+            as_receiver(&self.mqtt_notif),
+            as_receiver(&self.valve_notif),
+            as_receiver(&self.wm_notif),
+            as_receiver(&self.battery_notif),
+        ).await
+    }
+
+    pub async fn run_receiver(
+        &self, 
+        connection: impl Connection<Message = Option<MqttCommand>>,
+        valve_command: impl Sender<Data = ValveCommand>,
+        wm_command: impl Sender<Data = WaterMeterCommand>,
+    ) -> error::Result<()> 
+    where 
+        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
+    {
+        run_receiver(
+            connection,
+            as_sender(&self.mqtt_notif),
+            valve_command,
+            wm_command,
+        ).await
+    }
+}
 
 pub async fn run_sender(
     topic_prefix: impl AsRef<str>,

@@ -1,14 +1,16 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::mutex::Mutex;
+use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::utils::asyncs::select::{select, Either};
+use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
+use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
 
 use crate::error;
 use crate::pulse_counter::PulseCounter;
@@ -30,8 +32,56 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
+pub struct WaterMeter<M> 
+where 
+    M: MutexFamily,
+{
+    state: StateSnapshot<M::Mutex<WaterMeterState>>,
+    command: MutexSignal<M::Mutex<State<WaterMeterCommand>>, WaterMeterCommand>,
+}
+
+impl<M> WaterMeter<M> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            state: StateSnapshot::new(),
+            command: MutexSignal::new(),
+        }
+    }
+
+    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = WaterMeterState>> {
+        &self.state
+    }
+    
+    pub fn command(&self) -> impl Sender<Data = WaterMeterCommand> + '_ 
+    where 
+        M::Mutex<State<WaterMeterCommand>>: Send + Sync, 
+    {
+        as_sender(&self.command)
+    }
+
+    pub async fn run(
+        &self, 
+        timer: impl OnceTimer,
+        pulse_counter: impl PulseCounter,
+        state_sender: impl Sender<Data = WaterMeterState>) -> error::Result<()> 
+    where 
+        M::Mutex<State<WaterMeterCommand>>: Send + Sync, 
+    {
+        run(
+            &self.state,
+            as_receiver(&self.command),
+            state_sender,
+            timer,
+            pulse_counter,
+        ).await
+    }
+}
+
 pub async fn run(
-    state: StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     mut command: impl Receiver<Data = WaterMeterCommand>,
     mut notif: impl Sender<Data = WaterMeterState>,
     mut timer: impl OnceTimer,

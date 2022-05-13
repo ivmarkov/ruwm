@@ -1,15 +1,17 @@
 use core::time::Duration;
 
-use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::MutexFamily;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::utils::asyncs::select::{select, Either};
+use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
+use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 
-use crate::broadcast_event::{BroadcastEvent, Payload};
 use crate::error;
 use crate::quit::Quit;
 
@@ -22,8 +24,64 @@ pub enum RemainingTime {
     Duration(Duration),
 }
 
+pub struct Keepalive<M, const N: usize> 
+where 
+    M: MutexFamily,
+{
+    events: [MutexSignal<M::Mutex<State<()>>, ()>; N],
+}
+
+impl<M, const N: usize> Keepalive<M, N> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            events: [(); N].iter()
+                .map(|_| MutexSignal::new())
+                .collect::<heapless::Vec<_, N>>()
+                .into_array::<N>()
+                .unwrap_or_else(|_| panic!()),
+        }
+    }
+
+    pub fn events(&self) -> [impl Sender<Data = ()> + '_; N] 
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        self.events.iter()
+            .map(|signal| as_sender(signal))
+            .collect::<heapless::Vec<_, N>>()
+            .into_array()
+            .unwrap_or_else(|_| panic!())
+    }
+
+    pub async fn run(
+        &'static self, 
+        timer: impl OnceTimer,
+        system_time: impl SystemTime,
+        notif: impl Sender<Data = RemainingTime>,
+        quit: impl Sender<Data = Quit>,
+    ) -> error::Result<()>
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        run(
+            self.events.iter()
+                .map(|signal| as_receiver(signal))
+                .collect::<heapless::Vec<_, N>>()
+                .into_array::<N>()
+                .unwrap_or_else(|_| panic!()),
+            timer,
+            system_time,
+            notif,
+            quit,
+        ).await
+    }
+}
+
 pub async fn run(
-    mut event: impl Receiver<Data = BroadcastEvent>,
+    mut event: impl Receiver<Data = ()>,
     mut timer: impl OnceTimer,
     system_time: impl SystemTime,
     mut notif: impl Sender<Data = RemainingTime>,
@@ -43,22 +101,19 @@ pub async fn run(
         let result = select(event, tick).await;
         let now = system_time.now();
 
-        if let Either::First(event) = result {
-            let event = event.map_err(error::svc)?;
+        if let Either::First(_) = result {
+            quit_time = Some(now + TIMEOUT);
 
-            quit_time = match event.payload() {
-                Payload::ValveCommand(_)
-                | Payload::ValveState(_)
-                | Payload::WaterMeterCommand(_)
-                | Payload::WaterMeterState(_)
-                | Payload::ButtonCommand(_)
-                | Payload::MqttClientNotification(_)
-                | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
-                Payload::BatteryState(battery_state) => {
-                    battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
-                }
-                _ => quit_time,
-            };
+            // Payload::ValveCommand(_)
+            // | Payload::ValveState(_)
+            // | Payload::WaterMeterCommand(_)
+            // | Payload::WaterMeterState(_)
+            // | Payload::ButtonCommand(_)
+            // | Payload::MqttClientNotification(_)
+            // | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
+            // Payload::BatteryState(battery_state) => {
+            //     battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
+            // }
         }
 
         if quit_time.map(|quit_time| now >= quit_time).unwrap_or(false) {

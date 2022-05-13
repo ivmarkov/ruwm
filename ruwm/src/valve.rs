@@ -2,16 +2,18 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use embedded_svc::utils::asyncs::select::{select, Either};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::mutex::Mutex;
-use embedded_svc::timer::asyncs::OnceTimer;
-
 use embedded_hal::digital::v2::OutputPin;
+
+use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::utils::asyncs::select::{select, Either};
+use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
+use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 
 use crate::error;
 use crate::state_snapshot::StateSnapshot;
@@ -33,8 +35,78 @@ pub enum ValveCommand {
     Close,
 }
 
+pub struct Valve<M> 
+where 
+    M: MutexFamily,
+{
+    state: StateSnapshot<M::Mutex<Option<ValveState>>>,
+    spin_notif: MutexSignal<M::Mutex<State<()>>, ()>,
+    spin_command: MutexSignal<M::Mutex<State<ValveCommand>>, ValveCommand>,
+    command: MutexSignal<M::Mutex<State<ValveCommand>>, ValveCommand>,
+}
+
+impl<M> Valve<M> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            state: StateSnapshot::new(),
+            spin_notif: MutexSignal::new(),
+            spin_command: MutexSignal::new(),
+            command: MutexSignal::new(),
+        }
+    }
+
+    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = Option<ValveState>>> {
+        &self.state
+    }
+
+    pub fn command(&self) -> impl Sender<Data = ValveCommand> + '_ 
+    where 
+        M::Mutex<State<ValveCommand>>: Send + Sync, 
+    {
+        as_sender(&self.command)
+    }
+
+    pub async fn run_spin(
+        &self,
+        once: impl OnceTimer,
+        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+    ) -> error::Result<()> 
+    where 
+        M::Mutex<State<ValveCommand>>: Send + Sync, 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        run_spin(
+            once,
+            as_receiver(&self.spin_command),
+            as_sender(&self.spin_notif),
+            power_pin,
+            open_pin,
+            close_pin,
+        ).await
+    }
+
+    pub async fn run_events(&self, state_sender: impl Sender<Data = Option<ValveState>>) -> error::Result<()> 
+    where 
+        M::Mutex<State<ValveCommand>>: Send + Sync, 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        run_events(
+            &self.state,
+            as_receiver(&self.command),
+            state_sender,
+            as_sender(&self.spin_command),
+            as_receiver(&self.spin_notif),
+        ).await
+    }
+}
+
 pub async fn run_events(
-    state_snapshot: StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    state_snapshot: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     mut command: impl Receiver<Data = ValveCommand>,
     mut notif: impl Sender<Data = Option<ValveState>>,
     mut spin_command: impl Sender<Data = ValveCommand>,

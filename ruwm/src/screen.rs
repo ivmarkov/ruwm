@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 
-use embedded_svc::utils::asyncs::select::{select4, Either4};
 use futures::pin_mut;
 
 use serde::{Deserialize, Serialize};
@@ -8,10 +7,13 @@ use serde::{Deserialize, Serialize};
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::MutexFamily;
 use embedded_svc::unblocker::asyncs::Unblocker;
+use embedded_svc::utils::asyncs::select::{select4, Either4, Either3, select3};
+use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
+use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 
 use crate::battery::BatteryState;
-use crate::button::ButtonCommand;
 use crate::error;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
@@ -52,9 +54,123 @@ pub struct DrawRequest {
     battery: BatteryState,
 }
 
+pub struct Screen<M> 
+where 
+    M: MutexFamily,
+{
+    button1_command: MutexSignal<M::Mutex<State<()>>, ()>,
+    button2_command: MutexSignal<M::Mutex<State<()>>, ()>,
+    button3_command: MutexSignal<M::Mutex<State<()>>, ()>,
+    valve_notif: MutexSignal<M::Mutex<State<Option<ValveState>>>, Option<ValveState>>,
+    wm_notif: MutexSignal<M::Mutex<State<WaterMeterState>>, WaterMeterState>,
+    battery_notif: MutexSignal<M::Mutex<State<BatteryState>>, BatteryState>,
+    draw_notif: MutexSignal<M::Mutex<State<DrawRequest>>, DrawRequest>,
+}
+
+impl<M> Screen<M> 
+where 
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            button1_command: MutexSignal::new(),
+            button2_command: MutexSignal::new(),
+            button3_command: MutexSignal::new(),
+            valve_notif: MutexSignal::new(),
+            wm_notif: MutexSignal::new(),
+            battery_notif: MutexSignal::new(),
+            draw_notif: MutexSignal::new(),
+        }
+    }
+
+    pub fn button1_command(&self) -> impl Sender<Data = ()> + '_ 
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        as_sender(&self.button1_command)
+    }
+
+    pub fn button2_command(&self) -> impl Sender<Data = ()> + '_ 
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        as_sender(&self.button2_command)
+    }
+
+    pub fn button3_command(&self) -> impl Sender<Data = ()> + '_ 
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+    {
+        as_sender(&self.button3_command)
+    }
+
+    pub fn valve_notif(&self) -> impl Sender<Data = Option<ValveState>> + '_ 
+    where 
+        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
+    {
+        as_sender(&self.valve_notif)
+    }
+
+    pub fn wm_notif(&self) -> impl Sender<Data = WaterMeterState> + '_ 
+    where 
+        M::Mutex<State<WaterMeterState>>: Send + Sync, 
+    {
+        as_sender(&self.wm_notif)
+    }
+
+    pub fn battery_notif(&self) -> impl Sender<Data = BatteryState> + '_ 
+    where 
+        M::Mutex<State<BatteryState>>: Send + Sync, 
+    {
+        as_sender(&self.battery_notif)
+    }
+
+    pub async fn run_screen(
+        &self,
+        valve_state: Option<ValveState>,
+        wm_state: WaterMeterState,
+        battery_state: BatteryState,
+    ) -> error::Result<()> 
+    where 
+        M::Mutex<State<()>>: Send + Sync, 
+        M::Mutex<State<DrawRequest>>: Send + Sync, 
+        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
+        M::Mutex<State<WaterMeterState>>: Send + Sync, 
+        M::Mutex<State<BatteryState>>: Send + Sync, 
+    {
+        run_screen(
+            as_receiver(&self.button1_command),
+            as_receiver(&self.button2_command),
+            as_receiver(&self.button3_command),
+            as_receiver(&self.valve_notif),
+            as_receiver(&self.wm_notif),
+            as_receiver(&self.battery_notif),
+            valve_state,
+            wm_state,
+            battery_state,
+            as_sender(&self.draw_notif),
+        ).await
+    }
+
+    pub async fn run_draw_engine<D>(&self, display: D) -> error::Result<()>
+    where 
+        M::Mutex<State<DrawRequest>>: Send + Sync, 
+        D: FlushableDrawTarget + Send + 'static,
+        D::Color: RgbColor,
+        D::Error: Debug,
+    {
+        run_draw_engine(
+            as_receiver(&self.draw_notif),
+            display,
+        ).await
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_screen(
-    mut button_command: impl Receiver<Data = ButtonCommand>,
+    mut button1_command: impl Receiver<Data = ()>,
+    mut button2_command: impl Receiver<Data = ()>,
+    mut button3_command: impl Receiver<Data = ()>,
     mut valve: impl Receiver<Data = Option<ValveState>>,
     mut wm: impl Receiver<Data = WaterMeterState>,
     mut battery: impl Receiver<Data = BatteryState>,
@@ -71,21 +187,26 @@ pub async fn run_screen(
     };
 
     loop {
-        let command = button_command.recv();
+        let button1_command = button1_command.recv();
+        let button2_command = button2_command.recv();
+        let button3_command = button3_command.recv();
         let valve = valve.recv();
         let wm = wm.recv();
         let battery = battery.recv();
 
-        pin_mut!(command, valve, wm, battery);
+        pin_mut!(button1_command, button2_command, button3_command, valve, wm, battery);
 
-        let draw_request = match select4(command, valve, wm, battery).await {
-            Either4::First(command) => DrawRequest {
-                active_page: match command.map_err(error::svc)? {
-                    ButtonCommand::Pressed(1) => screen_state.active_page.prev(),
-                    ButtonCommand::Pressed(2) => screen_state.active_page.next(),
-                    ButtonCommand::Pressed(3) => screen_state.active_page,
-                    _ => panic!("What's that button?"),
-                },
+        let draw_request = match select4(select3(button1_command, button2_command, button3_command), valve, wm, battery).await {
+            Either4::First(Either3::First(_)) => DrawRequest {
+                active_page: screen_state.active_page.prev(),
+                ..screen_state
+            },
+            Either4::First(Either3::Second(_)) => DrawRequest {
+                active_page: screen_state.active_page.next(),
+                ..screen_state
+            },
+            Either4::First(Either3::Third(_)) => DrawRequest {
+                active_page: screen_state.active_page,
                 ..screen_state
             },
             Either4::Second(valve) => DrawRequest {

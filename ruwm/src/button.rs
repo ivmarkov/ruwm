@@ -14,25 +14,17 @@ use embedded_svc::timer::asyncs::OnceTimer;
 
 use crate::error;
 
-pub type ButtonId = u8;
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
     Low,
     High,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ButtonCommand {
-    Pressed(ButtonId),
-}
-
 pub async fn run(
-    id: ButtonId,
     mut pin_edge: impl Receiver,
     pin: impl InputPin<Error = impl error::HalError>,
     mut timer: impl OnceTimer,
-    mut notif: impl Sender<Data = ButtonCommand>,
+    mut notif: impl Sender<Data = ()>,
     pressed_level: PressedLevel,
     debounce_time: Option<Duration>,
 ) -> error::Result<()> {
@@ -75,7 +67,7 @@ pub async fn run(
 
             if pressed {
                 notif
-                    .send(ButtonCommand::Pressed(id))
+                    .send(())
                     .await
                     .map_err(error::svc)?;
             }
