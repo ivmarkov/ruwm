@@ -9,7 +9,7 @@ use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asyncs::Unblocker;
 use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
+use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
 use crate::battery::BatteryState;
 use crate::error;

@@ -76,7 +76,7 @@ where
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
     ) -> error::Result<()> {
-        run_sender(
+        send(
             topic_prefix,
             mqtt,
             as_static_receiver(&self.notif_signal),
@@ -94,7 +94,7 @@ where
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
     ) -> error::Result<()> {
-        run_receiver(
+        receive(
             connection,
             as_static_sender(&self.notif_signal),
             valve_command_sink,
@@ -104,7 +104,7 @@ where
     }
 }
 
-pub async fn run_sender(
+pub async fn send(
     topic_prefix: impl AsRef<str>,
     mut mqtt: impl Client + Publish,
     mut notif_source: impl Receiver<Data = MqttClientNotification>,
@@ -334,7 +334,7 @@ async fn publish(
     Ok(())
 }
 
-pub async fn run_receiver(
+pub async fn receive(
     mut connection: impl Connection<Message = Option<MqttCommand>>,
     mut notif_sink: impl Sender<Data = MqttClientNotification>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
