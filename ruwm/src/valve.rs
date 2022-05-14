@@ -2,18 +2,16 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use futures::pin_mut;
-
 use serde::{Deserialize, Serialize};
 
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::signal::asyncs::{Signal, SendSyncSignalFamily};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
 use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
-use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 
 use crate::error;
 use crate::state_snapshot::StateSnapshot;
@@ -37,36 +35,33 @@ pub enum ValveCommand {
 
 pub struct Valve<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     state: StateSnapshot<M::Mutex<Option<ValveState>>>,
-    spin_notif: MutexSignal<M::Mutex<State<()>>, ()>,
-    spin_command: MutexSignal<M::Mutex<State<ValveCommand>>, ValveCommand>,
-    command: MutexSignal<M::Mutex<State<ValveCommand>>, ValveCommand>,
+    command_signal: M::Signal<ValveCommand>,
+    spin_command_signal: M::Signal<ValveCommand>,
+    spin_finished_signal: M::Signal<()>,
 }
 
 impl<M> Valve<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
             state: StateSnapshot::new(),
-            spin_notif: MutexSignal::new(),
-            spin_command: MutexSignal::new(),
-            command: MutexSignal::new(),
+            command_signal: M::Signal::new(),
+            spin_command_signal: M::Signal::new(),
+            spin_finished_signal: M::Signal::new(),
         }
     }
 
-    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = Option<ValveState>>> {
+    pub fn state(&'static self) -> &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>> {
         &self.state
     }
 
-    pub fn command(&self) -> impl Sender<Data = ValveCommand> + '_ 
-    where 
-        M::Mutex<State<ValveCommand>>: Send + Sync, 
-    {
-        as_sender(&self.command)
+    pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + '_ {
+        as_sender(&self.command_signal)
     }
 
     pub async fn run_spin(
@@ -75,102 +70,35 @@ where
         power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
-    ) -> error::Result<()> 
-    where 
-        M::Mutex<State<ValveCommand>>: Send + Sync, 
-        M::Mutex<State<()>>: Send + Sync, 
-    {
+    ) -> error::Result<()> {
         run_spin(
             once,
-            as_receiver(&self.spin_command),
-            as_sender(&self.spin_notif),
             power_pin,
             open_pin,
             close_pin,
+            as_receiver(&self.spin_command_signal),
+            as_sender(&self.spin_finished_signal),
         ).await
     }
 
-    pub async fn run_events(&self, state_sender: impl Sender<Data = Option<ValveState>>) -> error::Result<()> 
-    where 
-        M::Mutex<State<ValveCommand>>: Send + Sync, 
-        M::Mutex<State<()>>: Send + Sync, 
-    {
-        run_events(
+    pub async fn run_receiver(&self, notif: impl Sender<Data = Option<ValveState>>) -> error::Result<()> {
+        run_receiver(
             &self.state,
-            as_receiver(&self.command),
-            state_sender,
-            as_sender(&self.spin_command),
-            as_receiver(&self.spin_notif),
+            as_receiver(&self.command_signal),
+            as_receiver(&self.spin_finished_signal),
+            as_sender(&self.spin_command_signal),
+            notif,
         ).await
-    }
-}
-
-pub async fn run_events(
-    state_snapshot: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    mut command: impl Receiver<Data = ValveCommand>,
-    mut notif: impl Sender<Data = Option<ValveState>>,
-    mut spin_command: impl Sender<Data = ValveCommand>,
-    mut spin_notif: impl Receiver<Data = ()>,
-) -> error::Result<()> {
-    loop {
-        let state = {
-            let command = command.recv();
-            let spin_notif = spin_notif.recv();
-
-            pin_mut!(command, spin_notif);
-
-            match select(command, spin_notif).await {
-                Either::First(command) => match command.map_err(error::svc)? {
-                    ValveCommand::Open => {
-                        let state = state_snapshot.get();
-
-                        if !matches!(state, Some(ValveState::Open) | Some(ValveState::Opening)) {
-                            spin_command
-                                .send(ValveCommand::Open)
-                                .await
-                                .map_err(error::svc)?;
-                            Some(ValveState::Opening)
-                        } else {
-                            state
-                        }
-                    }
-                    ValveCommand::Close => {
-                        let state = state_snapshot.get();
-
-                        if !matches!(state, Some(ValveState::Closed) | Some(ValveState::Closing)) {
-                            spin_command
-                                .send(ValveCommand::Close)
-                                .await
-                                .map_err(error::svc)?;
-                            Some(ValveState::Closing)
-                        } else {
-                            state
-                        }
-                    }
-                },
-                Either::Second(_) => {
-                    let state = state_snapshot.get();
-
-                    match state {
-                        Some(ValveState::Opening) => Some(ValveState::Open),
-                        Some(ValveState::Closing) => Some(ValveState::Closed),
-                        _ => None,
-                    }
-                }
-            }
-        };
-
-        state_snapshot.update(state, &mut notif).await?;
     }
 }
 
 pub async fn run_spin(
     mut once: impl OnceTimer,
-    mut command: impl Receiver<Data = ValveCommand>,
-    mut complete: impl Sender<Data = ()>,
     mut power_pin: impl OutputPin<Error = impl error::HalError>,
     mut open_pin: impl OutputPin<Error = impl error::HalError>,
     mut close_pin: impl OutputPin<Error = impl error::HalError>,
+    mut command_source: impl Receiver<Data = ValveCommand>,
+    mut spin_finished_sink: impl Sender<Data = ()>,
 ) -> error::Result<()> {
     let mut current_command: Option<ValveCommand> = None;
 
@@ -182,7 +110,7 @@ pub async fn run_spin(
             &mut power_pin,
         )?;
 
-        let command = command.recv();
+        let command = command_source.recv();
 
         let timer = if current_command.is_some() {
             futures::future::Either::Left(once.after(VALVE_TURN_DELAY).map_err(error::svc)?)
@@ -190,7 +118,7 @@ pub async fn run_spin(
             futures::future::Either::Right(pending())
         };
 
-        pin_mut!(command, timer);
+        //pin_mut!(command, timer);
 
         match select(command, timer).await {
             Either::First(command) => {
@@ -198,7 +126,7 @@ pub async fn run_spin(
             }
             Either::Second(_) => {
                 current_command = None;
-                complete.send(()).await.map_err(error::svc)?;
+                spin_finished_sink.send(()).await.map_err(error::svc)?;
             }
         }
     }
@@ -229,4 +157,63 @@ pub fn start_run(
     };
 
     Ok(())
+}
+
+pub async fn run_receiver(
+    state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    mut command_source: impl Receiver<Data = ValveCommand>,
+    mut spin_finished_source: impl Receiver<Data = ()>,
+    mut spin_command_sink: impl Sender<Data = ValveCommand>,
+    mut state_sink: impl Sender<Data = Option<ValveState>>,
+) -> error::Result<()> {
+    loop {
+        let current_state = {
+            let command = command_source.recv();
+            let spin_notif = spin_finished_source.recv();
+
+            //pin_mut!(command, spin_notif);
+
+            match select(command, spin_notif).await {
+                Either::First(command) => match command.map_err(error::svc)? {
+                    ValveCommand::Open => {
+                        let state = state.get();
+
+                        if !matches!(state, Some(ValveState::Open) | Some(ValveState::Opening)) {
+                            spin_command_sink
+                                .send(ValveCommand::Open)
+                                .await
+                                .map_err(error::svc)?;
+                            Some(ValveState::Opening)
+                        } else {
+                            state
+                        }
+                    }
+                    ValveCommand::Close => {
+                        let state = state.get();
+
+                        if !matches!(state, Some(ValveState::Closed) | Some(ValveState::Closing)) {
+                            spin_command_sink
+                                .send(ValveCommand::Close)
+                                .await
+                                .map_err(error::svc)?;
+                            Some(ValveState::Closing)
+                        } else {
+                            state
+                        }
+                    }
+                },
+                Either::Second(_) => {
+                    let state = state.get();
+
+                    match state {
+                        Some(ValveState::Opening) => Some(ValveState::Open),
+                        Some(ValveState::Closing) => Some(ValveState::Closed),
+                        _ => None,
+                    }
+                }
+            }
+        };
+
+        state.update(current_state, &mut state_sink).await?;
+    }
 }

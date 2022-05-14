@@ -1,15 +1,13 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use futures::pin_mut;
-
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
 use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
 
 use crate::error;
@@ -34,20 +32,20 @@ pub enum WaterMeterCommand {
 
 pub struct WaterMeter<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     state: StateSnapshot<M::Mutex<WaterMeterState>>,
-    command: MutexSignal<M::Mutex<State<WaterMeterCommand>>, WaterMeterCommand>,
+    command_signal: M::Signal<WaterMeterCommand>,
 }
 
 impl<M> WaterMeter<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
             state: StateSnapshot::new(),
-            command: MutexSignal::new(),
+            command_signal: M::Signal::new(),
         }
     }
 
@@ -55,47 +53,41 @@ where
         &self.state
     }
     
-    pub fn command(&self) -> impl Sender<Data = WaterMeterCommand> + '_ 
-    where 
-        M::Mutex<State<WaterMeterCommand>>: Send + Sync, 
-    {
-        as_sender(&self.command)
+    pub fn command_sink(&self) -> impl Sender<Data = WaterMeterCommand> + '_ {
+        as_sender(&self.command_signal)
     }
 
     pub async fn run(
         &self, 
         timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
-        state_sender: impl Sender<Data = WaterMeterState>) -> error::Result<()> 
-    where 
-        M::Mutex<State<WaterMeterCommand>>: Send + Sync, 
-    {
+        state_sink: impl Sender<Data = WaterMeterState>) -> error::Result<()> {
         run(
-            &self.state,
-            as_receiver(&self.command),
-            state_sender,
             timer,
             pulse_counter,
+            &self.state,
+            as_receiver(&self.command_signal),
+            state_sink,
         ).await
     }
 }
 
 pub async fn run(
-    state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-    mut command: impl Receiver<Data = WaterMeterCommand>,
-    mut notif: impl Sender<Data = WaterMeterState>,
     mut timer: impl OnceTimer,
     mut pulse_counter: impl PulseCounter,
+    state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    mut command_source: impl Receiver<Data = WaterMeterCommand>,
+    mut state_sink: impl Sender<Data = WaterMeterState>,
 ) -> error::Result<()> {
     pulse_counter.start().map_err(error::svc)?;
 
     loop {
-        let command = command.recv();
+        let command = command_source.recv();
         let tick = timer
             .after(Duration::from_secs(2) /*Duration::from_millis(200)*/)
             .map_err(error::svc)?;
 
-        pin_mut!(command, tick);
+        //pin_mut!(command, tick);
 
         let data = match select(command, tick).await {
             Either::First(command) => {
@@ -135,7 +127,7 @@ pub async fn run(
                             && data.wakeup_edges > 0,
                     })
                 },
-                &mut notif,
+                &mut state_sink,
             )
             .await?;
     }

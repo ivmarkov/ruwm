@@ -51,33 +51,33 @@ where
     
     pub async fn run<ADC, BP>(
         &self, 
-        notif: impl Sender<Data = BatteryState>,
         timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
         power_pin: impl InputPin<Error = impl error::HalError>,
+        state_sink: impl Sender<Data = BatteryState>,
     ) -> error::Result<()>
     where
         BP: adc::Channel<ADC>,
     {
         run(
-            &self.state,
-            notif,
             timer,
             one_shot,
             battery_pin,
             power_pin,
+            &self.state,
+            state_sink,
         ).await
     }
 }
 
 pub async fn run<ADC, BP>(
-    state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-    mut notif: impl Sender<Data = BatteryState>,
     mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
     power_pin: impl InputPin<Error = impl error::HalError>,
+    state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
+    mut state_sink: impl Sender<Data = BatteryState>,
 ) -> error::Result<()>
 where
     BP: adc::Channel<ADC>,
@@ -108,7 +108,7 @@ where
                         powered,
                     })
                 },
-                &mut notif,
+                &mut state_sink,
             )
             .await?;
     }

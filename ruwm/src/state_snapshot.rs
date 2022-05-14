@@ -48,7 +48,7 @@ where
         }
     }
 
-    pub async fn update(&self, state: S, notif: &mut impl Sender<Data = S>) -> error::Result<bool>
+    pub async fn update(&self, state: S, state_sink: &mut impl Sender<Data = S>) -> error::Result<bool>
     where
         S: PartialEq + Clone,
     {
@@ -65,7 +65,7 @@ where
         };
 
         if updated {
-            notif.send(state).await.map_err(error::svc)?;
+            state_sink.send(state).await.map_err(error::svc)?;
         }
 
         Ok(updated)

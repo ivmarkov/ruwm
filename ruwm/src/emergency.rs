@@ -1,90 +1,72 @@
-use futures::pin_mut;
-
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
+use embedded_svc::signal::asyncs::{Signal, SendSyncSignalFamily};
 use embedded_svc::utils::asyncs::select::{select3, Either3};
-use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
-use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
+use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
 use crate::battery::BatteryState;
 use crate::error;
+use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
 pub struct Emergency<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
-    valve_notif: MutexSignal<M::Mutex<State<Option<ValveState>>>, Option<ValveState>>,
-    wm_notif: MutexSignal<M::Mutex<State<WaterMeterState>>, WaterMeterState>,
-    battery_notif: MutexSignal<M::Mutex<State<BatteryState>>, BatteryState>,
+    valve_state_signal: M::Signal<Option<ValveState>>,
+    wm_state_signal: M::Signal<WaterMeterState>,
+    battery_state_signal: M::Signal<BatteryState>,
 }
 
 impl<M> Emergency<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            valve_notif: MutexSignal::new(),
-            wm_notif: MutexSignal::new(),
-            battery_notif: MutexSignal::new(),
+            valve_state_signal: M::Signal::new(),
+            wm_state_signal: M::Signal::new(),
+            battery_state_signal: M::Signal::new(),
         }
     }
 
-    pub fn valve_notif(&self) -> impl Sender<Data = Option<ValveState>> + '_ 
-    where 
-        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
-    {
-        as_sender(&self.valve_notif)
+    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_  {
+        as_sender(&self.valve_state_signal)
     }
 
-    pub fn wm_notif(&self) -> impl Sender<Data = WaterMeterState> + '_ 
-    where 
-        M::Mutex<State<WaterMeterState>>: Send + Sync, 
-    {
-        as_sender(&self.wm_notif)
+    pub fn wm_state_sink(&self) -> impl Sender<Data = WaterMeterState> + '_ {
+        as_sender(&self.wm_state_signal)
     }
 
-    pub fn battery_notif(&self) -> impl Sender<Data = BatteryState> + '_ 
-    where 
-        M::Mutex<State<BatteryState>>: Send + Sync, 
-    {
-        as_sender(&self.battery_notif)
+    pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
+        as_sender(&self.battery_state_signal)
     }
     
-    pub async fn run(
-        &self, 
-        notif: impl Sender<Data = ValveCommand>,
-    ) -> error::Result<()>
-    where 
-        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
-        M::Mutex<State<WaterMeterState>>: Send + Sync, 
-        M::Mutex<State<BatteryState>>: Send + Sync, 
-    {
+    pub async fn run(&'static self, valve_command: impl Sender<Data = ValveCommand>) -> error::Result<()> {
         run(
-            notif,
-            as_receiver(&self.valve_notif),
-            as_receiver(&self.wm_notif),
-            as_receiver(&self.battery_notif),
+            as_static_receiver(&self.valve_state_signal),
+            as_static_receiver(&self.wm_state_signal),
+            as_static_receiver(&self.battery_state_signal),
+            valve_command,
         ).await
     }
 }
 
 pub async fn run(
-    mut notif: impl Sender<Data = ValveCommand>,
-    mut valve: impl Receiver<Data = Option<ValveState>>,
-    mut wm: impl Receiver<Data = WaterMeterState>,
-    mut battery: impl Receiver<Data = BatteryState>,
+    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
+    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
+    mut battery_state_source: impl Receiver<Data = BatteryState>,
+    mut valve_command_sink: impl Sender<Data = ValveCommand>,
 ) -> error::Result<()> {
     let mut valve_state = None;
 
     loop {
-        let valve = valve.recv();
-        let wm = wm.recv();
-        let battery = battery.recv();
+        let valve = valve_state_source.recv();
+        let wm = wm_state_source.recv();
+        let battery = battery_state_source.recv();
 
-        pin_mut!(valve, wm, battery);
+        //pin_mut!(valve, wm, battery);
 
         let emergency_close = match select3(valve, wm, battery).await {
             Either3::First(valve) => {
@@ -119,7 +101,7 @@ pub async fn run(
                 Some(ValveState::Closing) | Some(ValveState::Closed)
             )
         {
-            notif.send(ValveCommand::Close).await.map_err(error::svc)?;
+            valve_command_sink.send(ValveCommand::Close).await.map_err(error::svc)?;
         }
     }
 }

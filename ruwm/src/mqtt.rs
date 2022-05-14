@@ -4,8 +4,6 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::format;
 
-use futures::pin_mut;
-
 use log::info;
 
 use serde::{Deserialize, Serialize};
@@ -17,11 +15,12 @@ use embedded_svc::mqtt::client::asyncs::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
-use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
-use embedded_svc::utils::asyncs::signal::{MutexSignal, State};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
 use crate::battery::BatteryState;
 use crate::error;
+use crate::utils::{as_static_sender, as_static_receiver};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -37,94 +36,68 @@ pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
 pub struct Mqtt<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
-    pub_notif: MutexSignal<M::Mutex<State<MessageId>>, MessageId>, // TODO: Not clear if a signal is a good fit
-    mqtt_notif: MutexSignal<M::Mutex<State<MqttClientNotification>>, MqttClientNotification>, // TODO: Not clear if a signal is a good fit
-    valve_notif: MutexSignal<M::Mutex<State<Option<ValveState>>>, Option<ValveState>>,
-    wm_notif: MutexSignal<M::Mutex<State<WaterMeterState>>, WaterMeterState>,
-    battery_notif: MutexSignal<M::Mutex<State<BatteryState>>, BatteryState>,
+    pub_signal: M::Signal<MessageId>, // TODO: Not clear if a signal is a good fit
+    notif_signal: M::Signal<MqttClientNotification>, // TODO: Not clear if a signal is a good fit
+    valve_state_signal: M::Signal<Option<ValveState>>,
+    wm_state_signal: M::Signal<WaterMeterState>,
+    battery_state_signal: M::Signal<BatteryState>,
 }
 
 impl<M> Mqtt<M> 
 where 
-    M: MutexFamily,
+    M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            pub_notif: MutexSignal::new(),
-            mqtt_notif: MutexSignal::new(),
-            valve_notif: MutexSignal::new(),
-            wm_notif: MutexSignal::new(),
-            battery_notif: MutexSignal::new(),
+            pub_signal: M::Signal::new(),
+            notif_signal: M::Signal::new(),
+            valve_state_signal: M::Signal::new(),
+            wm_state_signal: M::Signal::new(),
+            battery_state_signal: M::Signal::new(),
         }
     }
 
-    pub fn mqtt_notif(&self) -> impl Sender<Data = MqttClientNotification> + '_ 
-    where 
-        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
-    {
-        as_sender(&self.mqtt_notif)
+    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_ {
+        as_sender(&self.valve_state_signal)
     }
 
-    pub fn valve_notif(&self) -> impl Sender<Data = Option<ValveState>> + '_ 
-    where 
-        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
-    {
-        as_sender(&self.valve_notif)
+    pub fn wm_state_sink(&self) -> impl Sender<Data = WaterMeterState> + '_ {
+        as_sender(&self.wm_state_signal)
     }
 
-    pub fn wm_notif(&self) -> impl Sender<Data = WaterMeterState> + '_ 
-    where 
-        M::Mutex<State<WaterMeterState>>: Send + Sync, 
-    {
-        as_sender(&self.wm_notif)
-    }
-
-    pub fn battery_notif(&self) -> impl Sender<Data = BatteryState> + '_ 
-    where 
-        M::Mutex<State<BatteryState>>: Send + Sync, 
-    {
-        as_sender(&self.battery_notif)
+    pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
+        as_sender(&self.battery_state_signal)
     }
 
     pub async fn run_sender(
-        &self,
+        &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
-    ) -> error::Result<()> 
-    where 
-        M::Mutex<State<MessageId>>: Send + Sync, 
-        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
-        M::Mutex<State<Option<ValveState>>>: Send + Sync, 
-        M::Mutex<State<WaterMeterState>>: Send + Sync, 
-        M::Mutex<State<BatteryState>>: Send + Sync, 
-    {
+    ) -> error::Result<()> {
         run_sender(
             topic_prefix,
             mqtt,
-            as_sender(&self.pub_notif),
-            as_receiver(&self.mqtt_notif),
-            as_receiver(&self.valve_notif),
-            as_receiver(&self.wm_notif),
-            as_receiver(&self.battery_notif),
+            as_static_receiver(&self.notif_signal),
+            as_static_receiver(&self.valve_state_signal),
+            as_static_receiver(&self.wm_state_signal),
+            as_static_receiver(&self.battery_state_signal),
+            as_static_sender(&self.pub_signal),
         ).await
     }
 
     pub async fn run_receiver(
-        &self, 
+        &'static self, 
         connection: impl Connection<Message = Option<MqttCommand>>,
-        valve_command: impl Sender<Data = ValveCommand>,
-        wm_command: impl Sender<Data = WaterMeterCommand>,
-    ) -> error::Result<()> 
-    where 
-        M::Mutex<State<MqttClientNotification>>: Send + Sync, 
-    {
+        valve_command_sink: impl Sender<Data = ValveCommand>,
+        wm_command_sink: impl Sender<Data = WaterMeterCommand>,
+    ) -> error::Result<()> {
         run_receiver(
             connection,
-            as_sender(&self.mqtt_notif),
-            valve_command,
-            wm_command,
+            as_static_sender(&self.notif_signal),
+            valve_command_sink,
+            wm_command_sink,
         ).await
     }
 }
@@ -132,11 +105,11 @@ where
 pub async fn run_sender(
     topic_prefix: impl AsRef<str>,
     mut mqtt: impl Client + Publish,
-    mut pubq: impl Sender<Data = MessageId>,
-    mut mqtt_status: impl Receiver<Data = MqttClientNotification>,
-    mut valve: impl Receiver<Data = Option<ValveState>>,
-    mut wm: impl Receiver<Data = WaterMeterState>,
-    mut battery: impl Receiver<Data = BatteryState>,
+    mut notif_source: impl Receiver<Data = MqttClientNotification>,
+    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
+    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
+    mut battery_state_source: impl Receiver<Data = BatteryState>,
+    mut pub_sink: impl Sender<Data = MessageId>,
 ) -> error::Result<()> {
     let mut connected = false;
 
@@ -156,12 +129,12 @@ pub async fn run_sender(
 
     loop {
         let (mqtt_state, valve_state, wm_state, battery_state) = {
-            let mqtt = mqtt_status.recv();
-            let valve = valve.recv();
-            let wm = wm.recv();
-            let battery = battery.recv();
+            let mqtt = notif_source.recv();
+            let valve = valve_state_source.recv();
+            let wm = wm_state_source.recv();
+            let battery = battery_state_source.recv();
 
-            pin_mut!(mqtt, valve, wm, battery);
+            //pin_mut!(mqtt, valve, wm, battery);
 
             match select4(mqtt, valve, wm, battery).await {
                 Either4::First(mqtt_state) => {
@@ -206,7 +179,7 @@ pub async fn run_sender(
             publish(
                 connected,
                 &mut mqtt,
-                &mut pubq,
+                &mut pub_sink,
                 &topic_valve,
                 QoS::AtLeastOnce,
                 status.as_bytes(),
@@ -222,7 +195,7 @@ pub async fn run_sender(
                 publish(
                     connected,
                     &mut mqtt,
-                    &mut pubq,
+                    &mut pub_sink,
                     &topic_meter_edges,
                     QoS::AtLeastOnce,
                     num_slice,
@@ -234,7 +207,7 @@ pub async fn run_sender(
                 publish(
                     connected,
                     &mut mqtt,
-                    &mut pubq,
+                    &mut pub_sink,
                     &topic_meter_armed,
                     QoS::AtLeastOnce,
                     (if wm_state.armed { "true" } else { "false" }).as_bytes(),
@@ -246,7 +219,7 @@ pub async fn run_sender(
                 publish(
                     connected,
                     &mut mqtt,
-                    &mut pubq,
+                    &mut pub_sink,
                     &topic_meter_leak,
                     QoS::AtLeastOnce,
                     (if wm_state.armed { "true" } else { "false" }).as_bytes(),
@@ -264,7 +237,7 @@ pub async fn run_sender(
                     publish(
                         connected,
                         &mut mqtt,
-                        &mut pubq,
+                        &mut pub_sink,
                         &topic_battery_voltage,
                         QoS::AtMostOnce,
                         num_slice,
@@ -284,7 +257,7 @@ pub async fn run_sender(
                             publish(
                                 connected,
                                 &mut mqtt,
-                                &mut pubq,
+                                &mut pub_sink,
                                 &topic_battery_low,
                                 QoS::AtLeastOnce,
                                 status.as_bytes(),
@@ -304,7 +277,7 @@ pub async fn run_sender(
                             publish(
                                 connected,
                                 &mut mqtt,
-                                &mut pubq,
+                                &mut pub_sink,
                                 &topic_battery_charged,
                                 QoS::AtMostOnce,
                                 status.as_bytes(),
@@ -320,7 +293,7 @@ pub async fn run_sender(
                     publish(
                         connected,
                         &mut mqtt,
-                        &mut pubq,
+                        &mut pub_sink,
                         &topic_powered,
                         QoS::AtMostOnce,
                         (if powered { "true" } else { "false" }).as_bytes(),
@@ -335,7 +308,7 @@ pub async fn run_sender(
 async fn publish(
     connected: bool,
     mqtt: &mut impl Publish,
-    pubq: &mut impl Sender<Data = MessageId>,
+    pub_sink: &mut impl Sender<Data = MessageId>,
     topic: &str,
     qos: QoS,
     payload: &[u8],
@@ -349,7 +322,7 @@ async fn publish(
             info!("Published to {}", topic);
 
             if qos >= QoS::AtLeastOnce {
-                pubq.send(msg_id).await.map_err(error::svc)?;
+                pub_sink.send(msg_id).await.map_err(error::svc)?;
             }
         }
     } else {
@@ -361,9 +334,9 @@ async fn publish(
 
 pub async fn run_receiver(
     mut connection: impl Connection<Message = Option<MqttCommand>>,
-    mut mqtt_notif: impl Sender<Data = MqttClientNotification>,
-    mut valve_command: impl Sender<Data = ValveCommand>,
-    mut wm_command: impl Sender<Data = WaterMeterCommand>,
+    mut notif_sink: impl Sender<Data = MqttClientNotification>,
+    mut valve_command_sink: impl Sender<Data = ValveCommand>,
+    mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
 ) -> error::Result<()> {
     loop {
         let message = connection.next().await;
@@ -371,7 +344,7 @@ pub async fn run_receiver(
         if let Some(message) = message {
             if let Ok(Event::Received(Some(cmd))) = &message {
                 match cmd {
-                    MqttCommand::Valve(open) => valve_command
+                    MqttCommand::Valve(open) => valve_command_sink
                         .send(if *open {
                             ValveCommand::Open
                         } else {
@@ -379,7 +352,7 @@ pub async fn run_receiver(
                         })
                         .await
                         .map_err(error::svc)?,
-                    MqttCommand::FlowWatch(enable) => wm_command
+                    MqttCommand::FlowWatch(enable) => wm_command_sink
                         .send(if *enable {
                             WaterMeterCommand::Arm
                         } else {
@@ -391,7 +364,7 @@ pub async fn run_receiver(
                 }
             }
 
-            mqtt_notif
+            notif_sink
                 .send(message.map_err(|_| ()))
                 .await
                 .map_err(error::svc)?;
