@@ -17,15 +17,15 @@ pub enum WifiCommand {
 }
 
 pub struct Wifi<M>
-where 
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     state: StateSnapshot<M::Mutex<Option<Status>>>,
     command: M::Signal<WifiCommand>,
 }
 
-impl<M> Wifi<M> 
-where 
+impl<M> Wifi<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -43,17 +43,30 @@ where
         as_sender(&self.command)
     }
 
-    pub async fn run(&'static self, wifi: impl WifiTrait, state_changed_source: impl Receiver<Data = ()>, state_sink: impl Sender<Data = Option<Status>>) -> error::Result<()> {
-        run(wifi, &self.state, state_changed_source, as_static_receiver(&self.command), state_sink).await
+    pub async fn process(
+        &'static self,
+        wifi: impl WifiTrait,
+        state_changed_source: impl Receiver<Data = ()>,
+        state_sink: impl Sender<Data = Option<Status>>,
+    ) -> error::Result<()> {
+        run(
+            wifi,
+            &self.state,
+            state_changed_source,
+            as_static_receiver(&self.command),
+            state_sink,
+        )
+        .await
     }
 }
 
 pub async fn run(
-    mut wifi: impl WifiTrait, 
-    state: &StateSnapshot<impl Mutex<Data = Option<Status>>>, 
+    mut wifi: impl WifiTrait,
+    state: &StateSnapshot<impl Mutex<Data = Option<Status>>>,
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
-    mut state_sink: impl Sender<Data = Option<Status>>) -> error::Result<()> {
+    mut state_sink: impl Sender<Data = Option<Status>>,
+) -> error::Result<()> {
     loop {
         let receiver = state_changed_source.recv();
         let command = command_source.recv();
@@ -62,13 +75,15 @@ pub async fn run(
 
         match select(receiver, command).await {
             Either::First(_) => {
-                state.update(Some(wifi.get_status()), &mut state_sink).await?;
+                state
+                    .update(Some(wifi.get_status()), &mut state_sink)
+                    .await?;
             }
-            Either::Second(command) => {
-                match command? {
-                    WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).map_err(error::svc)?,
+            Either::Second(command) => match command? {
+                WifiCommand::SetConfiguration(conf) => {
+                    wifi.set_configuration(&conf).map_err(error::svc)?
                 }
-            }
+            },
         }
     }
 }

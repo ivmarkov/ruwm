@@ -1,6 +1,6 @@
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{Signal, SendSyncSignalFamily};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asyncs::select::{select3, Either3};
 use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
@@ -10,8 +10,8 @@ use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
-pub struct Emergency<M> 
-where 
+pub struct Emergency<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     valve_state_signal: M::Signal<Option<ValveState>>,
@@ -19,8 +19,8 @@ where
     battery_state_signal: M::Signal<BatteryState>,
 }
 
-impl<M> Emergency<M> 
-where 
+impl<M> Emergency<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -31,7 +31,7 @@ where
         }
     }
 
-    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_  {
+    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_ {
         as_sender(&self.valve_state_signal)
     }
 
@@ -42,18 +42,22 @@ where
     pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
         as_sender(&self.battery_state_signal)
     }
-    
-    pub async fn run(&'static self, valve_command: impl Sender<Data = ValveCommand>) -> error::Result<()> {
-        run(
+
+    pub async fn process(
+        &'static self,
+        valve_command: impl Sender<Data = ValveCommand>,
+    ) -> error::Result<()> {
+        process(
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
             valve_command,
-        ).await
+        )
+        .await
     }
 }
 
-pub async fn run(
+pub async fn process(
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
@@ -101,7 +105,10 @@ pub async fn run(
                 Some(ValveState::Closing) | Some(ValveState::Closed)
             )
         {
-            valve_command_sink.send(ValveCommand::Close).await.map_err(error::svc)?;
+            valve_command_sink
+                .send(ValveCommand::Close)
+                .await
+                .map_err(error::svc)?;
         }
     }
 }

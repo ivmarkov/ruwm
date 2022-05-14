@@ -15,7 +15,7 @@ pub mod pulse_counter;
 pub mod screen;
 pub mod state_snapshot;
 pub mod storage;
-mod utils;
+pub mod utils;
 pub mod valve;
 pub mod water_meter;
 pub mod web;

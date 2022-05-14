@@ -18,7 +18,7 @@ pub enum PressedLevel {
     High,
 }
 
-pub async fn run(
+pub async fn process(
     mut timer: impl OnceTimer,
     mut pin_edge: impl Receiver,
     pin: impl InputPin<Error = impl error::HalError>,
@@ -64,10 +64,7 @@ pub async fn run(
                 pin.is_high().map_err(error::hal)? == (pressed_level == PressedLevel::High);
 
             if pressed {
-                pressed_sink
-                    .send(())
-                    .await
-                    .map_err(error::svc)?;
+                pressed_sink.send(()).await.map_err(error::svc)?;
             }
         }
     }

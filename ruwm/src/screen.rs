@@ -8,8 +8,8 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asyncs::Unblocker;
-use embedded_svc::utils::asyncs::select::{select4, Either4, Either3, select3};
-use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
+use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
+use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -53,8 +53,8 @@ pub struct DrawRequest {
     battery: BatteryState,
 }
 
-pub struct Screen<M> 
-where 
+pub struct Screen<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     button1_pressed_signal: M::Signal<()>,
@@ -66,8 +66,8 @@ where
     draw_request_signal: M::Signal<DrawRequest>,
 }
 
-impl<M> Screen<M> 
-where 
+impl<M> Screen<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -106,25 +106,22 @@ where
         as_sender(&self.battery_state_signal)
     }
 
-    pub async fn run_draw<D>(&'static self, display: D) -> error::Result<()>
-    where 
+    pub async fn draw<D>(&'static self, display: D) -> error::Result<()>
+    where
         D: FlushableDrawTarget + Send + 'static,
         D::Color: RgbColor,
         D::Error: Debug,
     {
-        run_draw(
-            as_static_receiver(&self.draw_request_signal),
-            display,
-        ).await
+        run_draw(as_static_receiver(&self.draw_request_signal), display).await
     }
 
-    pub async fn run_receiver(
+    pub async fn process(
         &'static self,
         valve_state: Option<ValveState>,
         wm_state: WaterMeterState,
         battery_state: BatteryState,
     ) -> error::Result<()> {
-        run_receiver(
+        process(
             as_static_receiver(&self.button1_pressed_signal),
             as_static_receiver(&self.button2_pressed_signal),
             as_static_receiver(&self.button3_pressed_signal),
@@ -135,12 +132,13 @@ where
             wm_state,
             battery_state,
             as_static_sender(&self.draw_request_signal),
-        ).await
+        )
+        .await
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run_receiver(
+pub async fn process(
     mut button1_pressed_source: impl Receiver<Data = ()>,
     mut button2_pressed_source: impl Receiver<Data = ()>,
     mut button3_pressed_source: impl Receiver<Data = ()>,
@@ -169,7 +167,14 @@ pub async fn run_receiver(
 
         //pin_mut!(button1_command, button2_command, button3_command, valve, wm, battery);
 
-        let draw_request = match select4(select3(button1_command, button2_command, button3_command), valve, wm, battery).await {
+        let draw_request = match select4(
+            select3(button1_command, button2_command, button3_command),
+            valve,
+            wm,
+            battery,
+        )
+        .await
+        {
             Either4::First(Either3::First(_)) => DrawRequest {
                 active_page: screen_state.active_page.prev(),
                 ..screen_state
@@ -199,7 +204,10 @@ pub async fn run_receiver(
         if screen_state != draw_request {
             screen_state = draw_request;
 
-            draw_request_sink.send(draw_request).await.map_err(error::svc)?;
+            draw_request_sink
+                .send(draw_request)
+                .await
+                .map_err(error::svc)?;
         }
     }
 }

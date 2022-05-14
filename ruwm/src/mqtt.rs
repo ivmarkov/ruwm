@@ -8,19 +8,19 @@ use log::info;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::utils::asyncs::select::{select4, Either4};
 use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::mutex::MutexFamily;
 use embedded_svc::mqtt::client::asyncs::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
+use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asyncs::select::{select4, Either4};
 use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
 use crate::battery::BatteryState;
 use crate::error;
-use crate::utils::{as_static_sender, as_static_receiver};
+use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -34,8 +34,8 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub struct Mqtt<M> 
-where 
+pub struct Mqtt<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub_signal: M::Signal<MessageId>, // TODO: Not clear if a signal is a good fit
@@ -45,8 +45,8 @@ where
     battery_state_signal: M::Signal<BatteryState>,
 }
 
-impl<M> Mqtt<M> 
-where 
+impl<M> Mqtt<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -71,7 +71,7 @@ where
         as_sender(&self.battery_state_signal)
     }
 
-    pub async fn run_sender(
+    pub async fn send(
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
@@ -84,11 +84,12 @@ where
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
             as_static_sender(&self.pub_signal),
-        ).await
+        )
+        .await
     }
 
-    pub async fn run_receiver(
-        &'static self, 
+    pub async fn receive(
+        &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
@@ -98,7 +99,8 @@ where
             as_static_sender(&self.notif_signal),
             valve_command_sink,
             wm_command_sink,
-        ).await
+        )
+        .await
     }
 }
 

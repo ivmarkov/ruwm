@@ -5,8 +5,8 @@ use postcard::{from_bytes, to_slice};
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 use embedded_svc::utils::asyncs::select::{select, select4, select_all_hvec, Either, Either4};
+use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 use embedded_svc::utils::role::Role;
 use embedded_svc::ws::asyncs::{Acceptor, Receiver as _, Sender as _};
 use embedded_svc::ws::FrameType;
@@ -36,7 +36,7 @@ enum WebFrame {
 }
 
 pub struct Web<M, A, const N: usize>
-where 
+where
     M: MutexFamily + SendSyncSignalFamily,
     A: Acceptor,
 {
@@ -47,8 +47,8 @@ where
     battery_state_signal: M::Signal<BatteryState>,
 }
 
-impl<M, A, const N: usize> Web<M, A, N> 
-where 
+impl<M, A, const N: usize> Web<M, A, N>
+where
     M: MutexFamily + SendSyncSignalFamily,
     A: Acceptor,
 {
@@ -74,18 +74,19 @@ where
         as_sender(&self.battery_state_signal)
     }
 
-    pub async fn run_sender<const F: usize>(&'static self) -> error::Result<()> {
-        run_sender::<A, N, F>(
+    pub async fn send<const F: usize>(&'static self) -> error::Result<()> {
+        send::<A, N, F>(
             &self.connections,
             as_static_receiver(&self.conn_signal),
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
-        ).await
+        )
+        .await
     }
 
-    pub async fn run_receiver<const F: usize>(
-        &'static self, 
+    pub async fn receive<const F: usize>(
+        &'static self,
         ws_acceptor: A,
         valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
         wm_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
@@ -93,7 +94,7 @@ where
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
     ) -> error::Result<()> {
-        run_receiver::<A, N, F>(
+        receive::<A, N, F>(
             &self.connections,
             ws_acceptor,
             valve_state,
@@ -102,11 +103,12 @@ where
             as_static_sender(&self.conn_signal),
             valve_command,
             wm_command,
-        ).await
+        )
+        .await
     }
 }
 
-pub async fn run_sender<A, const N: usize, const F: usize>(
+pub async fn send<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     mut conn_source: impl Receiver<Data = (ConnectionId, WebEvent)>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
@@ -143,7 +145,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run_receiver<A, const N: usize, const F: usize>(
+pub async fn receive<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     mut ws_acceptor: A,
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
@@ -203,7 +205,8 @@ where
                 let id = next_connection_id;
                 next_connection_id += 1;
 
-                connections.lock()
+                connections
+                    .lock()
                     .push(SenderInfo {
                         id,
                         role,
@@ -416,7 +419,10 @@ where
     Ok(())
 }
 
-async fn web_send<A, const F: usize>(ws_sender: &mut A::Sender, event: &WebEvent) -> error::Result<()>
+async fn web_send<A, const F: usize>(
+    ws_sender: &mut A::Sender,
+    event: &WebEvent,
+) -> error::Result<()>
 where
     A: Acceptor,
 {
@@ -429,7 +435,10 @@ where
     Ok(())
 }
 
-async fn web_receive<A, const F: usize>(ws_receiver: &mut A::Receiver, index: usize) -> error::Result<(usize, WebFrame)>
+async fn web_receive<A, const F: usize>(
+    ws_receiver: &mut A::Receiver,
+    index: usize,
+) -> error::Result<(usize, WebFrame)>
 where
     A: Acceptor,
 {

@@ -2,9 +2,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(explicit_generic_args_with_impl_trait)]
 
+use core::ops::Deref;
 use core::time::Duration;
-use core::cell::UnsafeCell;
-use std::ops::Deref;
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -17,15 +16,17 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
-use embedded_svc::executor::asyncs::{Executor, WaitableExecutor, LocalSpawner, Spawner};
+use embedded_svc::executor::asyncs::{Executor, LocalSpawner, Spawner, WaitableExecutor};
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::Signal;
 use embedded_svc::timer::asyncs::TimerService;
-use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncify::ws::server::AsyncAcceptor;
+use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::asyncs::channel::adapt::both;
 use embedded_svc::utils::asyncs::signal::adapt::as_sender;
-use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal, MutexSignal, State};
+use embedded_svc::utils::asyncs::signal::{
+    adapt as signal_adapt, AtomicSignal, MutexSignal, State,
+};
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry;
@@ -36,8 +37,8 @@ use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::executor::asyncs::{local, sendable};
-use esp_idf_svc::http::server::ws::EspHttpWsDetachedSender;
 use esp_idf_svc::http::server::ws::asyncs::EspHttpWsProcessor;
+use esp_idf_svc::http::server::ws::EspHttpWsDetachedSender;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
@@ -53,18 +54,19 @@ use edge_frame::assets::serve::*;
 use pulse_counter::PulseCounter;
 
 use ruwm::battery::Battery;
-use ruwm::button::{PressedLevel, self};
+use ruwm::button::{self, PressedLevel};
 use ruwm::emergency::Emergency;
 use ruwm::keepalive::{Keepalive, RemainingTime};
 use ruwm::mqtt::{MessageParser, Mqtt};
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget, Screen};
 use ruwm::storage::Storage;
-use ruwm::valve::{ValveCommand, Valve};
+use ruwm::utils::AlmostOnce;
+use ruwm::valve;
+use ruwm::valve::{Valve, ValveCommand};
 use ruwm::water_meter::WaterMeter;
 use ruwm::web::Web;
 use ruwm::wifi::Wifi;
-use ruwm::{valve};
 use ruwm::{checkd, error};
 use smol::Task;
 
@@ -89,29 +91,6 @@ const WS_FRAME_SIZE: usize = 512;
 
 type MutexFamilyImpl = esp_idf_hal::mutex::Condvar;
 
-pub struct AlmostOnce<T>(UnsafeCell<Option<T>>);
-
-impl<T> AlmostOnce<T> {
-    pub const fn new() -> Self {
-        Self(UnsafeCell::new(None))
-    }
-
-    pub fn init(&self, value: T) {
-        let mut_ref = unsafe { self.0.get().as_mut().unwrap() };
-        *mut_ref = Some(value);
-    }
-}
-
-impl<T> Deref for AlmostOnce<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.0.get().as_ref().unwrap() }.as_ref().unwrap()
-    }
-}
-
-unsafe impl<T> Sync for AlmostOnce<T> {}
-
 static VALVE: AlmostOnce<Valve<MutexFamilyImpl>> = AlmostOnce::new();
 static WM: AlmostOnce<WaterMeter<MutexFamilyImpl>> = AlmostOnce::new();
 static BATTERY: AlmostOnce<Battery<MutexFamilyImpl>> = AlmostOnce::new();
@@ -123,7 +102,9 @@ static BUTTON3: AlmostOnce<PinSignal> = AlmostOnce::new();
 static EMERGENCY: AlmostOnce<Emergency<MutexFamilyImpl>> = AlmostOnce::new();
 static KEEPALIVE: AlmostOnce<Keepalive<MutexFamilyImpl>> = AlmostOnce::new();
 
-static REMAINING_TIME: AlmostOnce<MutexSignal<<MutexFamilyImpl as MutexFamily>::Mutex<State<RemainingTime>>, RemainingTime>> = AlmostOnce::new();
+static REMAINING_TIME: AlmostOnce<
+    MutexSignal<<MutexFamilyImpl as MutexFamily>::Mutex<State<RemainingTime>>, RemainingTime>,
+> = AlmostOnce::new();
 
 static QUIT1: AlmostOnce<PinSignal> = AlmostOnce::new();
 static QUIT2: AlmostOnce<PinSignal> = AlmostOnce::new();
@@ -132,7 +113,9 @@ static QUIT3: AlmostOnce<PinSignal> = AlmostOnce::new();
 static SCREEN: AlmostOnce<Screen<MutexFamilyImpl>> = AlmostOnce::new();
 
 static WIFI: AlmostOnce<Wifi<MutexFamilyImpl>> = AlmostOnce::new();
-static WEB: AlmostOnce<Web<MutexFamilyImpl, AsyncAcceptor<(), MutexFamilyImpl, EspHttpWsDetachedSender>, 4>> = AlmostOnce::new();
+static WEB: AlmostOnce<
+    Web<MutexFamilyImpl, AsyncAcceptor<(), MutexFamilyImpl, EspHttpWsDetachedSender>, 4>,
+> = AlmostOnce::new();
 static MQTT: AlmostOnce<Mqtt<MutexFamilyImpl>> = AlmostOnce::new();
 
 fn main() -> error::Result<()> {
@@ -203,18 +186,19 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     //let web_interest = KEEPALIVE.event();
     //let mqtt_interest = KEEPALIVE.event();
 
-    let quit_sink = both(as_sender(QUIT1.deref()), as_sender(QUIT2.deref())).and(as_sender(QUIT3.deref()));
+    let quit_sink =
+        both(as_sender(QUIT1.deref()), as_sender(QUIT2.deref())).and(as_sender(QUIT3.deref()));
 
-            // Payload::ValveCommand(_)
-            // | Payload::ValveState(_)
-            // | Payload::WaterMeterCommand(_)
-            // | Payload::WaterMeterState(_)
-            // | Payload::ButtonCommand(_)
-            // | Payload::MqttClientNotification(_)
-            // | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
-            // Payload::BatteryState(battery_state) => {
-            //     battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
-            // }
+    // Payload::ValveCommand(_)
+    // | Payload::ValveState(_)
+    // | Payload::WaterMeterCommand(_)
+    // | Payload::WaterMeterState(_)
+    // | Payload::ButtonCommand(_)
+    // | Payload::MqttClientNotification(_)
+    // | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
+    // Payload::BatteryState(battery_state) => {
+    //     battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
+    // }
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -262,30 +246,36 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     let mut executor3 = sendable(64);
 
     let mut executor1_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
-    let mut executor2_tasks =  heapless::Vec::<Task<error::Result<()>>, 64>::new();
-    let mut executor3_tasks =  heapless::Vec::<Task<error::Result<()>>, 64>::new();
+    let mut executor2_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
+    let mut executor3_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
 
-    let mut spawn1 = |fut| executor1_tasks.push(executor1.spawn_local(fut)?).map_err(error::heapless);
+    let mut spawn1 = |fut| {
+        executor1_tasks
+            .push(executor1.spawn_local(fut)?)
+            .map_err(error::heapless)
+    };
 
-    spawn1(VALVE.run_receiver(valve_state_sink))?;
+    spawn1(VALVE.process(valve_state_sink))?;
 
-    executor1_tasks.push(executor1.spawn_local(
-    VALVE.run_spin(
-        timers.timer()?,
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-    ))?).map_err(error::heapless)?;
-    
-    executor1_tasks.push(executor1.spawn_local(
-    WM.run(
-        timers.timer()?,
-        PulseCounter::new(peripherals.ulp).initialize()?,
-        wm_state_sink,
-    ))?).map_err(error::heapless)?;
+    executor1_tasks
+        .push(executor1.spawn_local(VALVE.spin(
+            timers.timer()?,
+            valve_power_pin,
+            valve_open_pin,
+            valve_close_pin,
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor2_tasks.push(executor2.spawn(
-        BATTERY.run(
+    executor1_tasks
+        .push(executor1.spawn_local(WM.process(
+            timers.timer()?,
+            PulseCounter::new(peripherals.ulp).initialize()?,
+            wm_state_sink,
+        ))?)
+        .map_err(error::heapless)?;
+
+    executor2_tasks
+        .push(executor2.spawn(BATTERY.process(
             timers.timer()?,
             adc::PoweredAdc::new(
                 peripherals.adc1,
@@ -294,22 +284,22 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             peripherals.pins.gpio33.into_analog_atten_11db()?,
             peripherals.pins.gpio14.into_input()?,
             battery_state_sink,
-        ))?).map_err(error::heapless)?;
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor1_tasks.push(executor1.spawn_local(
-        button::run(
+    executor1_tasks
+        .push(executor1.spawn_local(button::process(
             timers.timer()?,
             signal_adapt::as_receiver(BUTTON1.deref()),
-            unsafe {
-                button1_pin.into_subscribed(|| BUTTON1.signal(()), InterruptType::NegEdge)?
-            },
+            unsafe { button1_pin.into_subscribed(|| BUTTON1.signal(()), InterruptType::NegEdge)? },
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
             button1_pressed_sink,
-        ))?).map_err(error::heapless)?;
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor2_tasks.push(executor2.spawn(
-        button::run(
+    executor2_tasks
+        .push(executor2.spawn(button::process(
             timers.timer()?,
             signal_adapt::as_receiver(BUTTON2.deref()),
             unsafe {
@@ -320,10 +310,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
             button2_pressed_sink,
-        ))?).map_err(error::heapless)?;
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor1_tasks.push(executor1.spawn_local(
-        button::run(
+    executor1_tasks
+        .push(executor1.spawn_local(button::process(
             timers.timer()?,
             signal_adapt::as_receiver(BUTTON3.deref()),
             unsafe {
@@ -334,68 +325,71 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             PressedLevel::Low,
             Some(Duration::from_millis(50)),
             button3_pressed_sink,
-        ))?).map_err(error::heapless)?;
-    
-    executor2_tasks.push(executor2.spawn(
-        EMERGENCY.run(VALVE.command_sink())
-        )?).map_err(error::heapless)?;
-        
-    executor2_tasks.push(executor2.spawn(
-        KEEPALIVE.run(
+        ))?)
+        .map_err(error::heapless)?;
+
+    executor2_tasks
+        .push(executor2.spawn(EMERGENCY.process(VALVE.command_sink()))?)
+        .map_err(error::heapless)?;
+
+    executor2_tasks
+        .push(executor2.spawn(KEEPALIVE.process(
             timers.timer()?,
             EspSystemTime,
             as_sender(REMAINING_TIME.deref()),
-            quit_sink)
-        )?).map_err(error::heapless)?;
+            quit_sink,
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor2_tasks.push(executor2.spawn(
-            SCREEN.run_draw(display(
-                        peripherals.pins.gpio4.into_output()?.degrade(),
-                        peripherals.pins.gpio16.into_output()?.degrade(),
-                        peripherals.pins.gpio23.into_output()?.degrade(),
-                        peripherals.spi2,
-                        peripherals.pins.gpio18.into_output()?.degrade(),
-                        peripherals.pins.gpio19.into_output()?.degrade(),
-                        Some(peripherals.pins.gpio5.into_output()?.degrade()),
-                    )?
-            ))?).map_err(error::heapless)?;
-    
-    executor2_tasks.push(executor2.spawn(
-        SCREEN.run_receiver(
+    executor2_tasks
+        .push(executor2.spawn(SCREEN.draw(display(
+            peripherals.pins.gpio4.into_output()?.degrade(),
+            peripherals.pins.gpio16.into_output()?.degrade(),
+            peripherals.pins.gpio23.into_output()?.degrade(),
+            peripherals.spi2,
+            peripherals.pins.gpio18.into_output()?.degrade(),
+            peripherals.pins.gpio19.into_output()?.degrade(),
+            Some(peripherals.pins.gpio5.into_output()?.degrade()),
+        )?))?)
+        .map_err(error::heapless)?;
+
+    executor2_tasks
+        .push(executor2.spawn(SCREEN.process(
             VALVE.state().get(),
             WM.state().get(),
             BATTERY.state().get(),
-        ))?).map_err(error::heapless)?;
+        ))?)
+        .map_err(error::heapless)?;
 
-    executor3_tasks.push(executor3.spawn(
-        MQTT.run_sender(client_id, mqtt_client)
-        )?).map_err(error::heapless)?;
-            
-    executor3_tasks.push(executor3.spawn(
-        MQTT.run_receiver(mqtt_conn, VALVE.command_sink(), WM.command_sink())
-        )?).map_err(error::heapless)?;
+    executor3_tasks
+        .push(executor3.spawn(MQTT.send(client_id, mqtt_client))?)
+        .map_err(error::heapless)?;
 
-    executor3_tasks.push(executor3.spawn(
-        WEB.run_sender::<WS_FRAME_SIZE>()
-        )?).map_err(error::heapless)?;
+    executor3_tasks
+        .push(executor3.spawn(MQTT.receive(mqtt_conn, VALVE.command_sink(), WM.command_sink()))?)
+        .map_err(error::heapless)?;
 
-    executor3_tasks.push(executor3.spawn(
-        WEB.run_receiver::<WS_FRAME_SIZE>(
-                ws_acceptor, 
-                VALVE.state(),
-                WM.state(),
-                BATTERY.state(),
-                VALVE.command_sink(),
-                WM.command_sink(),
-            )
-        )?).map_err(error::heapless)?;
+    executor3_tasks
+        .push(executor3.spawn(WEB.send::<WS_FRAME_SIZE>())?)
+        .map_err(error::heapless)?;
+
+    executor3_tasks
+        .push(executor3.spawn(WEB.receive::<WS_FRAME_SIZE>(
+            ws_acceptor,
+            VALVE.state(),
+            WM.state(),
+            BATTERY.state(),
+            VALVE.command_sink(),
+            WM.command_sink(),
+        ))?)
+        .map_err(error::heapless)?;
 
     let wifi_state_changed_source = wifi.as_async().subscribe()?;
 
-    executor3_tasks.push(executor3.spawn(
-        WIFI.run(wifi, wifi_state_changed_source, wifi_state_sink)
-        )?).map_err(error::heapless)?;
-            
+    executor3_tasks
+        .push(executor3.spawn(WIFI.process(wifi, wifi_state_changed_source, wifi_state_sink))?)
+        .map_err(error::heapless)?;
+
     log::info!("Starting execution");
 
     let executor2 = std::thread::spawn(move || {
@@ -449,9 +443,9 @@ fn emergency_valve_close(
 ) -> error::Result<()> {
     log::error!("Start: emergency closing valve due to ULP wakeup...");
 
-    valve::start_run(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
+    valve::start_spin(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
     std::thread::sleep(valve::VALVE_TURN_DELAY);
-    valve::start_run(None, power_pin, open_pin, close_pin)?;
+    valve::start_spin(None, power_pin, open_pin, close_pin)?;
 
     log::error!("End: emergency closing valve due to ULP wakeup");
 

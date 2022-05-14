@@ -8,7 +8,7 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{Signal, SendSyncSignalFamily};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
 use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
@@ -33,8 +33,8 @@ pub enum ValveCommand {
     Close,
 }
 
-pub struct Valve<M> 
-where 
+pub struct Valve<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     state: StateSnapshot<M::Mutex<Option<ValveState>>>,
@@ -43,8 +43,8 @@ where
     spin_finished_signal: M::Signal<()>,
 }
 
-impl<M> Valve<M> 
-where 
+impl<M> Valve<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -64,35 +64,40 @@ where
         as_sender(&self.command_signal)
     }
 
-    pub async fn run_spin(
+    pub async fn spin(
         &self,
         once: impl OnceTimer,
         power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
     ) -> error::Result<()> {
-        run_spin(
+        spin(
             once,
             power_pin,
             open_pin,
             close_pin,
             as_receiver(&self.spin_command_signal),
             as_sender(&self.spin_finished_signal),
-        ).await
+        )
+        .await
     }
 
-    pub async fn run_receiver(&self, notif: impl Sender<Data = Option<ValveState>>) -> error::Result<()> {
-        run_receiver(
+    pub async fn process(
+        &self,
+        notif: impl Sender<Data = Option<ValveState>>,
+    ) -> error::Result<()> {
+        process(
             &self.state,
             as_receiver(&self.command_signal),
             as_receiver(&self.spin_finished_signal),
             as_sender(&self.spin_command_signal),
             notif,
-        ).await
+        )
+        .await
     }
 }
 
-pub async fn run_spin(
+pub async fn spin(
     mut once: impl OnceTimer,
     mut power_pin: impl OutputPin<Error = impl error::HalError>,
     mut open_pin: impl OutputPin<Error = impl error::HalError>,
@@ -103,7 +108,7 @@ pub async fn run_spin(
     let mut current_command: Option<ValveCommand> = None;
 
     loop {
-        start_run(
+        start_spin(
             current_command,
             &mut close_pin,
             &mut open_pin,
@@ -132,7 +137,7 @@ pub async fn run_spin(
     }
 }
 
-pub fn start_run(
+pub fn start_spin(
     command: Option<ValveCommand>,
     power_pin: &mut impl OutputPin<Error = impl error::HalError>,
     open_pin: &mut impl OutputPin<Error = impl error::HalError>,
@@ -159,7 +164,7 @@ pub fn start_run(
     Ok(())
 }
 
-pub async fn run_receiver(
+pub async fn process(
     state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     mut command_source: impl Receiver<Data = ValveCommand>,
     mut spin_finished_source: impl Receiver<Data = ()>,

@@ -28,15 +28,15 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub struct Battery<M> 
-where 
+pub struct Battery<M>
+where
     M: MutexFamily,
 {
     state: StateSnapshot<M::Mutex<BatteryState>>,
 }
 
-impl<M> Battery<M> 
-where 
+impl<M> Battery<M>
+where
     M: MutexFamily,
 {
     pub fn new() -> Self {
@@ -48,9 +48,9 @@ where
     pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = BatteryState>> {
         &self.state
     }
-    
-    pub async fn run<ADC, BP>(
-        &self, 
+
+    pub async fn process<ADC, BP>(
+        &self,
         timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
@@ -60,18 +60,19 @@ where
     where
         BP: adc::Channel<ADC>,
     {
-        run(
+        process(
             timer,
             one_shot,
             battery_pin,
             power_pin,
             &self.state,
             state_sink,
-        ).await
+        )
+        .await
     }
 }
 
-pub async fn run<ADC, BP>(
+pub async fn process<ADC, BP>(
     mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,

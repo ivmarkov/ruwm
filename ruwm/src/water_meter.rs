@@ -8,7 +8,7 @@ use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::{as_sender, as_receiver};
+use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
 
 use crate::error;
 use crate::pulse_counter::PulseCounter;
@@ -30,16 +30,16 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<M> 
-where 
+pub struct WaterMeter<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     state: StateSnapshot<M::Mutex<WaterMeterState>>,
     command_signal: M::Signal<WaterMeterCommand>,
 }
 
-impl<M> WaterMeter<M> 
-where 
+impl<M> WaterMeter<M>
+where
     M: MutexFamily + SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -52,23 +52,25 @@ where
     pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = WaterMeterState>> {
         &self.state
     }
-    
+
     pub fn command_sink(&self) -> impl Sender<Data = WaterMeterCommand> + '_ {
         as_sender(&self.command_signal)
     }
 
-    pub async fn run(
-        &self, 
+    pub async fn process(
+        &self,
         timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
-        state_sink: impl Sender<Data = WaterMeterState>) -> error::Result<()> {
+        state_sink: impl Sender<Data = WaterMeterState>,
+    ) -> error::Result<()> {
         run(
             timer,
             pulse_counter,
             &self.state,
             as_receiver(&self.command_signal),
             state_sink,
-        ).await
+        )
+        .await
     }
 }
 

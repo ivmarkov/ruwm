@@ -48,7 +48,11 @@ where
         }
     }
 
-    pub async fn update(&self, state: S, state_sink: &mut impl Sender<Data = S>) -> error::Result<bool>
+    pub async fn update(
+        &self,
+        state: S,
+        state_sink: &mut impl Sender<Data = S>,
+    ) -> error::Result<bool>
     where
         S: PartialEq + Clone,
     {

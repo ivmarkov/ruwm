@@ -22,15 +22,15 @@ pub enum RemainingTime {
     Duration(Duration),
 }
 
-pub struct Keepalive<M> 
-where 
+pub struct Keepalive<M>
+where
     M: SendSyncSignalFamily,
 {
     event_signal: M::Signal<()>,
 }
 
-impl<M> Keepalive<M> 
-where 
+impl<M> Keepalive<M>
+where
     M: SendSyncSignalFamily,
 {
     pub fn new() -> Self {
@@ -40,30 +40,31 @@ where
     }
 
     pub fn event_sink<D>(&'static self) -> impl Sender<Data = D> + '_
-    where 
+    where
         D: Send + 'static,
     {
         sender(as_sender(&self.event_signal), |_| Some(()))
     }
 
-    pub async fn run(
-        &'static self, 
+    pub async fn process(
+        &'static self,
         timer: impl OnceTimer,
         system_time: impl SystemTime,
         remaining_time_sink: impl Sender<Data = RemainingTime>,
         quit_sink: impl Sender<Data = ()>,
     ) -> error::Result<()> {
-        run(
+        process(
             timer,
             system_time,
             as_static_receiver(&self.event_signal),
             remaining_time_sink,
             quit_sink,
-        ).await
+        )
+        .await
     }
 }
 
-pub async fn run(
+pub async fn process(
     mut timer: impl OnceTimer,
     system_time: impl SystemTime,
     mut event_source: impl Receiver<Data = ()>,
