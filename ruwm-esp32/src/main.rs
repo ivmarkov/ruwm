@@ -19,8 +19,6 @@ use embedded_svc::executor::asyncs::{Executor, LocalSpawner, Spawner, WaitableEx
 use embedded_svc::timer::asyncs::TimerService;
 use embedded_svc::utils::asyncify::ws::server::AsyncAcceptor;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::utils::asyncs::signal::AtomicSignal;
-use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry;
 
@@ -70,8 +68,6 @@ const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 
-type PinSignal = AtomicSignal<AtomicOption, ()>;
-
 const WS_CONNS_MAX: usize = 2;
 const WS_FRAME_SIZE: usize = 512;
 
@@ -81,7 +77,7 @@ static SYSTEM: AlmostOnce<
     System<
         MutexFamilyImpl,
         AsyncAcceptor<(), MutexFamilyImpl, EspHttpWsDetachedSender>,
-        WS_FRAME_SIZE,
+        WS_CONNS_MAX,
     >,
 > = AlmostOnce::new();
 
@@ -121,33 +117,6 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
     SYSTEM.init(System::new());
-
-    // let valve_state_sink = both(MQTT.valve_state_sink(), KEEPALIVE.event_sink()).and(event_logger::sink());
-    // let wm_state_sink = both(MQTT.wm_state_sink(), KEEPALIVE.event_sink()).and(event_logger::sink());
-    // let battery_state_sink = both(MQTT.battery_state_sink(), KEEPALIVE.event_sink()).and(event_logger::sink());
-
-    // let button1_pressed_sink = both(SCREEN.button1_pressed_sink(), KEEPALIVE.event_sink()).and(event_logger::sink());
-    // let button2_pressed_sink = both(SCREEN.button2_pressed_sink(), KEEPALIVE.event_sink()).and(event_logger::sink());
-    // let button3_pressed_sink = both(SCREEN.button3_pressed_sink(), KEEPALIVE.event_sink::<()>()).and(event_logger::sink());
-
-    // let wifi_state_sink = both(KEEPALIVE.event_sink(), event_logger::sink());
-    // //let web_state_sink = both(KEEPALIVE.event_sink(), event_logger::sink());
-    // let mqtt_pub_sink = both(KEEPALIVE.event_sink(), event_logger::sink());
-    // let mqtt_notif_sink = both(KEEPALIVE.event_sink(), event_logger::sink());
-
-    // let quit_sink =
-    //     both(as_sender(QUIT1.deref()), as_sender(QUIT2.deref())).and(as_sender(QUIT3.deref())).and(event_logger::sink());
-
-    // Payload::ValveCommand(_)
-    // | Payload::ValveState(_)
-    // | Payload::WaterMeterCommand(_)
-    // | Payload::WaterMeterState(_)
-    // | Payload::ButtonCommand(_)
-    // | Payload::MqttClientNotification(_)
-    // | Payload::WebResponse(_, _) => Some(now + TIMEOUT),
-    // Payload::BatteryState(battery_state) => {
-    //     battery_state.powered.unwrap_or(true).then(|| now + TIMEOUT)
-    // }
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -332,8 +301,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         exec.run(ctx, || SYSTEM.should_quit(), Some(executor1_tasks));
     });
 
-    println!("Execution finished, waiting for 500ms to workaround a STD/ESP-IDF pthread (?) bug");
-    std::thread::sleep(Duration::from_millis(500));
+    log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
+
+    std::thread::sleep(Duration::from_millis(2000));
 
     checkd!(executor2.join());
     checkd!(executor3.join());

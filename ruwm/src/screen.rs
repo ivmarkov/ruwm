@@ -1,5 +1,6 @@
 use core::fmt::Debug;
 
+use embedded_svc::utils::asyncs::channel::adapt::both;
 use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
@@ -120,6 +121,7 @@ where
         valve_state: Option<ValveState>,
         wm_state: WaterMeterState,
         battery_state: BatteryState,
+        draw_request_sink: impl Sender<Data = DrawRequest> + Send + 'static,
     ) -> error::Result<()> {
         process(
             as_static_receiver(&self.button1_pressed_signal),
@@ -131,7 +133,10 @@ where
             valve_state,
             wm_state,
             battery_state,
-            as_static_sender(&self.draw_request_signal),
+            both(
+                as_static_sender(&self.draw_request_signal),
+                draw_request_sink,
+            ),
         )
         .await
     }

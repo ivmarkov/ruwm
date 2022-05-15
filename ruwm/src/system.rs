@@ -230,7 +230,7 @@ where
             .process(
                 timer,
                 system_time,
-                as_static_sender(&self.remaining_time),
+                both(as_static_sender(&self.remaining_time), event_logger::sink()),
                 both(as_static_sender(&self.quit), event_logger::sink()),
             )
             .await
@@ -251,6 +251,7 @@ where
                 self.valve.state().get(),
                 self.wm.state().get(),
                 self.battery.state().get(),
+                event_logger::sink(),
             )
             .await
     }
