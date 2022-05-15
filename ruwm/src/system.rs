@@ -29,6 +29,7 @@ use crate::storage::Storage;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::Valve;
 use crate::water_meter::WaterMeter;
+use crate::water_meter_stats::WaterMeterStats;
 use crate::web::Web;
 use crate::wifi::Wifi;
 use crate::{error, event_logger};
@@ -42,6 +43,7 @@ where
 {
     valve: Valve<M>,
     wm: WaterMeter<M>,
+    wm_stats: WaterMeterStats<M>,
     battery: Battery<M>,
 
     button1: NotifSignal,
@@ -71,6 +73,7 @@ where
         Self {
             valve: Valve::new(),
             wm: WaterMeter::new(),
+            wm_stats: WaterMeterStats::new(),
             battery: Battery::new(),
             button1: NotifSignal::new(),
             button2: NotifSignal::new(),
@@ -120,6 +123,22 @@ where
                     .and(self.screen.wm_state_sink())
                     .and(self.web.wm_state_sink())
                     .and(self.mqtt.wm_state_sink()),
+            )
+            .await
+    }
+
+    pub async fn wm_stats(
+        &'static self,
+        timer: impl OnceTimer,
+        sys_time: impl SystemTime,
+    ) -> error::Result<()> {
+        self.wm_stats
+            .process(
+                timer,
+                sys_time,
+                both(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
+                    .and(self.screen.wm_stats_state_sink())
+                    .and(self.web.wm_stats_state_sink()),
             )
             .await
     }

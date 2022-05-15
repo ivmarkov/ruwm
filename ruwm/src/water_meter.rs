@@ -60,7 +60,7 @@ where
         pulse_counter: impl PulseCounter,
         state_sink: impl Sender<Data = WaterMeterState>,
     ) -> error::Result<()> {
-        run(
+        process(
             timer,
             pulse_counter,
             &self.state,
@@ -71,7 +71,7 @@ where
     }
 }
 
-pub async fn run(
+pub async fn process(
     mut timer: impl OnceTimer,
     mut pulse_counter: impl PulseCounter,
     state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,

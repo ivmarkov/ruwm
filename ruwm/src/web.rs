@@ -18,6 +18,7 @@ use crate::storage::Storage;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
+use crate::water_meter_stats::WaterMeterStatsState;
 use crate::web_dto::*;
 
 pub type ConnectionId = usize;
@@ -44,6 +45,7 @@ where
     conn_signal: M::Signal<(ConnectionId, WebEvent)>, // TODO: Signal not a good idea
     valve_state_signal: M::Signal<Option<ValveState>>,
     wm_state_signal: M::Signal<WaterMeterState>,
+    wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
     battery_state_signal: M::Signal<BatteryState>,
 }
 
@@ -58,6 +60,7 @@ where
             conn_signal: M::Signal::new(),
             valve_state_signal: M::Signal::new(),
             wm_state_signal: M::Signal::new(),
+            wm_stats_state_signal: M::Signal::new(),
             battery_state_signal: M::Signal::new(),
         }
     }
@@ -68,6 +71,12 @@ where
 
     pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
         as_sender(&self.wm_state_signal)
+    }
+
+    pub fn wm_stats_state_sink(
+        &'static self,
+    ) -> impl Sender<Data = WaterMeterStatsState> + 'static {
+        as_sender(&self.wm_stats_state_signal)
     }
 
     pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {

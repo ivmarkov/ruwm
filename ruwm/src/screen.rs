@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 
-use embedded_svc::utils::asyncs::channel::adapt::both;
 use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
@@ -9,6 +8,7 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asyncs::Unblocker;
+use embedded_svc::utils::asyncs::channel::adapt::both;
 use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
 use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
@@ -17,6 +17,7 @@ use crate::error;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
+use crate::water_meter_stats::WaterMeterStatsState;
 
 pub use adaptors::*;
 
@@ -63,6 +64,7 @@ where
     button3_pressed_signal: M::Signal<()>,
     valve_state_signal: M::Signal<Option<ValveState>>,
     wm_state_signal: M::Signal<WaterMeterState>,
+    wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
     battery_state_signal: M::Signal<BatteryState>,
     draw_request_signal: M::Signal<DrawRequest>,
 }
@@ -78,6 +80,7 @@ where
             button3_pressed_signal: M::Signal::new(),
             valve_state_signal: M::Signal::new(),
             wm_state_signal: M::Signal::new(),
+            wm_stats_state_signal: M::Signal::new(),
             battery_state_signal: M::Signal::new(),
             draw_request_signal: M::Signal::new(),
         }
@@ -101,6 +104,12 @@ where
 
     pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
         as_sender(&self.wm_state_signal)
+    }
+
+    pub fn wm_stats_state_sink(
+        &'static self,
+    ) -> impl Sender<Data = WaterMeterStatsState> + 'static {
+        as_sender(&self.wm_stats_state_signal)
     }
 
     pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {

@@ -194,6 +194,10 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .map_err(error::heapless)?;
 
     executor2_tasks
+        .push(executor2.spawn(SYSTEM.wm_stats(timers.timer()?, EspSystemTime))?)
+        .map_err(error::heapless)?;
+
+    executor2_tasks
         .push(executor2.spawn(SYSTEM.battery(
             timers.timer()?,
             adc::PoweredAdc::new(

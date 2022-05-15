@@ -19,6 +19,7 @@ pub mod system;
 pub mod utils;
 pub mod valve;
 pub mod water_meter;
+pub mod water_meter_stats;
 pub mod web;
 pub mod web_dto;
 pub mod wifi;
