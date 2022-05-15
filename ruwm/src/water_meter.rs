@@ -8,7 +8,7 @@ use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::error;
 use crate::pulse_counter::PulseCounter;
@@ -51,11 +51,11 @@ where
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = WaterMeterCommand> + 'static {
-        as_sender(&self.command_signal)
+        as_channel(&self.command_signal)
     }
 
     pub async fn process(
-        &self,
+        &'static self,
         timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
         state_sink: impl Sender<Data = WaterMeterState>,
@@ -64,7 +64,7 @@ where
             timer,
             pulse_counter,
             &self.state,
-            as_receiver(&self.command_signal),
+            as_channel(&self.command_signal),
             state_sink,
         )
         .await

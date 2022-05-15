@@ -8,9 +8,9 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asyncs::Unblocker;
-use embedded_svc::utils::asyncs::channel::adapt::both;
+use embedded_svc::utils::asyncs::channel::adapt::merge;
 use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -87,33 +87,33 @@ where
     }
 
     pub fn button1_pressed_sink<'a>(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_sender(&self.button1_pressed_signal)
+        as_channel(&self.button1_pressed_signal)
     }
 
     pub fn button2_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_sender(&self.button2_pressed_signal)
+        as_channel(&self.button2_pressed_signal)
     }
 
     pub fn button3_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_sender(&self.button3_pressed_signal)
+        as_channel(&self.button3_pressed_signal)
     }
 
     pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
-        as_sender(&self.valve_state_signal)
+        as_channel(&self.valve_state_signal)
     }
 
     pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
-        as_sender(&self.wm_state_signal)
+        as_channel(&self.wm_state_signal)
     }
 
     pub fn wm_stats_state_sink(
         &'static self,
     ) -> impl Sender<Data = WaterMeterStatsState> + 'static {
-        as_sender(&self.wm_stats_state_signal)
+        as_channel(&self.wm_stats_state_signal)
     }
 
     pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
-        as_sender(&self.battery_state_signal)
+        as_channel(&self.battery_state_signal)
     }
 
     pub async fn draw<D>(&'static self, display: D) -> error::Result<()>
@@ -142,7 +142,7 @@ where
             valve_state,
             wm_state,
             battery_state,
-            both(
+            merge(
                 as_static_sender(&self.draw_request_signal),
                 draw_request_sink,
             ),

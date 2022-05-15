@@ -2,7 +2,7 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asyncs::select::{select3, Either3};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -31,16 +31,16 @@ where
         }
     }
 
-    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_ {
-        as_sender(&self.valve_state_signal)
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+        as_channel(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&self) -> impl Sender<Data = WaterMeterState> + '_ {
-        as_sender(&self.wm_state_signal)
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+        as_channel(&self.wm_state_signal)
     }
 
-    pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
-        as_sender(&self.battery_state_signal)
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
+        as_channel(&self.battery_state_signal)
     }
 
     pub async fn process(

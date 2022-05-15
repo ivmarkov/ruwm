@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use log::info;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::utils::asyncs::channel::adapt::{dummy, sender};
+use embedded_svc::utils::asyncs::channel::adapt::{adapt, dummy};
 
 use crate::error;
 
@@ -11,7 +11,7 @@ pub fn sink<D>(source: &'static str) -> impl Sender<Data = D> + 'static
 where
     D: Send + Debug + 'static,
 {
-    sender(dummy::<()>(), move |event| {
+    adapt(dummy::<()>(), move |event| {
         info!("[{}] {:?}", source, event);
         None
     })

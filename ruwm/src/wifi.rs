@@ -4,7 +4,7 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
 use crate::error;
@@ -40,7 +40,7 @@ where
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = WifiCommand> + '_ {
-        as_sender(&self.command)
+        as_channel(&self.command)
     }
 
     pub async fn process(

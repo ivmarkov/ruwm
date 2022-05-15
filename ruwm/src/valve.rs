@@ -11,7 +11,7 @@ use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::error;
 use crate::state_snapshot::StateSnapshot;
@@ -61,11 +61,11 @@ where
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {
-        as_sender(&self.command_signal)
+        as_channel(&self.command_signal)
     }
 
     pub async fn spin(
-        &self,
+        &'static self,
         once: impl OnceTimer,
         power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
         open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
@@ -76,21 +76,21 @@ where
             power_pin,
             open_pin,
             close_pin,
-            as_receiver(&self.spin_command_signal),
-            as_sender(&self.spin_finished_signal),
+            as_channel(&self.spin_command_signal),
+            as_channel(&self.spin_finished_signal),
         )
         .await
     }
 
     pub async fn process(
-        &self,
+        &'static self,
         notif: impl Sender<Data = Option<ValveState>>,
     ) -> error::Result<()> {
         process(
             &self.state,
-            as_receiver(&self.command_signal),
-            as_receiver(&self.spin_finished_signal),
-            as_sender(&self.spin_command_signal),
+            as_channel(&self.command_signal),
+            as_channel(&self.spin_finished_signal),
+            as_channel(&self.spin_command_signal),
             notif,
         )
         .await

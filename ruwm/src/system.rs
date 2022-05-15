@@ -12,7 +12,7 @@ use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::channel::adapt::both;
+use embedded_svc::utils::asyncs::channel::adapt::merge;
 use embedded_svc::utils::asyncs::signal::AtomicSignal;
 use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::Wifi as WifiTrait;
@@ -92,7 +92,7 @@ where
     pub async fn valve(&'static self) -> error::Result<()> {
         self.valve
             .process(
-                both(self.keepalive.event_sink(), event_logger::sink("VALVE"))
+                merge(self.keepalive.event_sink(), event_logger::sink("VALVE"))
                     .and(self.screen.valve_state_sink())
                     .and(self.web.valve_state_sink())
                     .and(self.mqtt.valve_state_sink()),
@@ -119,7 +119,7 @@ where
             .process(
                 timer,
                 pulse_counter,
-                both(self.keepalive.event_sink(), event_logger::sink("WM"))
+                merge(self.keepalive.event_sink(), event_logger::sink("WM"))
                     .and(self.screen.wm_state_sink())
                     .and(self.web.wm_state_sink())
                     .and(self.mqtt.wm_state_sink()),
@@ -136,7 +136,7 @@ where
             .process(
                 timer,
                 sys_time,
-                both(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
+                merge(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
                     .and(self.screen.wm_stats_state_sink())
                     .and(self.web.wm_stats_state_sink()),
             )
@@ -159,7 +159,7 @@ where
                 one_shot,
                 battery_pin,
                 power_pin,
-                both(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
+                merge(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
                     .and(self.screen.battery_state_sink())
                     .and(self.web.battery_state_sink())
                     .and(self.mqtt.battery_state_sink()),
@@ -191,7 +191,7 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(self.keepalive.event_sink(), event_logger::sink("BUTTON1"))
+            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON1"))
                 .and(self.screen.button1_pressed_sink()),
         )
         .await
@@ -209,7 +209,7 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(self.keepalive.event_sink(), event_logger::sink("BUTTON2"))
+            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON2"))
                 .and(self.screen.button2_pressed_sink()),
         )
         .await
@@ -227,7 +227,7 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(self.keepalive.event_sink(), event_logger::sink("BUTTON3"))
+            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON3"))
                 .and(self.screen.button3_pressed_sink()),
         )
         .await
@@ -246,11 +246,11 @@ where
             .process(
                 timer,
                 system_time,
-                both(
+                merge(
                     as_static_sender(&self.remaining_time),
                     event_logger::sink("KEEPALIVE/REMAINING TIME"),
                 ), // TODO: Screen
-                both(
+                merge(
                     as_static_sender(&self.quit),
                     event_logger::sink("KEEPALIVE/QUIT"),
                 ), // TODO: Screen
@@ -287,7 +287,7 @@ where
             .send::<L>(
                 topic_prefix,
                 mqtt,
-                both(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
+                merge(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
             )
             .await
     }
@@ -299,7 +299,7 @@ where
         self.mqtt
             .receive(
                 connection,
-                both(
+                merge(
                     self.keepalive.event_sink(),
                     event_logger::sink("MQTT/RECEIVE"),
                 ),
@@ -329,13 +329,13 @@ where
     pub async fn wifi(
         &'static self,
         wifi: impl WifiTrait,
-        state_changed_source: impl Receiver<Data = ()>,
+        state_changed_source: impl Receiver<Data = ()> + 'static,
     ) -> error::Result<()> {
         self.wifi
             .process(
                 wifi,
                 state_changed_source,
-                both(self.keepalive.event_sink(), event_logger::sink("WIFI")),
+                merge(self.keepalive.event_sink(), event_logger::sink("WIFI")),
             )
             .await
     }

@@ -3,7 +3,7 @@ use core::ops::Deref;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::signal::asyncs::Signal;
-use embedded_svc::utils::asyncs::signal::adapt::{as_receiver, as_sender};
+use embedded_svc::utils::asyncs::signal::adapt::{as_channel, SignalChannel};
 
 pub struct AlmostOnce<T>(UnsafeCell<Option<T>>);
 
@@ -28,22 +28,24 @@ impl<T> Deref for AlmostOnce<T> {
 
 unsafe impl<T> Sync for AlmostOnce<T> {}
 
-// TODO: Something seems wrong with rustc here as this signature should
-// be equivalent to as_receiver() from above
+// TODO: Something seems wrong with here as this signature should
+// be equivalent to as_channel) which is being called
+// Late-binding lifetimes?
 pub fn as_static_sender<S, T>(signal: &'static S) -> impl Sender<Data = T> + 'static
 where
-    S: Signal<Data = T> + Send + Sync,
+    S: Signal<Data = T> + Send + Sync + 'static,
     T: Send + 'static,
 {
-    as_sender(signal)
+    as_channel(signal)
 }
 
-// TODO: Something seems wrong with rustc here as this signature should
-// be equivalent to as_receiver() from above
+// TODO: Something seems wrong with here as this signature should
+// be equivalent to as_channel) which is being called
+// Late-binding lifetimes?
 pub fn as_static_receiver<S, T>(signal: &'static S) -> impl Receiver<Data = T> + 'static
 where
     S: Signal<Data = T> + Send + Sync + 'static,
     T: Send + 'static,
 {
-    as_receiver(signal)
+    as_channel(signal)
 }

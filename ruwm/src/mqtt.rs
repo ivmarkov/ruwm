@@ -14,9 +14,9 @@ use embedded_svc::mqtt::client::asyncs::{
 use embedded_svc::mqtt::client::Details;
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::channel::adapt::both;
+use embedded_svc::utils::asyncs::channel::adapt::merge;
 use embedded_svc::utils::asyncs::select::{select4, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -59,16 +59,16 @@ where
         }
     }
 
-    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_ {
-        as_sender(&self.valve_state_signal)
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+        as_channel(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&self) -> impl Sender<Data = WaterMeterState> + '_ {
-        as_sender(&self.wm_state_signal)
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+        as_channel(&self.wm_state_signal)
     }
 
     pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
-        as_sender(&self.battery_state_signal)
+        as_channel(&self.battery_state_signal)
     }
 
     pub async fn send<const L: usize>(
@@ -84,7 +84,7 @@ where
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
-            both(as_static_sender(&self.pub_signal), pub_sink),
+            merge(as_static_sender(&self.pub_signal), pub_sink),
         )
         .await
     }
@@ -98,7 +98,7 @@ where
     ) -> error::Result<()> {
         receive(
             connection,
-            both(as_static_sender(&self.notif_signal), notif_sink),
+            merge(as_static_sender(&self.notif_signal), notif_sink),
             valve_command_sink,
             wm_command_sink,
         )

@@ -6,9 +6,9 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::channel::adapt::sender;
+use embedded_svc::utils::asyncs::channel::adapt::adapt;
 use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::as_sender;
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::error;
 use crate::utils::as_static_receiver;
@@ -43,7 +43,7 @@ where
     where
         D: Send + 'static,
     {
-        sender(as_sender(&self.event_signal), |_| Some(()))
+        adapt(as_channel(&self.event_signal), |_| Some(()))
     }
 
     pub async fn process(
