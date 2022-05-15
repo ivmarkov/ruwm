@@ -28,8 +28,8 @@ impl<T> Deref for AlmostOnce<T> {
 
 unsafe impl<T> Sync for AlmostOnce<T> {}
 
-// TODO: Something seems wrong with here as this signature should
-// be equivalent to as_channel) which is being called
+// TODO: Something seems wrong here as this signature should
+// be equivalent to as_channel which is being called
 // Late-binding lifetimes?
 pub fn as_static_sender<S, T>(signal: &'static S) -> impl Sender<Data = T> + 'static
 where
@@ -39,8 +39,8 @@ where
     as_channel(signal)
 }
 
-// TODO: Something seems wrong with here as this signature should
-// be equivalent to as_channel) which is being called
+// TODO: Something seems wrong here as this signature should
+// be equivalent to as_channel which is being called
 // Late-binding lifetimes?
 pub fn as_static_receiver<S, T>(signal: &'static S) -> impl Receiver<Data = T> + 'static
 where

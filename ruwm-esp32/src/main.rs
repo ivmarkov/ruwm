@@ -15,10 +15,11 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
-use embedded_svc::executor::asyncs::{Executor, LocalSpawner, Spawner, WaitableExecutor};
+use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
 use embedded_svc::timer::asyncs::TimerService;
 use embedded_svc::utils::asyncify::ws::server::AsyncAcceptor;
 use embedded_svc::utils::asyncify::Asyncify;
+use embedded_svc::utils::asyncs::executor::spawn::TasksSpawner;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry;
 
@@ -52,7 +53,6 @@ use ruwm::system::System;
 use ruwm::utils::AlmostOnce;
 use ruwm::valve::{self, ValveCommand};
 use ruwm::{checkd, error};
-use smol::Task;
 
 use crate::espidf::timer;
 
@@ -119,10 +119,61 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     SYSTEM.init(System::new());
 
+    let mut timers = timer::timers()?;
+
+    let (mut executor1, tasks1) = TasksSpawner::new(local(64))
+        .spawn_local(SYSTEM.valve())?
+        .spawn_local(SYSTEM.valve_spin(
+            timers.timer()?,
+            valve_power_pin,
+            valve_open_pin,
+            valve_close_pin,
+        ))?
+        .spawn_local(SYSTEM.wm(
+            timers.timer()?,
+            PulseCounter::new(peripherals.ulp).initialize()?,
+        ))?
+        .spawn_local(SYSTEM.battery(
+            timers.timer()?,
+            adc::PoweredAdc::new(
+                peripherals.adc1,
+                adc::config::Config::new().calibration(true),
+            )?,
+            peripherals.pins.gpio33.into_analog_atten_11db()?,
+            peripherals.pins.gpio14.into_input()?,
+        ))?
+        .spawn_local(SYSTEM.button1(
+            timers.timer()?,
+            unsafe {
+                button1_pin.into_subscribed(|| SYSTEM.button1_signal(), InterruptType::NegEdge)?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.button2(
+            timers.timer()?,
+            unsafe {
+                button2_pin
+                    .into_subscribed(|| SYSTEM.button2_signal(), InterruptType::NegEdge)?
+                    .into_pull_up()?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.button3(
+            timers.timer()?,
+            unsafe {
+                button3_pin
+                    .into_subscribed(|| SYSTEM.button3_signal(), InterruptType::NegEdge)?
+                    .into_pull_up()?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.emergency())?
+        .spawn_local(SYSTEM.keepalive(timers.timer()?, EspSystemTime))?
+        .release();
+
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
     let nvs_stack = Arc::new(EspDefaultNvs::new()?);
-
     let mut wifi = EspWifi::new(netif_stack, sysloop_stack, nvs_stack)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
@@ -130,6 +181,22 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         password: PASS.into(),
         ..Default::default()
     }))?;
+
+    let wifi_state_changed_source = wifi.as_async().subscribe()?;
+
+    let client_id = "water-meter-demo";
+    let mut mqtt_parser = MessageParser::new();
+
+    let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
+        "mqtt://broker.emqx.io:1883",
+        &MqttClientConfiguration {
+            client_id: Some(client_id),
+            ..Default::default()
+        },
+        move |event| mqtt_parser.convert(event),
+    )?;
+
+    let mqtt_client = mqtt_client.into_async();
 
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<WS_MAX_CONNECTIONS, WS_MAX_FRAME_SIZE>::new(());
@@ -144,115 +211,10 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .ws("/ws")
         .handler(move |receiver, sender| ws_processor.lock().process(receiver, sender))?;
 
-    let client_id = "water-meter-demo";
-
-    let mut mqtt_parser = MessageParser::new();
-
-    let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
-        "mqtt://broker.emqx.io:1883",
-        &MqttClientConfiguration {
-            client_id: Some(client_id),
-            ..Default::default()
-        },
-        move |event| mqtt_parser.convert(event),
-    )?;
-
-    let mqtt_client = mqtt_client.into_async();
-
-    let mut timers = timer::timers()?;
-
-    let mut executor1 = local(64);
-    let mut executor2 = sendable(64);
-    let mut executor3 = sendable(64);
-
-    let mut executor1_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
-    let mut executor2_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
-    let mut executor3_tasks = heapless::Vec::<Task<error::Result<()>>, 64>::new();
-
-    let mut spawn1 = |fut| {
-        executor1_tasks
-            .push(executor1.spawn_local(fut)?)
-            .map_err(error::heapless)
-    };
-
-    spawn1(SYSTEM.valve())?;
-
-    executor1_tasks
-        .push(executor1.spawn_local(SYSTEM.valve_spin(
-            timers.timer()?,
-            valve_power_pin,
-            valve_open_pin,
-            valve_close_pin,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor1_tasks
-        .push(executor1.spawn_local(SYSTEM.wm(
-            timers.timer()?,
-            PulseCounter::new(peripherals.ulp).initialize()?,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.wm_stats(timers.timer()?, EspSystemTime))?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.battery(
-            timers.timer()?,
-            adc::PoweredAdc::new(
-                peripherals.adc1,
-                adc::config::Config::new().calibration(true),
-            )?,
-            peripherals.pins.gpio33.into_analog_atten_11db()?,
-            peripherals.pins.gpio14.into_input()?,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor1_tasks
-        .push(executor1.spawn_local(SYSTEM.button1(
-            timers.timer()?,
-            unsafe {
-                button1_pin.into_subscribed(|| SYSTEM.button1_signal(), InterruptType::NegEdge)?
-            },
-            PressedLevel::Low,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.button2(
-            timers.timer()?,
-            unsafe {
-                button2_pin
-                    .into_subscribed(|| SYSTEM.button2_signal(), InterruptType::NegEdge)?
-                    .into_pull_up()?
-            },
-            PressedLevel::Low,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor1_tasks
-        .push(executor1.spawn_local(SYSTEM.button3(
-            timers.timer()?,
-            unsafe {
-                button3_pin
-                    .into_subscribed(|| SYSTEM.button3_signal(), InterruptType::NegEdge)?
-                    .into_pull_up()?
-            },
-            PressedLevel::Low,
-        ))?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.emergency())?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.keepalive(timers.timer()?, EspSystemTime))?)
-        .map_err(error::heapless)?;
-
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.screen_draw(display(
+    let (mut executor2, tasks2) = TasksSpawner::new(sendable(64))
+        .spawn(SYSTEM.wm_stats(timers.timer()?, EspSystemTime))?
+        .spawn(SYSTEM.screen())?
+        .spawn(SYSTEM.screen_draw(display(
             peripherals.pins.gpio4.into_output()?.degrade(),
             peripherals.pins.gpio16.into_output()?.degrade(),
             peripherals.pins.gpio23.into_output()?.degrade(),
@@ -260,51 +222,33 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             peripherals.pins.gpio18.into_output()?.degrade(),
             peripherals.pins.gpio19.into_output()?.degrade(),
             Some(peripherals.pins.gpio5.into_output()?.degrade()),
-        )?))?)
-        .map_err(error::heapless)?;
+        )?))?
+        .spawn(SYSTEM.wifi(wifi, wifi_state_changed_source))?
+        .spawn(SYSTEM.mqtt_receive(mqtt_conn))?
+        .spawn(SYSTEM.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
+        .release();
 
-    executor2_tasks
-        .push(executor2.spawn(SYSTEM.screen())?)
-        .map_err(error::heapless)?;
-
-    executor3_tasks
-        .push(executor3.spawn(SYSTEM.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?)
-        .map_err(error::heapless)?;
-
-    executor3_tasks
-        .push(executor3.spawn(SYSTEM.mqtt_receive(mqtt_conn))?)
-        .map_err(error::heapless)?;
-
-    executor3_tasks
-        .push(executor3.spawn(SYSTEM.web_send::<WS_MAX_FRAME_SIZE>())?)
-        .map_err(error::heapless)?;
-
-    executor3_tasks
-        .push(executor3.spawn(SYSTEM.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?)
-        .map_err(error::heapless)?;
-
-    let wifi_state_changed_source = wifi.as_async().subscribe()?;
-
-    executor3_tasks
-        .push(executor3.spawn(SYSTEM.wifi(wifi, wifi_state_changed_source))?)
-        .map_err(error::heapless)?;
+    let (mut executor3, tasks3) = TasksSpawner::new(sendable(64))
+        .spawn(SYSTEM.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
+        .spawn(SYSTEM.web_send::<WS_MAX_FRAME_SIZE>())?
+        .release();
 
     log::info!("Starting execution");
 
     let executor2 = std::thread::spawn(move || {
         executor2.with_context(|exec, ctx| {
-            exec.run(ctx, || SYSTEM.should_quit(), Some(executor2_tasks));
+            exec.run(ctx, || SYSTEM.should_quit(), Some(tasks2));
         });
     });
 
     let executor3 = std::thread::spawn(move || {
         executor3.with_context(|exec, ctx| {
-            exec.run(ctx, || SYSTEM.should_quit(), Some(executor3_tasks));
+            exec.run(ctx, || SYSTEM.should_quit(), Some(tasks3));
         });
     });
 
     executor1.with_context(|exec, ctx| {
-        exec.run(ctx, || SYSTEM.should_quit(), Some(executor1_tasks));
+        exec.run(ctx, || SYSTEM.should_quit(), Some(tasks1));
     });
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
