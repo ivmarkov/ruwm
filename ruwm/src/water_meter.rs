@@ -53,7 +53,7 @@ where
         &self.state
     }
 
-    pub fn command_sink(&self) -> impl Sender<Data = WaterMeterCommand> + '_ {
+    pub fn command_sink(&'static self) -> impl Sender<Data = WaterMeterCommand> + 'static {
         as_sender(&self.command_signal)
     }
 

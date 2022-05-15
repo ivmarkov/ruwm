@@ -60,7 +60,7 @@ where
         &self.state
     }
 
-    pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + '_ {
+    pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {
         as_sender(&self.command_signal)
     }
 

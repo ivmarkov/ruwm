@@ -1,0 +1,320 @@
+use core::fmt::Debug;
+use core::time::Duration;
+
+use embedded_graphics::prelude::RgbColor;
+
+use embedded_hal::adc;
+use embedded_hal::digital::v2::{InputPin, OutputPin};
+
+use embedded_svc::channel::asyncs::Receiver;
+use embedded_svc::mqtt::client::asyncs::{Client, Connection, Publish};
+use embedded_svc::mutex::MutexFamily;
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::sys_time::SystemTime;
+use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::utils::asyncs::channel::adapt::both;
+use embedded_svc::utils::asyncs::signal::AtomicSignal;
+use embedded_svc::utils::atomic_swap::AtomicOption;
+use embedded_svc::wifi::Wifi as WifiTrait;
+use embedded_svc::ws::asyncs::Acceptor;
+
+use crate::battery::Battery;
+use crate::button::{self, PressedLevel};
+use crate::emergency::Emergency;
+use crate::keepalive::{Keepalive, RemainingTime};
+use crate::mqtt::{Mqtt, MqttCommand};
+use crate::pulse_counter::PulseCounter;
+use crate::screen::{FlushableDrawTarget, Screen};
+use crate::storage::Storage;
+use crate::utils::{as_static_receiver, as_static_sender};
+use crate::valve::Valve;
+use crate::water_meter::WaterMeter;
+use crate::web::Web;
+use crate::wifi::Wifi;
+use crate::{error, event_logger};
+
+type NotifSignal = AtomicSignal<AtomicOption, ()>;
+
+pub struct System<M, A, const N: usize>
+where
+    M: MutexFamily + SendSyncSignalFamily,
+    A: Acceptor,
+{
+    valve: Valve<M>,
+    wm: WaterMeter<M>,
+    battery: Battery<M>,
+
+    button1: NotifSignal,
+    button2: NotifSignal,
+    button3: NotifSignal,
+
+    emergency: Emergency<M>,
+    keepalive: Keepalive<M>,
+
+    remaining_time: M::Signal<RemainingTime>,
+
+    quit: NotifSignal,
+
+    screen: Screen<M>,
+
+    wifi: Wifi<M>,
+    web: Web<M, A, N>,
+    mqtt: Mqtt<M>,
+}
+
+impl<M, A, const N: usize> System<M, A, N>
+where
+    M: MutexFamily + SendSyncSignalFamily,
+    A: Acceptor,
+{
+    pub fn new() -> Self {
+        Self {
+            valve: Valve::new(),
+            wm: WaterMeter::new(),
+            battery: Battery::new(),
+            button1: NotifSignal::new(),
+            button2: NotifSignal::new(),
+            button3: NotifSignal::new(),
+            emergency: Emergency::new(),
+            keepalive: Keepalive::new(),
+            remaining_time: M::Signal::new(),
+            quit: NotifSignal::new(),
+            screen: Screen::new(),
+            wifi: Wifi::new(),
+            web: Web::new(),
+            mqtt: Mqtt::new(),
+        }
+    }
+
+    pub async fn valve(&'static self) -> error::Result<()> {
+        self.valve
+            .process(
+                both(self.mqtt.valve_state_sink(), self.keepalive.event_sink())
+                    .and(event_logger::sink()),
+            )
+            .await
+    }
+
+    pub async fn valve_spin(
+        &'static self,
+        once: impl OnceTimer,
+        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
+    ) -> error::Result<()> {
+        self.valve.spin(once, power_pin, open_pin, close_pin).await
+    }
+
+    pub async fn wm(
+        &'static self,
+        timer: impl OnceTimer,
+        pulse_counter: impl PulseCounter,
+    ) -> error::Result<()> {
+        self.wm
+            .process(
+                timer,
+                pulse_counter,
+                both(self.mqtt.wm_state_sink(), self.keepalive.event_sink())
+                    .and(event_logger::sink()),
+            )
+            .await
+    }
+
+    pub async fn battery<ADC, BP>(
+        &'static self,
+        timer: impl OnceTimer,
+        one_shot: impl adc::OneShot<ADC, u16, BP>,
+        battery_pin: BP,
+        power_pin: impl InputPin<Error = impl error::HalError>,
+    ) -> error::Result<()>
+    where
+        BP: adc::Channel<ADC>,
+    {
+        self.battery
+            .process(
+                timer,
+                one_shot,
+                battery_pin,
+                power_pin,
+                both(self.mqtt.battery_state_sink(), self.keepalive.event_sink())
+                    .and(event_logger::sink()),
+            )
+            .await
+    }
+
+    pub fn button1_signal(&self) {
+        self.button1.signal(())
+    }
+
+    pub fn button2_signal(&self) {
+        self.button2.signal(())
+    }
+
+    pub fn button3_signal(&self) {
+        self.button3.signal(())
+    }
+
+    pub async fn button1(
+        &'static self,
+        timer: impl OnceTimer,
+        pin: impl InputPin<Error = impl error::HalError>,
+        pressed_level: PressedLevel,
+    ) -> error::Result<()> {
+        button::process(
+            timer,
+            as_static_receiver(&self.button1),
+            pin,
+            pressed_level,
+            Some(Duration::from_millis(50)),
+            both(
+                self.screen.button1_pressed_sink(),
+                self.keepalive.event_sink(),
+            )
+            .and(event_logger::sink()),
+        )
+        .await
+    }
+
+    pub async fn button2(
+        &'static self,
+        timer: impl OnceTimer,
+        pin: impl InputPin<Error = impl error::HalError>,
+        pressed_level: PressedLevel,
+    ) -> error::Result<()> {
+        button::process(
+            timer,
+            as_static_receiver(&self.button2),
+            pin,
+            pressed_level,
+            Some(Duration::from_millis(50)),
+            both(
+                self.screen.button2_pressed_sink(),
+                self.keepalive.event_sink(),
+            )
+            .and(event_logger::sink()),
+        )
+        .await
+    }
+
+    pub async fn button3(
+        &'static self,
+        timer: impl OnceTimer,
+        pin: impl InputPin<Error = impl error::HalError>,
+        pressed_level: PressedLevel,
+    ) -> error::Result<()> {
+        button::process(
+            timer,
+            as_static_receiver(&self.button3),
+            pin,
+            pressed_level,
+            Some(Duration::from_millis(50)),
+            both(
+                self.screen.button3_pressed_sink(),
+                self.keepalive.event_sink(),
+            )
+            .and(event_logger::sink()),
+        )
+        .await
+    }
+
+    pub async fn emergency(&'static self) -> error::Result<()> {
+        self.emergency.process(self.valve.command_sink()).await
+    }
+
+    pub async fn keepalive(
+        &'static self,
+        timer: impl OnceTimer,
+        system_time: impl SystemTime,
+    ) -> error::Result<()> {
+        self.keepalive
+            .process(
+                timer,
+                system_time,
+                as_static_sender(&self.remaining_time),
+                both(as_static_sender(&self.quit), event_logger::sink()),
+            )
+            .await
+    }
+
+    pub async fn screen_draw<D>(&'static self, display: D) -> error::Result<()>
+    where
+        D: FlushableDrawTarget + Send + 'static,
+        D::Color: RgbColor,
+        D::Error: Debug,
+    {
+        self.screen.draw(display).await
+    }
+
+    pub async fn screen(&'static self) -> error::Result<()> {
+        self.screen
+            .process(
+                self.valve.state().get(),
+                self.wm.state().get(),
+                self.battery.state().get(),
+            )
+            .await
+    }
+
+    pub async fn mqtt_send(
+        &'static self,
+        topic_prefix: impl AsRef<str>,
+        mqtt: impl Client + Publish,
+    ) -> error::Result<()> {
+        self.mqtt
+            .send(
+                topic_prefix,
+                mqtt,
+                both(self.keepalive.event_sink(), event_logger::sink()),
+            )
+            .await
+    }
+
+    pub async fn mqtt_receive(
+        &'static self,
+        connection: impl Connection<Message = Option<MqttCommand>>,
+    ) -> error::Result<()> {
+        self.mqtt
+            .receive(
+                connection,
+                both(self.keepalive.event_sink(), event_logger::sink()),
+                self.valve.command_sink(),
+                self.wm.command_sink(),
+            )
+            .await
+    }
+
+    pub async fn web_send<const F: usize>(&'static self) -> error::Result<()> {
+        self.web.send::<F>().await
+    }
+
+    pub async fn web_receive<const F: usize>(&'static self, acceptor: A) -> error::Result<()> {
+        self.web
+            .receive::<F>(
+                acceptor,
+                self.valve.state(),
+                self.wm.state(),
+                self.battery.state(),
+                self.valve.command_sink(),
+                self.wm.command_sink(),
+            )
+            .await
+    }
+
+    pub async fn wifi(
+        &'static self,
+        wifi: impl WifiTrait,
+        state_changed_source: impl Receiver<Data = ()>,
+    ) -> error::Result<()> {
+        self.wifi
+            .process(
+                wifi,
+                state_changed_source,
+                both(self.keepalive.event_sink(), event_logger::sink()),
+            )
+            .await
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.quit.is_set()
+    }
+}

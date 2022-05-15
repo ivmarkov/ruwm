@@ -39,7 +39,7 @@ where
         }
     }
 
-    pub fn event_sink<D>(&'static self) -> impl Sender<Data = D> + '_
+    pub fn event_sink<D>(&'static self) -> impl Sender<Data = D> + 'static
     where
         D: Send + 'static,
     {

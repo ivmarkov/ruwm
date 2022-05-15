@@ -4,6 +4,7 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::format;
 
+use embedded_svc::utils::asyncs::channel::adapt::both;
 use log::info;
 
 use serde::{Deserialize, Serialize};
@@ -67,7 +68,7 @@ where
         as_sender(&self.wm_state_signal)
     }
 
-    pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
         as_sender(&self.battery_state_signal)
     }
 
@@ -75,6 +76,7 @@ where
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
+        pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) -> error::Result<()> {
         send(
             topic_prefix,
@@ -83,7 +85,7 @@ where
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
-            as_static_sender(&self.pub_signal),
+            both(as_static_sender(&self.pub_signal), pub_sink),
         )
         .await
     }
@@ -91,12 +93,13 @@ where
     pub async fn receive(
         &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
+        notif_sink: impl Sender<Data = MqttClientNotification> + Send + 'static,
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
     ) -> error::Result<()> {
         receive(
             connection,
-            as_static_sender(&self.notif_signal),
+            both(as_static_sender(&self.notif_signal), notif_sink),
             valve_command_sink,
             wm_command_sink,
         )
