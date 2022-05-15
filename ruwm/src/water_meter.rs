@@ -16,9 +16,6 @@ use crate::state_snapshot::StateSnapshot;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
-    pub prev_edges_count: u64,
-    pub prev_armed: bool,
-    pub prev_leaking: bool,
     pub edges_count: u64,
     pub armed: bool,
     pub leaking: bool,
@@ -119,9 +116,6 @@ pub async fn run(
             .update_with(
                 |state| {
                     Ok(WaterMeterState {
-                        prev_edges_count: state.edges_count,
-                        prev_armed: state.armed,
-                        prev_leaking: state.leaking,
                         edges_count: state.edges_count + data.edges_count as u64,
                         armed: data.wakeup_edges > 0,
                         leaking: state.edges_count < state.edges_count + data.edges_count as u64

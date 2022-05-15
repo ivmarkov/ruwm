@@ -89,8 +89,10 @@ where
     pub async fn valve(&'static self) -> error::Result<()> {
         self.valve
             .process(
-                both(self.mqtt.valve_state_sink(), self.keepalive.event_sink())
-                    .and(event_logger::sink()),
+                both(self.keepalive.event_sink(), event_logger::sink("VALVE"))
+                    .and(self.screen.valve_state_sink())
+                    .and(self.web.valve_state_sink())
+                    .and(self.mqtt.valve_state_sink()),
             )
             .await
     }
@@ -114,8 +116,10 @@ where
             .process(
                 timer,
                 pulse_counter,
-                both(self.mqtt.wm_state_sink(), self.keepalive.event_sink())
-                    .and(event_logger::sink()),
+                both(self.keepalive.event_sink(), event_logger::sink("WM"))
+                    .and(self.screen.wm_state_sink())
+                    .and(self.web.wm_state_sink())
+                    .and(self.mqtt.wm_state_sink()),
             )
             .await
     }
@@ -136,8 +140,10 @@ where
                 one_shot,
                 battery_pin,
                 power_pin,
-                both(self.mqtt.battery_state_sink(), self.keepalive.event_sink())
-                    .and(event_logger::sink()),
+                both(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
+                    .and(self.screen.battery_state_sink())
+                    .and(self.web.battery_state_sink())
+                    .and(self.mqtt.battery_state_sink()),
             )
             .await
     }
@@ -166,11 +172,8 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(
-                self.screen.button1_pressed_sink(),
-                self.keepalive.event_sink(),
-            )
-            .and(event_logger::sink()),
+            both(self.keepalive.event_sink(), event_logger::sink("BUTTON1"))
+                .and(self.screen.button1_pressed_sink()),
         )
         .await
     }
@@ -187,11 +190,8 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(
-                self.screen.button2_pressed_sink(),
-                self.keepalive.event_sink(),
-            )
-            .and(event_logger::sink()),
+            both(self.keepalive.event_sink(), event_logger::sink("BUTTON2"))
+                .and(self.screen.button2_pressed_sink()),
         )
         .await
     }
@@ -208,17 +208,14 @@ where
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            both(
-                self.screen.button3_pressed_sink(),
-                self.keepalive.event_sink(),
-            )
-            .and(event_logger::sink()),
+            both(self.keepalive.event_sink(), event_logger::sink("BUTTON3"))
+                .and(self.screen.button3_pressed_sink()),
         )
         .await
     }
 
     pub async fn emergency(&'static self) -> error::Result<()> {
-        self.emergency.process(self.valve.command_sink()).await
+        self.emergency.process(self.valve.command_sink()).await // TODO: Screen
     }
 
     pub async fn keepalive(
@@ -230,8 +227,14 @@ where
             .process(
                 timer,
                 system_time,
-                both(as_static_sender(&self.remaining_time), event_logger::sink()),
-                both(as_static_sender(&self.quit), event_logger::sink()),
+                both(
+                    as_static_sender(&self.remaining_time),
+                    event_logger::sink("KEEPALIVE/REMAINING TIME"),
+                ), // TODO: Screen
+                both(
+                    as_static_sender(&self.quit),
+                    event_logger::sink("KEEPALIVE/QUIT"),
+                ), // TODO: Screen
             )
             .await
     }
@@ -251,21 +254,21 @@ where
                 self.valve.state().get(),
                 self.wm.state().get(),
                 self.battery.state().get(),
-                event_logger::sink(),
+                event_logger::sink("SCREEN"),
             )
             .await
     }
 
-    pub async fn mqtt_send(
+    pub async fn mqtt_send<const L: usize>(
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
     ) -> error::Result<()> {
         self.mqtt
-            .send(
+            .send::<L>(
                 topic_prefix,
                 mqtt,
-                both(self.keepalive.event_sink(), event_logger::sink()),
+                both(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
             )
             .await
     }
@@ -277,7 +280,10 @@ where
         self.mqtt
             .receive(
                 connection,
-                both(self.keepalive.event_sink(), event_logger::sink()),
+                both(
+                    self.keepalive.event_sink(),
+                    event_logger::sink("MQTT/RECEIVE"),
+                ),
                 self.valve.command_sink(),
                 self.wm.command_sink(),
             )
@@ -310,7 +316,7 @@ where
             .process(
                 wifi,
                 state_changed_source,
-                both(self.keepalive.event_sink(), event_logger::sink()),
+                both(self.keepalive.event_sink(), event_logger::sink("WIFI")),
             )
             .await
     }

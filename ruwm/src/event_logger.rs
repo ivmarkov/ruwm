@@ -7,12 +7,12 @@ use embedded_svc::utils::asyncs::channel::adapt::{dummy, sender};
 
 use crate::error;
 
-pub fn sink<D>() -> impl Sender<Data = D> + 'static
+pub fn sink<D>(source: &'static str) -> impl Sender<Data = D> + 'static
 where
     D: Send + Debug + 'static,
 {
-    sender(dummy::<()>(), |event| {
-        info!("Event: {:?}", event);
+    sender(dummy::<()>(), move |event| {
+        info!("[{}] {:?}", source, event);
         None
     })
 }

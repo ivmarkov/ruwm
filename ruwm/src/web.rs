@@ -62,15 +62,15 @@ where
         }
     }
 
-    pub fn valve_state_sink(&self) -> impl Sender<Data = Option<ValveState>> + '_ {
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
         as_sender(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&self) -> impl Sender<Data = WaterMeterState> + '_ {
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
         as_sender(&self.wm_state_signal)
     }
 
-    pub fn battery_state_sink(&self) -> impl Sender<Data = BatteryState> + '_ {
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
         as_sender(&self.battery_state_signal)
     }
 

@@ -1,13 +1,11 @@
-use core::str;
+use core::str::{self, FromStr};
 use core::time::Duration;
 
-extern crate alloc;
-use alloc::format;
-
-use embedded_svc::utils::asyncs::channel::adapt::both;
-use log::info;
+use log::{error, info};
 
 use serde::{Deserialize, Serialize};
+
+use heapless::String;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::mqtt::client::asyncs::{
@@ -16,6 +14,7 @@ use embedded_svc::mqtt::client::asyncs::{
 use embedded_svc::mqtt::client::Details;
 use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asyncs::channel::adapt::both;
 use embedded_svc::utils::asyncs::select::{select4, Either4};
 use embedded_svc::utils::asyncs::signal::adapt::as_sender;
 
@@ -72,13 +71,13 @@ where
         as_sender(&self.battery_state_signal)
     }
 
-    pub async fn send(
+    pub async fn send<const L: usize>(
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) -> error::Result<()> {
-        send(
+        send::<L>(
             topic_prefix,
             mqtt,
             as_static_receiver(&self.notif_signal),
@@ -107,7 +106,7 @@ where
     }
 }
 
-pub async fn send(
+pub async fn send<const L: usize>(
     topic_prefix: impl AsRef<str>,
     mut mqtt: impl Client + Publish,
     mut notif_source: impl Receiver<Data = MqttClientNotification>,
@@ -118,22 +117,31 @@ pub async fn send(
 ) -> error::Result<()> {
     let mut connected = false;
 
-    let topic_prefix = topic_prefix.as_ref();
+    let topic = |topic_suffix| {
+        String::<L>::from_str(topic_prefix.as_ref())
+            .and_then(|mut s| s.push_str(topic_suffix).map(|_| s))
+            .map_err(error::heapless)
+    };
 
-    let topic_valve = format!("{}/valve", topic_prefix);
+    let topic_commands = topic("/commands/#")?;
 
-    let topic_meter_edges = format!("{}/meter/edges", topic_prefix);
-    let topic_meter_armed = format!("{}/meter/armed", topic_prefix);
-    let topic_meter_leak = format!("{}/meter/leak", topic_prefix);
+    let topic_valve = topic("/valve")?;
 
-    let topic_battery_voltage = format!("{}/battery/voltage", topic_prefix);
-    let topic_battery_low = format!("{}/battery/low", topic_prefix);
-    let topic_battery_charged = format!("{}/battery/charged", topic_prefix);
+    let topic_meter_edges = topic("/meter/edges")?;
+    let topic_meter_armed = topic("/meter/armed")?;
+    let topic_meter_leak = topic("/meter/leak")?;
 
-    let topic_powered = format!("{}/powered", topic_prefix);
+    let topic_battery_voltage = topic("/battery/voltage")?;
+    let topic_battery_low = topic("/battery/low")?;
+    let topic_battery_charged = topic("/battery/charged")?;
+
+    let topic_powered = topic("/powered")?;
+
+    let mut published_wm_state: Option<WaterMeterState> = None;
+    let mut published_battery_state: Option<BatteryState> = None;
 
     loop {
-        let (mqtt_state, valve_state, wm_state, battery_state) = {
+        let (mqtt_state, valve_state, wm_state, battery_state) = if connected {
             let mqtt = notif_source.recv();
             let valve = valve_state_source.recv();
             let wm = wm_state_source.recv();
@@ -153,19 +161,27 @@ pub async fn send(
                     (None, None, None, Some(battery_state.map_err(error::svc)?))
                 }
             }
+        } else {
+            let mqtt_state = notif_source.recv().await;
+
+            (Some(mqtt_state.map_err(error::svc)?), None, None, None)
         };
 
         if let Some(mqtt_state) = mqtt_state {
             match mqtt_state {
                 Ok(Event::Connected(_)) => {
+                    info!("MQTT is now connected, subscribing");
+
                     error::check!(mqtt
-                        .subscribe(format!("{}/commands/#", topic_prefix), QoS::AtLeastOnce)
+                        .subscribe(topic_commands.as_str(), QoS::AtLeastOnce)
                         .await
                         .map_err(error::svc));
 
                     connected = true;
                 }
                 Ok(Event::Disconnected) => {
+                    info!("MQTT disconnected");
+
                     connected = false;
                 }
                 _ => {}
@@ -193,7 +209,10 @@ pub async fn send(
         }
 
         if let Some(wm_state) = wm_state {
-            if wm_state.prev_edges_count != wm_state.edges_count {
+            if published_wm_state
+                .map(|p| p.edges_count != wm_state.edges_count)
+                .unwrap_or(true)
+            {
                 let num = wm_state.edges_count.to_le_bytes();
                 let num_slice: &[u8] = &num;
 
@@ -208,7 +227,10 @@ pub async fn send(
                 .await?;
             }
 
-            if wm_state.prev_armed != wm_state.armed {
+            if published_wm_state
+                .map(|p| p.armed != wm_state.armed)
+                .unwrap_or(true)
+            {
                 publish(
                     connected,
                     &mut mqtt,
@@ -220,7 +242,10 @@ pub async fn send(
                 .await?;
             }
 
-            if wm_state.prev_leaking != wm_state.leaking {
+            if published_wm_state
+                .map(|p| p.leaking != wm_state.leaking)
+                .unwrap_or(true)
+            {
                 publish(
                     connected,
                     &mut mqtt,
@@ -231,10 +256,15 @@ pub async fn send(
                 )
                 .await?;
             }
+
+            published_wm_state = Some(wm_state);
         }
 
         if let Some(battery_state) = battery_state {
-            if battery_state.prev_voltage != battery_state.voltage {
+            if published_battery_state
+                .map(|p| p.voltage != battery_state.voltage)
+                .unwrap_or(true)
+            {
                 if let Some(voltage) = battery_state.voltage {
                     let num = voltage.to_le_bytes();
                     let num_slice: &[u8] = &num;
@@ -249,7 +279,7 @@ pub async fn send(
                     )
                     .await?;
 
-                    if let Some(prev_voltage) = battery_state.prev_voltage {
+                    if let Some(prev_voltage) = published_battery_state.and_then(|p| p.voltage) {
                         if (prev_voltage > BatteryState::LOW_VOLTAGE)
                             != (voltage > BatteryState::LOW_VOLTAGE)
                         {
@@ -293,7 +323,10 @@ pub async fn send(
                 }
             }
 
-            if battery_state.prev_powered != battery_state.powered {
+            if published_battery_state
+                .map(|p| p.powered != battery_state.powered)
+                .unwrap_or(true)
+            {
                 if let Some(powered) = battery_state.powered {
                     publish(
                         connected,
@@ -306,6 +339,8 @@ pub async fn send(
                     .await?;
                 }
             }
+
+            published_battery_state = Some(battery_state);
         };
     }
 }
@@ -331,7 +366,7 @@ async fn publish(
             }
         }
     } else {
-        info!("Client not connected, skipping publishment to {}", topic);
+        error!("Client not connected, skipping publishment to {}", topic);
     }
 
     Ok(())

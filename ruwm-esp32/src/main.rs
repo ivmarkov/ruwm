@@ -68,8 +68,9 @@ const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 
-const WS_CONNS_MAX: usize = 2;
-const WS_FRAME_SIZE: usize = 512;
+const MQTT_MAX_TOPIC_LEN: usize = 64;
+const WS_MAX_CONNECTIONS: usize = 2;
+const WS_MAX_FRAME_SIZE: usize = 512;
 
 type MutexFamilyImpl = esp_idf_hal::mutex::Condvar;
 
@@ -77,7 +78,7 @@ static SYSTEM: AlmostOnce<
     System<
         MutexFamilyImpl,
         AsyncAcceptor<(), MutexFamilyImpl, EspHttpWsDetachedSender>,
-        WS_CONNS_MAX,
+        WS_MAX_CONNECTIONS,
     >,
 > = AlmostOnce::new();
 
@@ -130,7 +131,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (ws_processor, ws_acceptor) = EspHttpWsProcessor::<WS_CONNS_MAX, WS_FRAME_SIZE>::new(());
+    let (ws_processor, ws_acceptor) =
+        EspHttpWsProcessor::<WS_MAX_CONNECTIONS, WS_MAX_FRAME_SIZE>::new(());
 
     let ws_processor = esp_idf_hal::mutex::Mutex::new(ws_processor);
 
@@ -262,7 +264,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .map_err(error::heapless)?;
 
     executor3_tasks
-        .push(executor3.spawn(SYSTEM.mqtt_send(client_id, mqtt_client))?)
+        .push(executor3.spawn(SYSTEM.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?)
         .map_err(error::heapless)?;
 
     executor3_tasks
@@ -270,11 +272,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .map_err(error::heapless)?;
 
     executor3_tasks
-        .push(executor3.spawn(SYSTEM.web_send::<WS_FRAME_SIZE>())?)
+        .push(executor3.spawn(SYSTEM.web_send::<WS_MAX_FRAME_SIZE>())?)
         .map_err(error::heapless)?;
 
     executor3_tasks
-        .push(executor3.spawn(SYSTEM.web_receive::<WS_FRAME_SIZE>(ws_acceptor))?)
+        .push(executor3.spawn(SYSTEM.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?)
         .map_err(error::heapless)?;
 
     let wifi_state_changed_source = wifi.as_async().subscribe()?;

@@ -17,8 +17,6 @@ const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BatteryState {
-    pub prev_voltage: Option<u16>,
-    pub prev_powered: Option<bool>,
     pub voltage: Option<u16>,
     pub powered: Option<bool>,
 }
@@ -101,14 +99,7 @@ where
 
         state
             .update_with(
-                |state| {
-                    Ok(BatteryState {
-                        prev_voltage: state.voltage,
-                        prev_powered: state.powered,
-                        voltage,
-                        powered,
-                    })
-                },
+                |state| Ok(BatteryState { voltage, powered }),
                 &mut state_sink,
             )
             .await?;
