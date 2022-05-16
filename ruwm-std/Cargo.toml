@@ -11,8 +11,6 @@ repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
-[features]
-
 [dependencies]
 anyhow = "1"
 log = "0.4"

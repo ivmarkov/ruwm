@@ -19,16 +19,16 @@ use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
 use embedded_svc::timer::asyncs::TimerService;
 use embedded_svc::utils::asyncify::ws::server::AsyncAcceptor;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::utils::asyncs::executor::spawn::TasksSpawner;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
+use esp_idf_hal::mutex::Condvar;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
-use esp_idf_svc::executor::asyncs::{local, sendable};
+use esp_idf_svc::executor::asyncs::isr::{local_tasks_spawner, tasks_spawner};
 use esp_idf_svc::http::server::ws::asyncs::EspHttpWsProcessor;
 use esp_idf_svc::http::server::ws::EspHttpWsDetachedSender;
 use esp_idf_svc::http::server::EspHttpServer;
@@ -37,6 +37,7 @@ use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::systime::EspSystemTime;
+use esp_idf_svc::timer::EspISRTimerService;
 use esp_idf_svc::wifi::EspWifi;
 
 use esp_idf_sys::esp;
@@ -54,10 +55,6 @@ use ruwm::utils::AlmostOnce;
 use ruwm::valve::{self, ValveCommand};
 use ruwm::{checkd, error};
 
-use crate::espidf::timer;
-
-mod espidf;
-
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
 
@@ -72,14 +69,8 @@ const MQTT_MAX_TOPIC_LEN: usize = 64;
 const WS_MAX_CONNECTIONS: usize = 2;
 const WS_MAX_FRAME_SIZE: usize = 512;
 
-type MutexFamilyImpl = esp_idf_hal::mutex::Condvar;
-
 static SYSTEM: AlmostOnce<
-    System<
-        MutexFamilyImpl,
-        AsyncAcceptor<(), MutexFamilyImpl, EspHttpWsDetachedSender>,
-        WS_MAX_CONNECTIONS,
-    >,
+    System<Condvar, AsyncAcceptor<(), Condvar, EspHttpWsDetachedSender>, WS_MAX_CONNECTIONS>,
 > = AlmostOnce::new();
 
 fn main() -> error::Result<()> {
@@ -119,9 +110,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     SYSTEM.init(System::new());
 
-    let mut timers = timer::timers()?;
+    let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
-    let (mut executor1, tasks1) = TasksSpawner::new(local(64))
+    let (mut executor1, tasks1) = local_tasks_spawner::<16, _>()
         .spawn_local(SYSTEM.valve())?
         .spawn_local(SYSTEM.valve_spin(
             timers.timer()?,
@@ -211,7 +202,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .ws("/ws")
         .handler(move |receiver, sender| ws_processor.lock().process(receiver, sender))?;
 
-    let (mut executor2, tasks2) = TasksSpawner::new(sendable(64))
+    let (mut executor2, tasks2) = tasks_spawner::<8, _>()
         .spawn(SYSTEM.wm_stats(timers.timer()?, EspSystemTime))?
         .spawn(SYSTEM.screen())?
         .spawn(SYSTEM.screen_draw(display(
@@ -228,7 +219,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         .spawn(SYSTEM.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
         .release();
 
-    let (mut executor3, tasks3) = TasksSpawner::new(sendable(64))
+    let (mut executor3, tasks3) = tasks_spawner::<4, _>()
         .spawn(SYSTEM.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
         .spawn(SYSTEM.web_send::<WS_MAX_FRAME_SIZE>())?
         .release();
