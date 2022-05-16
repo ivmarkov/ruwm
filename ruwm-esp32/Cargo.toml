@@ -32,6 +32,7 @@ embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"
 st7789 = "0.6"
+heapless = "0.7.12"
 edge-frame = { version = "0.1.6", default-features = false, features = ["assets-serve"] }
 ruwm = { version = "0.1", path = "../ruwm" }
 ruwm-std = { version = "0.1", path = "../ruwm-std" }

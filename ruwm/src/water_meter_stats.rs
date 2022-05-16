@@ -1,25 +1,26 @@
-use core::cell::Ref;
-use core::cell::RefCell;
-use core::future::Future;
 use core::mem;
 use core::time::Duration;
 
-extern crate alloc;
-use alloc::rc::Rc;
+use serde::{Deserialize, Serialize};
 
-use embedded_svc::event_bus::asyncs::Postbox;
-use embedded_svc::sys_time;
-use embedded_svc::timer;
-use embedded_svc::timer::asyncs::{Periodic, Timer};
+use embedded_svc::channel::asyncs::Receiver;
+use embedded_svc::channel::asyncs::Sender;
+use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::sys_time::SystemTime;
+use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::utils::asyncs::select::select;
+use embedded_svc::utils::asyncs::select::Either;
 
-use crate::pulse_counter::*;
+use crate::error;
+use crate::state_snapshot::StateSnapshot;
 use crate::storage::*;
+use crate::utils::as_static_receiver;
+use crate::water_meter::WaterMeterState;
 
-const FLOW_STATS_INSTANCES: usize = 10;
+const FLOW_STATS_INSTANCES: usize = 8;
 
 const DURATIONS: [Duration; FLOW_STATS_INSTANCES] = [
-    Duration::from_secs(60),
-    Duration::from_secs(60 * 2),
     Duration::from_secs(60 * 5),
     Duration::from_secs(60 * 30),
     Duration::from_secs(60 * 60),
@@ -30,14 +31,14 @@ const DURATIONS: [Duration; FLOW_STATS_INSTANCES] = [
     Duration::from_secs(60 * 60 * 24 * 30),
 ];
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FlowSnapshot {
     time: Duration,
-    edges_count: u32,
+    edges_count: u64,
 }
 
 impl FlowSnapshot {
-    pub const fn new(current_time: Duration, current_edges_count: u32) -> Self {
+    pub const fn new(current_time: Duration, current_edges_count: u64) -> Self {
         Self {
             time: current_time,
             edges_count: current_edges_count,
@@ -50,7 +51,7 @@ impl FlowSnapshot {
     }
 
     /// Get a reference to the flow snapshot's edges count.
-    pub fn edges_count(&self) -> u32 {
+    pub fn edges_count(&self) -> u64 {
         self.edges_count
     }
 
@@ -62,11 +63,11 @@ impl FlowSnapshot {
         Self::is_aligned_measurement_due(self.time, current_time, measurement_duration)
     }
 
-    pub fn flow_detected(&self, current_edges_count: u32) -> bool {
+    pub fn flow_detected(&self, current_edges_count: u64) -> bool {
         self.statistics(current_edges_count) > 1
     }
 
-    pub fn statistics(&self, current_edges_count: u32) -> u32 {
+    pub fn statistics(&self, current_edges_count: u64) -> u64 {
         current_edges_count - self.edges_count
     }
 
@@ -91,7 +92,7 @@ impl FlowSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FlowMeasurement {
     start: FlowSnapshot,
     end: FlowSnapshot,
@@ -111,74 +112,23 @@ impl FlowMeasurement {
     }
 }
 
-pub struct WaterMeterStats {
-    installation: FlowSnapshot,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WaterMeterStatsState {
+    pub installation: FlowSnapshot,
 
-    watch_start: Option<FlowSnapshot>,
-    most_recent: FlowSnapshot,
+    pub most_recent: FlowSnapshot,
 
-    snapshots: [FlowSnapshot; FLOW_STATS_INSTANCES],
-    measurements: [Option<FlowMeasurement>; FLOW_STATS_INSTANCES],
+    pub snapshots: [FlowSnapshot; FLOW_STATS_INSTANCES],
+    pub measurements: [Option<FlowMeasurement>; FLOW_STATS_INSTANCES],
 }
 
-impl WaterMeterStats {
-    /// Get a reference to the water meter stats's installation.
-    pub fn installation(&self) -> &FlowSnapshot {
-        &self.installation
-    }
+impl WaterMeterStatsState {
+    fn update(&mut self, edges_count: u64, now: Duration) -> bool {
+        let most_recent = FlowSnapshot::new(now, self.most_recent.edges_count + edges_count);
 
-    /// Get a reference to the water meter stats's watch start.
-    pub fn watch_start(&self) -> Option<&FlowSnapshot> {
-        self.watch_start.as_ref()
-    }
-
-    pub fn set_watch(&mut self, enabled: bool) {
-        if enabled {
-            self.watch_start = Some(self.most_recent().clone());
-        } else {
-            self.watch_start = None;
-        }
-    }
-
-    /// Get a reference to the water meter stats's most recent.
-    pub fn most_recent(&self) -> &FlowSnapshot {
-        &self.most_recent
-    }
-
-    /// Get a reference to the water meter stats's snapshots.
-    pub fn snapshots(&self) -> &[FlowSnapshot; FLOW_STATS_INSTANCES] {
-        &self.snapshots
-    }
-
-    /// Get a reference to the water meter stats's measurements.
-    pub fn measurements(&self) -> &[Option<FlowMeasurement>; FLOW_STATS_INSTANCES] {
-        &self.measurements
-    }
-
-    fn update<P>(&mut self, pulse_counter: &mut P, now: Duration) -> anyhow::Result<bool>
-    where
-        P: PulseCounter,
-    {
-        let ps_data = pulse_counter
-            .swap_data(&super::pulse_counter::Data {
-                wakeup_edges: self.watch_start.as_ref().map(|_| 2).unwrap_or(0),
-                ..Default::default()
-            })
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        self.most_recent = FlowSnapshot::new(
-            now,
-            self.most_recent.edges_count + ps_data.edges_count as u32,
-        );
-
-        let mut updated = false;
-
-        if self.most_recent.edges_count > self.most_recent.edges_count {
-            if let Some(watch_start) = self.watch_start.as_ref() {
-                if watch_start.flow_detected(self.most_recent.edges_count) {
-                    updated = true;
-                }
-            }
+        let mut updated = self.most_recent != most_recent;
+        if updated {
+            self.most_recent = most_recent;
         }
 
         for (index, snapshot) in self.snapshots.iter_mut().enumerate() {
@@ -191,112 +141,81 @@ impl WaterMeterStats {
             }
         }
 
-        Ok(updated)
+        updated
     }
 }
 
-pub trait WaterMeterStateRead {
-    type GetFuture<'a>: Future<Output = Result<Option<WaterMeterStats>, anyhow::Error>>;
-
-    fn get(&self) -> Self::GetFuture<'a>;
-}
-
-pub trait WaterMeterStateWrite {
-    type SetWatchFuture<'a>: Future<Output = Result<(), anyhow::Error>>;
-
-    fn set_watch(&mut self, enabled: bool) -> Self::SetWatchFuture<'a>;
-}
-
-pub struct Poller<C, N, P> {
-    pulse_counter: C,
-    sys_time: N,
-    postbox: P,
-}
-
-impl<C, N, P> Poller<C, N, P>
+pub struct WaterMeterStats<M>
 where
-    C: PulseCounter,
-    N: sys_time::SystemTime,
-    P: Postbox<WaterMeterStats>,
+    M: MutexFamily + SendSyncSignalFamily,
 {
-    async fn poll(&mut self, state: &mut WaterMeterStats, post: bool) -> anyhow::Result<()> {
-        if state.update(&mut self.pulse_counter, self.sys_time.now())? && post {
-            self.postbox
-                .post(*state)
-                .map_err(|e| anyhow::anyhow!(e))?;
+    state: StateSnapshot<M::Mutex<WaterMeterStatsState>>,
+    wm_state_signal: M::Signal<WaterMeterState>,
+}
+
+impl<M> WaterMeterStats<M>
+where
+    M: MutexFamily + SendSyncSignalFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            state: StateSnapshot::new(),
+            wm_state_signal: M::Signal::new(),
         }
+    }
 
-        Ok(())
+    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>> {
+        &self.state
+    }
+
+    pub async fn process(
+        &'static self,
+        timer: impl OnceTimer,
+        sys_time: impl SystemTime,
+        state_sink: impl Sender<Data = WaterMeterStatsState>,
+    ) -> error::Result<()> {
+        process(
+            timer,
+            sys_time,
+            &self.state,
+            as_static_receiver(&self.wm_state_signal),
+            state_sink,
+        )
+        .await
     }
 }
 
-pub struct WaterMeter<S, T, B>
-where
-    T: Periodic,
-{
-    storage: S,
-    stats: Rc<RefCell<WaterMeterStats>>,
-    postbox: B,
-    _timer: T::Timer,
-}
+pub async fn process(
+    mut timer: impl OnceTimer,
+    sys_time: impl SystemTime,
+    state: &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>>,
+    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
+    mut state_sink: impl Sender<Data = WaterMeterStatsState>,
+) -> error::Result<()> {
+    loop {
+        let wm_state = wm_state_source.recv();
+        let tick = timer
+            .after(Duration::from_secs(10) /*Duration::from_millis(200)*/)
+            .map_err(error::svc)?;
 
-impl<S, T, B> WaterMeter<S, T, B>
-where
-    S: Storage<WaterMeterStats>,
-    T: Periodic,
-    B: Postbox<WaterMeterStats> + 'static,
-{
-    pub fn new<N, P>(
-        periodic: &mut T,
-        postbox: B,
-        sys_time: N,
-        pulse_counter: P,
-        storage: S,
-    ) -> Result<Self, anyhow::Error>
-    where
-        N: sys_time::SystemTime + 'static,
-        P: PulseCounter + 'static,
-    {
-        let mut poller = Poller {
-            pulse_counter,
-            sys_time,
-            postbox,
+        //pin_mut!(wm_state, tick);
+
+        let edges_count = match select(wm_state, tick).await {
+            Either::First(wm_state) => wm_state.map_err(error::svc)?.edges_count,
+            Either::Second(_) => state.get().most_recent.edges_count,
         };
 
-        let mut stats = storage.get();
+        state
+            .update_with(
+                |state| {
+                    let mut state = state.clone();
 
-        let mut timer = periodic
-            .every(Duration::from_millis(500))
-            .map_err(|e| anyhow::anyhow!(e))?;
+                    state.update(edges_count, sys_time.now());
 
-        Ok(WaterMeter {
-            _timer: timer,
-            stats,
-            storage,
-            postbox,
-        })
-    }
-}
-
-impl<S, T, B> WaterMeterStateRead for WaterMeter<S, T, B>
-where
-    T: Periodic,
-{
-    fn get(&self) -> Self::GetFuture<'_> {
-        
-        self.stats.borrow()
-    }
-}
-
-impl<S, T, B> WaterMeterStateWrite for WaterMeter<S, T, B>
-where
-    T: timer::PinnedTimerService,
-    B: event_bus::Postbox + 'static,
-{
-    fn set_watch(&mut self, enabled: bool) -> anyhow::Result<()> {
-        self.stats.borrow_mut().set_watch(enabled);
-        self.postbox.post(&WATER_METER_EVENT_SOURCE, &()).map_err(|e| anyhow::anyhow!(e))?;
-
-        Ok(())
+                    Ok(state)
+                },
+                &mut state_sink,
+            )
+            .await?;
     }
 }

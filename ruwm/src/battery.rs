@@ -7,7 +7,7 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::asyncs::Sender;
-use embedded_svc::mutex::Mutex;
+use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::timer::asyncs::OnceTimer;
 
 use crate::error;
@@ -17,8 +17,6 @@ const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct BatteryState {
-    pub prev_voltage: Option<u16>,
-    pub prev_powered: Option<bool>,
     pub voltage: Option<u16>,
     pub powered: Option<bool>,
 }
@@ -28,13 +26,57 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub async fn run<ADC, BP>(
-    state: StateSnapshot<impl Mutex<Data = BatteryState>>,
-    mut notif: impl Sender<Data = BatteryState>,
+pub struct Battery<M>
+where
+    M: MutexFamily,
+{
+    state: StateSnapshot<M::Mutex<BatteryState>>,
+}
+
+impl<M> Battery<M>
+where
+    M: MutexFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            state: StateSnapshot::new(),
+        }
+    }
+
+    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = BatteryState>> {
+        &self.state
+    }
+
+    pub async fn process<ADC, BP>(
+        &self,
+        timer: impl OnceTimer,
+        one_shot: impl adc::OneShot<ADC, u16, BP>,
+        battery_pin: BP,
+        power_pin: impl InputPin<Error = impl error::HalError>,
+        state_sink: impl Sender<Data = BatteryState>,
+    ) -> error::Result<()>
+    where
+        BP: adc::Channel<ADC>,
+    {
+        process(
+            timer,
+            one_shot,
+            battery_pin,
+            power_pin,
+            &self.state,
+            state_sink,
+        )
+        .await
+    }
+}
+
+pub async fn process<ADC, BP>(
     mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
     power_pin: impl InputPin<Error = impl error::HalError>,
+    state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
+    mut state_sink: impl Sender<Data = BatteryState>,
 ) -> error::Result<()>
 where
     BP: adc::Channel<ADC>,
@@ -57,15 +99,8 @@ where
 
         state
             .update_with(
-                |state| {
-                    Ok(BatteryState {
-                        prev_voltage: state.voltage,
-                        prev_powered: state.powered,
-                        voltage,
-                        powered,
-                    })
-                },
-                &mut notif,
+                |state| Ok(BatteryState { voltage, powered }),
+                &mut state_sink,
             )
             .await?;
     }

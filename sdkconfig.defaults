@@ -1,5 +1,5 @@
 # The low-latency executor runs off from the main thread
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=30000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=50000
 
 # Two of the other executors run from pthreads. TODO: set this at runtime
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=10000

@@ -1,5 +1,7 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
+#![feature(explicit_generic_args_with_impl_trait)]
+
 use core::time::Duration;
 
 extern crate alloc;
@@ -14,51 +16,44 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asyncs::EventBus;
 use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
-use embedded_svc::signal::asyncs::Signal;
+use embedded_svc::timer::asyncs::TimerService;
+use embedded_svc::utils::asyncify::ws::server::AsyncAcceptor;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::utils::asyncs::signal::{adapt as signal_adapt, AtomicSignal};
-use embedded_svc::utils::atomic_swap::AtomicOption;
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
-use esp_idf_hal::mutex::{Mutex, MutexSignalFamily};
+use esp_idf_hal::mutex::Condvar;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
-use esp_idf_svc::executor::asyncs::{local, sendable};
+use esp_idf_svc::executor::asyncs::isr::{local_tasks_spawner, tasks_spawner};
 use esp_idf_svc::http::server::ws::asyncs::EspHttpWsProcessor;
+use esp_idf_svc::http::server::ws::EspHttpWsDetachedSender;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::systime::EspSystemTime;
+use esp_idf_svc::timer::EspISRTimerService;
 use esp_idf_svc::wifi::EspWifi;
+
+use esp_idf_sys::esp;
 
 use edge_frame::assets::serve::*;
 
-use esp_idf_sys::esp;
 use pulse_counter::PulseCounter;
 
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
-use ruwm::valve::ValveCommand;
-use ruwm::{broadcast_binder, valve};
+use ruwm::system::System;
+use ruwm::utils::AlmostOnce;
+use ruwm::valve::{self, ValveCommand};
 use ruwm::{checkd, error};
-
-#[cfg(feature = "espidf")]
-use crate::espidf::broadcast;
-
-#[cfg(not(feature = "espidf"))]
-use ruwm_std::broadcast;
-
-use crate::espidf::timer;
-
-mod espidf;
 
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
@@ -70,7 +65,13 @@ const ASSETS: Assets = edge_frame::assets!("RUWM_WEB");
 
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 
-type PinSignal = AtomicSignal<AtomicOption, ()>;
+const MQTT_MAX_TOPIC_LEN: usize = 64;
+const WS_MAX_CONNECTIONS: usize = 2;
+const WS_MAX_FRAME_SIZE: usize = 512;
+
+static SYSTEM: AlmostOnce<
+    System<Condvar, AsyncAcceptor<(), Condvar, EspHttpWsDetachedSender>, WS_MAX_CONNECTIONS>,
+> = AlmostOnce::new();
 
 fn main() -> error::Result<()> {
     let wakeup_reason = get_sleep_wakeup_reason()?;
@@ -107,16 +108,63 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
-    #[cfg(feature = "espidf")]
-    let broadcast = broadcast::broadcast::<espidf::broadcast_event_serde::Serde, _>(100)?;
+    SYSTEM.init(System::new());
 
-    #[cfg(not(feature = "espidf"))]
-    let broadcast = broadcast::broadcast(100)?;
+    let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
+
+    let (mut executor1, tasks1) = local_tasks_spawner::<16, _>()
+        .spawn_local(SYSTEM.valve())?
+        .spawn_local(SYSTEM.valve_spin(
+            timers.timer()?,
+            valve_power_pin,
+            valve_open_pin,
+            valve_close_pin,
+        ))?
+        .spawn_local(SYSTEM.wm(
+            timers.timer()?,
+            PulseCounter::new(peripherals.ulp).initialize()?,
+        ))?
+        .spawn_local(SYSTEM.battery(
+            timers.timer()?,
+            adc::PoweredAdc::new(
+                peripherals.adc1,
+                adc::config::Config::new().calibration(true),
+            )?,
+            peripherals.pins.gpio33.into_analog_atten_11db()?,
+            peripherals.pins.gpio14.into_input()?,
+        ))?
+        .spawn_local(SYSTEM.button1(
+            timers.timer()?,
+            unsafe {
+                button1_pin.into_subscribed(|| SYSTEM.button1_signal(), InterruptType::NegEdge)?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.button2(
+            timers.timer()?,
+            unsafe {
+                button2_pin
+                    .into_subscribed(|| SYSTEM.button2_signal(), InterruptType::NegEdge)?
+                    .into_pull_up()?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.button3(
+            timers.timer()?,
+            unsafe {
+                button3_pin
+                    .into_subscribed(|| SYSTEM.button3_signal(), InterruptType::NegEdge)?
+                    .into_pull_up()?
+            },
+            PressedLevel::Low,
+        ))?
+        .spawn_local(SYSTEM.emergency())?
+        .spawn_local(SYSTEM.keepalive(timers.timer()?, EspSystemTime))?
+        .release();
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
     let nvs_stack = Arc::new(EspDefaultNvs::new()?);
-
     let mut wifi = EspWifi::new(netif_stack, sysloop_stack, nvs_stack)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
@@ -125,20 +173,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
         ..Default::default()
     }))?;
 
-    let (ws_processor, ws_acceptor) = EspHttpWsProcessor::new((), 4096);
-
-    let ws_processor = esp_idf_hal::mutex::Mutex::new(ws_processor);
-
-    let mut httpd = EspHttpServer::new(&Default::default())?;
-
-    register(&mut httpd, &ASSETS)?;
-
-    httpd
-        .ws("/ws")
-        .handler(move |receiver, sender| ws_processor.lock().process(receiver, sender))?;
+    let wifi_state_changed_source = wifi.as_async().subscribe()?;
 
     let client_id = "water-meter-demo";
-
     let mut mqtt_parser = MessageParser::new();
 
     let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
@@ -152,98 +189,23 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
 
     let mqtt_client = mqtt_client.into_async();
 
-    let mut executor1 = local(64);
-    let mut executor2 = sendable(64);
-    let mut executor3 = sendable(64);
+    let (ws_processor, ws_acceptor) =
+        EspHttpWsProcessor::<WS_MAX_CONNECTIONS, WS_MAX_FRAME_SIZE>::new(());
 
-    let mut executor1_tasks = Vec::with_capacity(64);
-    let mut executor2_tasks = Vec::with_capacity(64);
-    let mut executor3_tasks = Vec::with_capacity(64);
+    let ws_processor = esp_idf_hal::mutex::Mutex::new(ws_processor);
 
-    let mut binder = broadcast_binder::BroadcastBinder::<
-        MutexSignalFamily,
-        Mutex<_>,
-        Mutex<_>,
-        Mutex<_>,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-    >::new(
-        broadcast,
-        timer::timers()?,
-        (&mut executor1, &mut executor1_tasks),
-        Some((&mut executor2, &mut executor2_tasks)),
-        Some((&mut executor3, &mut executor3_tasks)),
-    );
+    let mut httpd = EspHttpServer::new(&Default::default())?;
 
-    binder
-        .event_logger()?
-        .emergency()?
-        .keepalive(EspSystemTime)?
-        .valve(valve_power_pin, valve_open_pin, valve_close_pin)?
-        .battery(
-            adc::PoweredAdc::new(
-                peripherals.adc1,
-                adc::config::Config::new().calibration(true),
-            )?,
-            peripherals.pins.gpio33.into_analog_atten_11db()?,
-            peripherals.pins.gpio14.into_input()?,
-        )?
-        .water_meter(PulseCounter::new(peripherals.ulp).initialize()?)?
-        .button(
-            1,
-            "BUTTON1",
-            {
-                let signal = Arc::new(PinSignal::new());
+    register(&mut httpd, &ASSETS)?;
 
-                (signal_adapt::into_receiver(signal.clone()), unsafe {
-                    button1_pin
-                        .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                })
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(50)),
-        )?
-        .button(
-            2,
-            "BUTTON2",
-            {
-                let signal = Arc::new(PinSignal::new());
+    httpd
+        .ws("/ws")
+        .handler(move |receiver, sender| ws_processor.lock().process(receiver, sender))?;
 
-                (
-                    signal_adapt::into_receiver(signal.clone()),
-                    unsafe {
-                        button2_pin
-                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                    }
-                    .into_pull_up()?,
-                )
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(50)),
-        )?
-        .button(
-            3,
-            "BUTTON3",
-            {
-                let signal = Arc::new(PinSignal::new());
-
-                (
-                    signal_adapt::into_receiver(signal.clone()),
-                    unsafe {
-                        button3_pin
-                            .into_subscribed(move || signal.signal(()), InterruptType::NegEdge)?
-                    }
-                    .into_pull_up()?,
-                )
-            },
-            PressedLevel::Low,
-            Some(Duration::from_millis(20)),
-        )?
-        .screen(display(
+    let (mut executor2, tasks2) = tasks_spawner::<8, _>()
+        .spawn(SYSTEM.wm_stats(timers.timer()?, EspSystemTime))?
+        .spawn(SYSTEM.screen())?
+        .spawn(SYSTEM.screen_draw(display(
             peripherals.pins.gpio4.into_output()?.degrade(),
             peripherals.pins.gpio16.into_output()?.degrade(),
             peripherals.pins.gpio23.into_output()?.degrade(),
@@ -251,37 +213,38 @@ fn run(wakeup_reason: SleepWakeupReason) -> error::Result<()> {
             peripherals.pins.gpio18.into_output()?.degrade(),
             peripherals.pins.gpio19.into_output()?.degrade(),
             Some(peripherals.pins.gpio5.into_output()?.degrade()),
-        )?)?
-        .wifi(wifi.as_async().subscribe()?)?
-        .mqtt(client_id, mqtt_client, mqtt_conn)?
-        .web::<_, esp_idf_hal::mutex::Mutex<_>, 4>(ws_acceptor)?;
+        )?))?
+        .spawn(SYSTEM.wifi(wifi, wifi_state_changed_source))?
+        .spawn(SYSTEM.mqtt_receive(mqtt_conn))?
+        .spawn(SYSTEM.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
+        .release();
 
-    let quit1 = binder.quit(broadcast_binder::TaskPriority::High)?;
-    let quit2 = binder.quit(broadcast_binder::TaskPriority::Medium)?;
-    let quit3 = binder.quit(broadcast_binder::TaskPriority::Low)?;
-
-    drop(binder);
+    let (mut executor3, tasks3) = tasks_spawner::<4, _>()
+        .spawn(SYSTEM.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
+        .spawn(SYSTEM.web_send::<WS_MAX_FRAME_SIZE>())?
+        .release();
 
     log::info!("Starting execution");
 
     let executor2 = std::thread::spawn(move || {
         executor2.with_context(|exec, ctx| {
-            exec.run(ctx, quit2, Some(executor2_tasks));
+            exec.run(ctx, || SYSTEM.should_quit(), Some(tasks2));
         });
     });
 
     let executor3 = std::thread::spawn(move || {
         executor3.with_context(|exec, ctx| {
-            exec.run(ctx, quit3, Some(executor3_tasks));
+            exec.run(ctx, || SYSTEM.should_quit(), Some(tasks3));
         });
     });
 
     executor1.with_context(|exec, ctx| {
-        exec.run(ctx, quit1, Some(executor1_tasks));
+        exec.run(ctx, || SYSTEM.should_quit(), Some(tasks1));
     });
 
-    println!("Execution finished, waiting for 500ms to workaround a STD/ESP-IDF pthread (?) bug");
-    std::thread::sleep(Duration::from_millis(500));
+    log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
+
+    std::thread::sleep(Duration::from_millis(2000));
 
     checkd!(executor2.join());
     checkd!(executor3.join());
@@ -315,9 +278,9 @@ fn emergency_valve_close(
 ) -> error::Result<()> {
     log::error!("Start: emergency closing valve due to ULP wakeup...");
 
-    valve::start_run(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
+    valve::start_spin(Some(ValveCommand::Close), power_pin, open_pin, close_pin)?;
     std::thread::sleep(valve::VALVE_TURN_DELAY);
-    valve::start_run(None, power_pin, open_pin, close_pin)?;
+    valve::start_spin(None, power_pin, open_pin, close_pin)?;
 
     log::error!("End: emergency closing valve due to ULP wakeup");
 

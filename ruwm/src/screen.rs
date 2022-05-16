@@ -1,20 +1,23 @@
 use core::fmt::Debug;
 
-use embedded_svc::utils::asyncs::select::{select4, Either4};
-use futures::pin_mut;
-
 use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::mutex::MutexFamily;
+use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asyncs::Unblocker;
+use embedded_svc::utils::asyncs::channel::adapt::merge;
+use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
+use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
-use crate::button::ButtonCommand;
 use crate::error;
+use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
+use crate::water_meter_stats::WaterMeterStatsState;
 
 pub use adaptors::*;
 
@@ -52,16 +55,114 @@ pub struct DrawRequest {
     battery: BatteryState,
 }
 
+pub struct Screen<M>
+where
+    M: MutexFamily + SendSyncSignalFamily,
+{
+    button1_pressed_signal: M::Signal<()>,
+    button2_pressed_signal: M::Signal<()>,
+    button3_pressed_signal: M::Signal<()>,
+    valve_state_signal: M::Signal<Option<ValveState>>,
+    wm_state_signal: M::Signal<WaterMeterState>,
+    wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
+    battery_state_signal: M::Signal<BatteryState>,
+    draw_request_signal: M::Signal<DrawRequest>,
+}
+
+impl<M> Screen<M>
+where
+    M: MutexFamily + SendSyncSignalFamily,
+{
+    pub fn new() -> Self {
+        Self {
+            button1_pressed_signal: M::Signal::new(),
+            button2_pressed_signal: M::Signal::new(),
+            button3_pressed_signal: M::Signal::new(),
+            valve_state_signal: M::Signal::new(),
+            wm_state_signal: M::Signal::new(),
+            wm_stats_state_signal: M::Signal::new(),
+            battery_state_signal: M::Signal::new(),
+            draw_request_signal: M::Signal::new(),
+        }
+    }
+
+    pub fn button1_pressed_sink<'a>(&'static self) -> impl Sender<Data = ()> + 'static {
+        as_channel(&self.button1_pressed_signal)
+    }
+
+    pub fn button2_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
+        as_channel(&self.button2_pressed_signal)
+    }
+
+    pub fn button3_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
+        as_channel(&self.button3_pressed_signal)
+    }
+
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+        as_channel(&self.valve_state_signal)
+    }
+
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+        as_channel(&self.wm_state_signal)
+    }
+
+    pub fn wm_stats_state_sink(
+        &'static self,
+    ) -> impl Sender<Data = WaterMeterStatsState> + 'static {
+        as_channel(&self.wm_stats_state_signal)
+    }
+
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
+        as_channel(&self.battery_state_signal)
+    }
+
+    pub async fn draw<D>(&'static self, display: D) -> error::Result<()>
+    where
+        D: FlushableDrawTarget + Send + 'static,
+        D::Color: RgbColor,
+        D::Error: Debug,
+    {
+        run_draw(as_static_receiver(&self.draw_request_signal), display).await
+    }
+
+    pub async fn process(
+        &'static self,
+        valve_state: Option<ValveState>,
+        wm_state: WaterMeterState,
+        battery_state: BatteryState,
+        draw_request_sink: impl Sender<Data = DrawRequest> + Send + 'static,
+    ) -> error::Result<()> {
+        process(
+            as_static_receiver(&self.button1_pressed_signal),
+            as_static_receiver(&self.button2_pressed_signal),
+            as_static_receiver(&self.button3_pressed_signal),
+            as_static_receiver(&self.valve_state_signal),
+            as_static_receiver(&self.wm_state_signal),
+            as_static_receiver(&self.battery_state_signal),
+            valve_state,
+            wm_state,
+            battery_state,
+            merge(
+                as_static_sender(&self.draw_request_signal),
+                draw_request_sink,
+            ),
+        )
+        .await
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub async fn run_screen(
-    mut button_command: impl Receiver<Data = ButtonCommand>,
-    mut valve: impl Receiver<Data = Option<ValveState>>,
-    mut wm: impl Receiver<Data = WaterMeterState>,
-    mut battery: impl Receiver<Data = BatteryState>,
+pub async fn process(
+    mut button1_pressed_source: impl Receiver<Data = ()>,
+    mut button2_pressed_source: impl Receiver<Data = ()>,
+    mut button3_pressed_source: impl Receiver<Data = ()>,
+    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
+    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
+    mut battery_state_source: impl Receiver<Data = BatteryState>,
     valve_state: Option<ValveState>,
     wm_state: WaterMeterState,
     battery_state: BatteryState,
-    mut draw_engine: impl Sender<Data = DrawRequest>,
+    mut draw_request_sink: impl Sender<Data = DrawRequest>,
 ) -> error::Result<()> {
     let mut screen_state = DrawRequest {
         active_page: Page::Summary,
@@ -71,21 +172,33 @@ pub async fn run_screen(
     };
 
     loop {
-        let command = button_command.recv();
-        let valve = valve.recv();
-        let wm = wm.recv();
-        let battery = battery.recv();
+        let button1_command = button1_pressed_source.recv();
+        let button2_command = button2_pressed_source.recv();
+        let button3_command = button3_pressed_source.recv();
+        let valve = valve_state_source.recv();
+        let wm = wm_state_source.recv();
+        let battery = battery_state_source.recv();
 
-        pin_mut!(command, valve, wm, battery);
+        //pin_mut!(button1_command, button2_command, button3_command, valve, wm, battery);
 
-        let draw_request = match select4(command, valve, wm, battery).await {
-            Either4::First(command) => DrawRequest {
-                active_page: match command.map_err(error::svc)? {
-                    ButtonCommand::Pressed(1) => screen_state.active_page.prev(),
-                    ButtonCommand::Pressed(2) => screen_state.active_page.next(),
-                    ButtonCommand::Pressed(3) => screen_state.active_page,
-                    _ => panic!("What's that button?"),
-                },
+        let draw_request = match select4(
+            select3(button1_command, button2_command, button3_command),
+            valve,
+            wm,
+            battery,
+        )
+        .await
+        {
+            Either4::First(Either3::First(_)) => DrawRequest {
+                active_page: screen_state.active_page.prev(),
+                ..screen_state
+            },
+            Either4::First(Either3::Second(_)) => DrawRequest {
+                active_page: screen_state.active_page.next(),
+                ..screen_state
+            },
+            Either4::First(Either3::Third(_)) => DrawRequest {
+                active_page: screen_state.active_page,
                 ..screen_state
             },
             Either4::Second(valve) => DrawRequest {
@@ -105,7 +218,10 @@ pub async fn run_screen(
         if screen_state != draw_request {
             screen_state = draw_request;
 
-            draw_engine.send(draw_request).await.map_err(error::svc)?;
+            draw_request_sink
+                .send(draw_request)
+                .await
+                .map_err(error::svc)?;
         }
     }
 }
@@ -115,9 +231,9 @@ enum PageDrawable {
     Battery(pages::Battery),
 }
 
-pub async fn unblock_run_draw_engine<U, R, D>(
+pub async fn unblock_run_draw<U, R, D>(
     unblocker: U,
-    mut draw_notif: R,
+    mut draw_request_source: R,
     mut display: D,
 ) -> error::Result<()>
 where
@@ -130,7 +246,7 @@ where
     let mut page_drawable = None;
 
     loop {
-        let draw_request = draw_notif.recv().await.map_err(error::svc)?;
+        let draw_request = draw_request_source.recv().await.map_err(error::svc)?;
 
         let result = unblocker
             .unblock(move || draw(display, page_drawable, draw_request))
@@ -141,7 +257,7 @@ where
     }
 }
 
-pub async fn run_draw_engine<R, D>(mut draw_notif: R, mut display: D) -> error::Result<()>
+pub async fn run_draw<R, D>(mut draw_request_source: R, mut display: D) -> error::Result<()>
 where
     R: Receiver<Data = DrawRequest>,
     D: FlushableDrawTarget + Send + 'static,
@@ -151,7 +267,7 @@ where
     let mut page_drawable = None;
 
     loop {
-        let draw_request = draw_notif.recv().await.map_err(error::svc)?;
+        let draw_request = draw_request_source.recv().await.map_err(error::svc)?;
 
         let result = draw(display, page_drawable, draw_request)?;
 
