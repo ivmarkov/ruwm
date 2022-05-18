@@ -14,7 +14,6 @@ use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::channel::adapt::merge;
 use embedded_svc::utils::asyncs::signal::AtomicSignal;
-use embedded_svc::utils::atomic_swap::AtomicOption;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asyncs::Acceptor;
 
@@ -34,7 +33,7 @@ use crate::web::Web;
 use crate::wifi::Wifi;
 use crate::{error, event_logger};
 
-type NotifSignal = AtomicSignal<AtomicOption, ()>;
+type NotifSignal = AtomicSignal<()>;
 
 pub struct System<M, A, const N: usize>
 where
