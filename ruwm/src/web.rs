@@ -25,7 +25,6 @@ pub type ConnectionId = usize;
 
 pub struct SenderInfo<A: Acceptor> {
     id: ConnectionId,
-    initialized: bool,
     role: Role,
     sender: Option<A::Sender>,
 }
@@ -43,7 +42,7 @@ where
     A: Acceptor,
 {
     connections: M::Mutex<heapless::Vec<SenderInfo<A>, N>>,
-    conn_signal: M::Signal<()>,
+    conn_signal: M::Signal<(ConnectionId, WebEvent)>, // TODO: Signal not a good idea
     valve_state_signal: M::Signal<Option<ValveState>>,
     wm_state_signal: M::Signal<WaterMeterState>,
     wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
@@ -120,7 +119,7 @@ where
 
 pub async fn send<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
-    mut conn_source: impl Receiver<Data = ()>,
+    mut conn_source: impl Receiver<Data = (ConnectionId, WebEvent)>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
@@ -219,7 +218,6 @@ where
                     .lock()
                     .push(SenderInfo {
                         id,
-                        initialized: false,
                         role,
                         sender: Some(new_sender),
                     })
@@ -352,18 +350,6 @@ where
     }
 
     Ok(())
-}
-
-async fn process_connection(
-    mut receiver: impl Receiver<Data = WebFrame>,
-    mut sender: impl Sender<Data = WebFrame>,
-    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
-    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
-    mut battery_state_source: impl Receiver<Data = BatteryState>,
-) -> error::Result<()> {
-    let mut authenticated = false;
-
-    loop {}
 }
 
 async fn process_initial_response(
