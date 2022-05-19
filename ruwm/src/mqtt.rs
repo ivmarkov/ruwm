@@ -38,8 +38,7 @@ pub struct Mqtt<M>
 where
     M: MutexFamily + SendSyncSignalFamily,
 {
-    pub_signal: M::Signal<MessageId>, // TODO: Not clear if a signal is a good fit
-    notif_signal: M::Signal<MqttClientNotification>, // TODO: Not clear if a signal is a good fit
+    conn_signal: M::Signal<bool>,
     valve_state_signal: M::Signal<Option<ValveState>>,
     wm_state_signal: M::Signal<WaterMeterState>,
     battery_state_signal: M::Signal<BatteryState>,
@@ -51,8 +50,7 @@ where
 {
     pub fn new() -> Self {
         Self {
-            pub_signal: M::Signal::new(),
-            notif_signal: M::Signal::new(),
+            conn_signal: M::Signal::new(),
             valve_state_signal: M::Signal::new(),
             wm_state_signal: M::Signal::new(),
             battery_state_signal: M::Signal::new(),
@@ -80,11 +78,11 @@ where
         send::<L>(
             topic_prefix,
             mqtt,
-            as_static_receiver(&self.notif_signal),
+            as_static_receiver(&self.conn_signal),
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
-            merge(as_static_sender(&self.pub_signal), pub_sink),
+            pub_sink,
         )
         .await
     }
@@ -92,13 +90,15 @@ where
     pub async fn receive(
         &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
-        notif_sink: impl Sender<Data = MqttClientNotification> + Send + 'static,
+        conn_sink: impl Sender<Data = bool> + Send + 'static,
+        notif_sink: impl Sender<Data = MqttClientNotification>,
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
     ) -> error::Result<()> {
         receive(
             connection,
-            merge(as_static_sender(&self.notif_signal), notif_sink),
+            merge(as_static_sender(&self.conn_signal), conn_sink),
+            notif_sink,
             valve_command_sink,
             wm_command_sink,
         )
@@ -109,7 +109,7 @@ where
 pub async fn send<const L: usize>(
     topic_prefix: impl AsRef<str>,
     mut mqtt: impl Client + Publish,
-    mut notif_source: impl Receiver<Data = MqttClientNotification>,
+    mut conn_source: impl Receiver<Data = bool>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
@@ -141,17 +141,17 @@ pub async fn send<const L: usize>(
     let mut published_battery_state: Option<BatteryState> = None;
 
     loop {
-        let (mqtt_state, valve_state, wm_state, battery_state) = if connected {
-            let mqtt = notif_source.recv();
+        let (conn_state, valve_state, wm_state, battery_state) = if connected {
+            let conn = conn_source.recv();
             let valve = valve_state_source.recv();
             let wm = wm_state_source.recv();
             let battery = battery_state_source.recv();
 
-            //pin_mut!(mqtt, valve, wm, battery);
+            //pin_mut!(conn, valve, wm, battery);
 
-            match select4(mqtt, valve, wm, battery).await {
-                Either4::First(mqtt_state) => {
-                    (Some(mqtt_state.map_err(error::svc)?), None, None, None)
+            match select4(conn, valve, wm, battery).await {
+                Either4::First(conn_state) => {
+                    (Some(conn_state.map_err(error::svc)?), None, None, None)
                 }
                 Either4::Second(valve_state) => {
                     (None, Some(valve_state.map_err(error::svc)?), None, None)
@@ -162,29 +162,25 @@ pub async fn send<const L: usize>(
                 }
             }
         } else {
-            let mqtt_state = notif_source.recv().await;
+            let conn_state = conn_source.recv().await;
 
-            (Some(mqtt_state.map_err(error::svc)?), None, None, None)
+            (Some(conn_state.map_err(error::svc)?), None, None, None)
         };
 
-        if let Some(mqtt_state) = mqtt_state {
-            match mqtt_state {
-                Ok(Event::Connected(_)) => {
-                    info!("MQTT is now connected, subscribing");
+        if let Some(conn_state) = conn_state {
+            if conn_state {
+                info!("MQTT is now connected, subscribing");
 
-                    error::check!(mqtt
-                        .subscribe(topic_commands.as_str(), QoS::AtLeastOnce)
-                        .await
-                        .map_err(error::svc));
+                error::check!(mqtt
+                    .subscribe(topic_commands.as_str(), QoS::AtLeastOnce)
+                    .await
+                    .map_err(error::svc));
 
-                    connected = true;
-                }
-                Ok(Event::Disconnected) => {
-                    info!("MQTT disconnected");
+                connected = true;
+            } else {
+                info!("MQTT disconnected");
 
-                    connected = false;
-                }
-                _ => {}
+                connected = false;
             }
         }
 
@@ -374,6 +370,7 @@ async fn publish(
 
 pub async fn receive(
     mut connection: impl Connection<Message = Option<MqttCommand>>,
+    mut conn_sink: impl Sender<Data = bool>,
     mut notif_sink: impl Sender<Data = MqttClientNotification>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
@@ -402,6 +399,10 @@ pub async fn receive(
                         .map_err(error::svc)?,
                     _ => (),
                 }
+            } else if matches!(&message, Ok(Event::Connected(_))) {
+                conn_sink.send(true).await.map_err(error::svc)?;
+            } else if matches!(&message, Ok(Event::Disconnected)) {
+                conn_sink.send(false).await.map_err(error::svc)?;
             }
 
             notif_sink

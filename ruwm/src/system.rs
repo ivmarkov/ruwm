@@ -12,7 +12,7 @@ use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::channel::adapt::merge;
+use embedded_svc::utils::asyncs::channel::adapt::{dummy, merge};
 use embedded_svc::utils::asyncs::signal::AtomicSignal;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asyncs::Acceptor;
@@ -298,6 +298,7 @@ where
         self.mqtt
             .receive(
                 connection,
+                dummy(),
                 merge(
                     self.keepalive.event_sink(),
                     event_logger::sink("MQTT/RECEIVE"),
