@@ -12,7 +12,6 @@ use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::select;
 use embedded_svc::utils::asyncs::select::Either;
 
-use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::*;
 use crate::utils::as_static_receiver;
@@ -173,7 +172,7 @@ where
         timer: impl OnceTimer,
         sys_time: impl SystemTime,
         state_sink: impl Sender<Data = WaterMeterStatsState>,
-    ) -> error::Result<()> {
+    ) {
         process(
             timer,
             sys_time,
@@ -191,17 +190,17 @@ pub async fn process(
     state: &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut state_sink: impl Sender<Data = WaterMeterStatsState>,
-) -> error::Result<()> {
+) {
     loop {
         let wm_state = wm_state_source.recv();
         let tick = timer
             .after(Duration::from_secs(10) /*Duration::from_millis(200)*/)
-            .map_err(error::svc)?;
+            .unwrap();
 
         //pin_mut!(wm_state, tick);
 
         let edges_count = match select(wm_state, tick).await {
-            Either::First(wm_state) => wm_state.map_err(error::svc)?.edges_count,
+            Either::First(wm_state) => wm_state.edges_count,
             Either::Second(_) => state.get().most_recent.edges_count,
         };
 
@@ -212,10 +211,10 @@ pub async fn process(
 
                     state.update(edges_count, sys_time.now());
 
-                    Ok(state)
+                    state
                 },
                 &mut state_sink,
             )
-            .await?;
+            .await;
     }
 }

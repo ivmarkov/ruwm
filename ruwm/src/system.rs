@@ -20,6 +20,7 @@ use embedded_svc::ws::asyncs::Acceptor;
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
 use crate::emergency::Emergency;
+use crate::event_logger;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::pulse_counter::PulseCounter;
@@ -31,7 +32,6 @@ use crate::water_meter::WaterMeter;
 use crate::water_meter_stats::WaterMeterStats;
 use crate::web::Web;
 use crate::wifi::Wifi;
-use crate::{error, event_logger};
 
 type NotifSignal = AtomicSignal<()>;
 
@@ -88,7 +88,7 @@ where
         }
     }
 
-    pub async fn valve(&'static self) -> error::Result<()> {
+    pub async fn valve(&'static self) {
         self.valve
             .process(
                 merge(self.keepalive.event_sink(), event_logger::sink("VALVE"))
@@ -102,18 +102,14 @@ where
     pub async fn valve_spin(
         &'static self,
         once: impl OnceTimer,
-        power_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
-        open_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
-        close_pin: impl OutputPin<Error = impl error::HalError + 'static> + Send + 'static,
-    ) -> error::Result<()> {
+        power_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
+        open_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
+        close_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
+    ) {
         self.valve.spin(once, power_pin, open_pin, close_pin).await
     }
 
-    pub async fn wm(
-        &'static self,
-        timer: impl OnceTimer,
-        pulse_counter: impl PulseCounter,
-    ) -> error::Result<()> {
+    pub async fn wm(&'static self, timer: impl OnceTimer, pulse_counter: impl PulseCounter) {
         self.wm
             .process(
                 timer,
@@ -126,11 +122,7 @@ where
             .await
     }
 
-    pub async fn wm_stats(
-        &'static self,
-        timer: impl OnceTimer,
-        sys_time: impl SystemTime,
-    ) -> error::Result<()> {
+    pub async fn wm_stats(&'static self, timer: impl OnceTimer, sys_time: impl SystemTime) {
         self.wm_stats
             .process(
                 timer,
@@ -147,9 +139,8 @@ where
         timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
-        power_pin: impl InputPin<Error = impl error::HalError>,
-    ) -> error::Result<()>
-    where
+        power_pin: impl InputPin,
+    ) where
         BP: adc::Channel<ADC>,
     {
         self.battery
@@ -181,9 +172,9 @@ where
     pub async fn button1(
         &'static self,
         timer: impl OnceTimer,
-        pin: impl InputPin<Error = impl error::HalError>,
+        pin: impl InputPin,
         pressed_level: PressedLevel,
-    ) -> error::Result<()> {
+    ) {
         button::process(
             timer,
             as_static_receiver(&self.button1),
@@ -199,9 +190,9 @@ where
     pub async fn button2(
         &'static self,
         timer: impl OnceTimer,
-        pin: impl InputPin<Error = impl error::HalError>,
+        pin: impl InputPin,
         pressed_level: PressedLevel,
-    ) -> error::Result<()> {
+    ) {
         button::process(
             timer,
             as_static_receiver(&self.button2),
@@ -217,9 +208,9 @@ where
     pub async fn button3(
         &'static self,
         timer: impl OnceTimer,
-        pin: impl InputPin<Error = impl error::HalError>,
+        pin: impl InputPin,
         pressed_level: PressedLevel,
-    ) -> error::Result<()> {
+    ) {
         button::process(
             timer,
             as_static_receiver(&self.button3),
@@ -232,15 +223,11 @@ where
         .await
     }
 
-    pub async fn emergency(&'static self) -> error::Result<()> {
+    pub async fn emergency(&'static self) {
         self.emergency.process(self.valve.command_sink()).await // TODO: Screen
     }
 
-    pub async fn keepalive(
-        &'static self,
-        timer: impl OnceTimer,
-        system_time: impl SystemTime,
-    ) -> error::Result<()> {
+    pub async fn keepalive(&'static self, timer: impl OnceTimer, system_time: impl SystemTime) {
         self.keepalive
             .process(
                 timer,
@@ -257,7 +244,7 @@ where
             .await
     }
 
-    pub async fn screen_draw<D>(&'static self, display: D) -> error::Result<()>
+    pub async fn screen_draw<D>(&'static self, display: D)
     where
         D: FlushableDrawTarget + Send + 'static,
         D::Color: RgbColor,
@@ -266,7 +253,7 @@ where
         self.screen.draw(display).await
     }
 
-    pub async fn screen(&'static self) -> error::Result<()> {
+    pub async fn screen(&'static self) {
         self.screen
             .process(
                 self.valve.state().get(),
@@ -281,7 +268,7 @@ where
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
-    ) -> error::Result<()> {
+    ) {
         self.mqtt
             .send::<L>(
                 topic_prefix,
@@ -294,7 +281,7 @@ where
     pub async fn mqtt_receive(
         &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
-    ) -> error::Result<()> {
+    ) {
         self.mqtt
             .receive(
                 connection,
@@ -309,11 +296,11 @@ where
             .await
     }
 
-    pub async fn web_send<const F: usize>(&'static self) -> error::Result<()> {
+    pub async fn web_send<const F: usize>(&'static self) {
         self.web.send::<F>().await
     }
 
-    pub async fn web_receive<const F: usize>(&'static self, acceptor: A) -> error::Result<()> {
+    pub async fn web_receive<const F: usize>(&'static self, acceptor: A) {
         self.web
             .receive::<F>(
                 acceptor,
@@ -330,7 +317,7 @@ where
         &'static self,
         wifi: impl WifiTrait,
         state_changed_source: impl Receiver<Data = ()> + 'static,
-    ) -> error::Result<()> {
+    ) -> Result<(), impl Debug> {
         self.wifi
             .process(
                 wifi,

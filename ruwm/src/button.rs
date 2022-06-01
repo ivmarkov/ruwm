@@ -10,8 +10,6 @@ use embedded_svc::channel::asyncs::{Receiver, Sender};
 use embedded_svc::timer::asyncs::OnceTimer;
 use embedded_svc::utils::asyncs::select::{select, Either};
 
-use crate::error;
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
     Low,
@@ -21,18 +19,18 @@ pub enum PressedLevel {
 pub async fn process(
     mut timer: impl OnceTimer,
     mut pin_edge: impl Receiver,
-    pin: impl InputPin<Error = impl error::HalError>,
+    pin: impl InputPin,
     pressed_level: PressedLevel,
     debounce_time: Option<Duration>,
     mut pressed_sink: impl Sender<Data = ()>,
-) -> error::Result<()> {
+) {
     let mut debounce = false;
 
     loop {
         let pin_edge = pin_edge.recv();
 
         let timer = if debounce {
-            futures::future::Either::Left(timer.after(debounce_time.unwrap()).map_err(error::svc)?)
+            futures::future::Either::Left(timer.after(debounce_time.unwrap()).unwrap())
         } else {
             futures::future::Either::Right(pending())
         };
@@ -60,11 +58,11 @@ pub async fn process(
         };
 
         if check {
-            let pressed =
-                pin.is_high().map_err(error::hal)? == (pressed_level == PressedLevel::High);
+            let pressed = pin.is_high().unwrap_or(pressed_level != PressedLevel::High)
+                == (pressed_level == PressedLevel::High);
 
             if pressed {
-                pressed_sink.send(()).await.map_err(error::svc)?;
+                pressed_sink.send(()).await;
             }
         }
     }

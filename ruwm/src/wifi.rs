@@ -1,19 +1,21 @@
+use core::fmt::Debug;
+
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::errors::{EitherError, EitherError3};
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asyncs::select::{select, Either};
 use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
-use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::utils::as_static_receiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum WifiCommand {
-    SetConfiguration(Configuration),
+    SetConfiguration(Configuration<heapless::String<64>>),
 }
 
 pub struct Wifi<M>
@@ -48,7 +50,7 @@ where
         wifi: impl WifiTrait,
         state_changed_source: impl Receiver<Data = ()>,
         state_sink: impl Sender<Data = Option<Status>>,
-    ) -> error::Result<()> {
+    ) -> Result<(), impl Debug> {
         run(
             wifi,
             &self.state,
@@ -66,7 +68,7 @@ pub async fn run(
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
     mut state_sink: impl Sender<Data = Option<Status>>,
-) -> error::Result<()> {
+) -> Result<(), AnyError<impl Debug>> {
     loop {
         let receiver = state_changed_source.recv();
         let command = command_source.recv();
@@ -75,15 +77,20 @@ pub async fn run(
 
         match select(receiver, command).await {
             Either::First(_) => {
-                state
-                    .update(Some(wifi.get_status()), &mut state_sink)
-                    .await?;
+                state.update(Some(wifi.get_status()), &mut state_sink).await;
             }
-            Either::Second(command) => match command? {
-                WifiCommand::SetConfiguration(conf) => {
-                    wifi.set_configuration(&conf).map_err(error::svc)?
-                }
+            Either::Second(command) => match command {
+                WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf)?,
             },
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct AnyError<E>(pub E);
+
+impl<E: Debug> From<E> for AnyError<E> {
+    fn from(e: E) -> Self {
+        AnyError(e)
     }
 }

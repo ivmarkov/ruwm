@@ -13,7 +13,6 @@ use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
 use embedded_svc::utils::asyncs::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
-use crate::error;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
@@ -116,13 +115,15 @@ where
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn draw<D>(&'static self, display: D) -> error::Result<()>
+    pub async fn draw<D>(&'static self, display: D)
     where
         D: FlushableDrawTarget + Send + 'static,
         D::Color: RgbColor,
         D::Error: Debug,
     {
-        run_draw(as_static_receiver(&self.draw_request_signal), display).await
+        run_draw(as_static_receiver(&self.draw_request_signal), display)
+            .await
+            .unwrap(); // TODO
     }
 
     pub async fn process(
@@ -131,7 +132,7 @@ where
         wm_state: WaterMeterState,
         battery_state: BatteryState,
         draw_request_sink: impl Sender<Data = DrawRequest> + Send + 'static,
-    ) -> error::Result<()> {
+    ) {
         process(
             as_static_receiver(&self.button1_pressed_signal),
             as_static_receiver(&self.button2_pressed_signal),
@@ -163,7 +164,7 @@ pub async fn process(
     wm_state: WaterMeterState,
     battery_state: BatteryState,
     mut draw_request_sink: impl Sender<Data = DrawRequest>,
-) -> error::Result<()> {
+) {
     let mut screen_state = DrawRequest {
         active_page: Page::Summary,
         valve: valve_state,
@@ -202,15 +203,12 @@ pub async fn process(
                 ..screen_state
             },
             Either4::Second(valve) => DrawRequest {
-                valve: valve.map_err(error::svc)?,
+                valve,
                 ..screen_state
             },
-            Either4::Third(wm) => DrawRequest {
-                wm: wm.map_err(error::svc)?,
-                ..screen_state
-            },
+            Either4::Third(wm) => DrawRequest { wm, ..screen_state },
             Either4::Fourth(battery) => DrawRequest {
-                battery: battery.map_err(error::svc)?,
+                battery,
                 ..screen_state
             },
         };
@@ -218,10 +216,7 @@ pub async fn process(
         if screen_state != draw_request {
             screen_state = draw_request;
 
-            draw_request_sink
-                .send(draw_request)
-                .await
-                .map_err(error::svc)?;
+            draw_request_sink.send(draw_request).await;
         }
     }
 }
@@ -235,18 +230,18 @@ pub async fn unblock_run_draw<U, R, D>(
     unblocker: U,
     mut draw_request_source: R,
     mut display: D,
-) -> error::Result<()>
+) -> Result<(), D::Error>
 where
     U: Unblocker,
     R: Receiver<Data = DrawRequest>,
     D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
-    D::Error: Debug,
+    D::Error: Debug + Send + 'static,
 {
     let mut page_drawable = None;
 
     loop {
-        let draw_request = draw_request_source.recv().await.map_err(error::svc)?;
+        let draw_request = draw_request_source.recv().await;
 
         let result = unblocker
             .unblock(move || draw(display, page_drawable, draw_request))
@@ -257,7 +252,7 @@ where
     }
 }
 
-pub async fn run_draw<R, D>(mut draw_request_source: R, mut display: D) -> error::Result<()>
+pub async fn run_draw<R, D>(mut draw_request_source: R, mut display: D) -> Result<(), D::Error>
 where
     R: Receiver<Data = DrawRequest>,
     D: FlushableDrawTarget + Send + 'static,
@@ -267,7 +262,7 @@ where
     let mut page_drawable = None;
 
     loop {
-        let draw_request = draw_request_source.recv().await.map_err(error::svc)?;
+        let draw_request = draw_request_source.recv().await;
 
         let result = draw(display, page_drawable, draw_request)?;
 
@@ -280,7 +275,7 @@ fn draw<D>(
     mut display: D,
     mut page_drawable: Option<PageDrawable>,
     draw_request: DrawRequest,
-) -> error::Result<(D, Option<PageDrawable>)>
+) -> Result<(D, Option<PageDrawable>), D::Error>
 where
     D: FlushableDrawTarget + Send + 'static,
     D::Color: RgbColor,
@@ -290,14 +285,12 @@ where
         match draw_request.active_page {
             Page::Summary => {
                 if let Some(PageDrawable::Summary(drawable)) = &mut page_drawable {
-                    drawable
-                        .draw(
-                            &mut display,
-                            draw_request.valve,
-                            draw_request.wm,
-                            draw_request.battery,
-                        )
-                        .map_err(error::debug)?;
+                    drawable.draw(
+                        &mut display,
+                        draw_request.valve,
+                        draw_request.wm,
+                        draw_request.battery,
+                    )?;
                     break;
                 } else {
                     page_drawable = Some(PageDrawable::Summary(pages::Summary::new()));
@@ -305,9 +298,7 @@ where
             }
             Page::Battery => {
                 if let Some(PageDrawable::Battery(drawable)) = &mut page_drawable {
-                    drawable
-                        .draw(&mut display, draw_request.battery)
-                        .map_err(error::debug)?;
+                    drawable.draw(&mut display, draw_request.battery)?;
                     break;
                 } else {
                     page_drawable = Some(PageDrawable::Battery(pages::Battery::new()));
@@ -315,10 +306,10 @@ where
             }
         }
 
-        display.clear(RgbColor::BLACK).map_err(error::debug)?;
+        display.clear(RgbColor::BLACK)?;
     }
 
-    display.flush().map_err(error::debug)?;
+    display.flush()?;
 
     Ok((display, page_drawable))
 }

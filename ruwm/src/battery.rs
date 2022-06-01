@@ -10,7 +10,6 @@ use embedded_svc::channel::asyncs::Sender;
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::timer::asyncs::OnceTimer;
 
-use crate::error;
 use crate::state_snapshot::StateSnapshot;
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
@@ -52,10 +51,9 @@ where
         timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
-        power_pin: impl InputPin<Error = impl error::HalError>,
+        power_pin: impl InputPin,
         state_sink: impl Sender<Data = BatteryState>,
-    ) -> error::Result<()>
-    where
+    ) where
         BP: adc::Channel<ADC>,
     {
         process(
@@ -74,19 +72,14 @@ pub async fn process<ADC, BP>(
     mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
-    power_pin: impl InputPin<Error = impl error::HalError>,
+    power_pin: impl InputPin,
     state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
     mut state_sink: impl Sender<Data = BatteryState>,
-) -> error::Result<()>
-where
+) where
     BP: adc::Channel<ADC>,
 {
     loop {
-        timer
-            .after(Duration::from_secs(2))
-            .map_err(error::svc)?
-            .await
-            .map_err(error::svc)?;
+        timer.after(Duration::from_secs(2)).unwrap().await;
 
         let voltage = Some(100);
         // let voltage = one_shot
@@ -95,13 +88,10 @@ where
         //     .map(|voltage| voltage / ROUND_UP * ROUND_UP);
         //.map_err(error::wrap_display)?; TODO
 
-        let powered = Some(power_pin.is_high().map_err(error::hal)?);
+        let powered = Some(power_pin.is_high().unwrap_or(false));
 
         state
-            .update_with(
-                |state| Ok(BatteryState { voltage, powered }),
-                &mut state_sink,
-            )
-            .await?;
+            .update_with(|state| BatteryState { voltage, powered }, &mut state_sink)
+            .await;
     }
 }
