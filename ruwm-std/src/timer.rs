@@ -3,7 +3,6 @@ use core::future::Future;
 use core::time::Duration;
 
 use embedded_svc::channel::asynch::Receiver;
-use embedded_svc::errors::Errors;
 use embedded_svc::timer::asynch::*;
 
 pub fn timers() -> impl TimerService {
@@ -14,7 +13,7 @@ struct SmolTimers;
 struct SmolTimer;
 pub struct SmolInterval(Duration);
 
-impl Errors for SmolTimers {
+impl ErrorType for SmolTimers {
     type Error = Infallible;
 }
 
@@ -26,7 +25,7 @@ impl TimerService for SmolTimers {
     }
 }
 
-impl Errors for SmolTimer {
+impl ErrorType for SmolTimer {
     type Error = Infallible;
 }
 
@@ -54,7 +53,7 @@ impl PeriodicTimer for SmolTimer {
     }
 }
 
-impl Errors for SmolInterval {
+impl ErrorType for SmolInterval {
     type Error = Infallible;
 }
 

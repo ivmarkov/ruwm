@@ -8,7 +8,7 @@ use futures::{
 
 use smol::{LocalExecutor, Task};
 
-use embedded_svc::{errors::Errors, executor::asynch::Spawner};
+use embedded_svc::executor::asynch::Spawner;
 
 pub struct SmolLocalSpawner<'a>(LocalExecutor<'a>);
 
@@ -22,11 +22,9 @@ impl<'a> SmolLocalSpawner<'a> {
     }
 }
 
-impl<'a> Errors for SmolLocalSpawner<'a> {
-    type Error = Infallible;
-}
-
 impl<'a> Spawner<'a> for SmolLocalSpawner<'a> {
+    type Error = Infallible;
+
     type Task<T>
     = Task<T>
     where
@@ -53,11 +51,9 @@ impl FuturesLocalSpawner {
     }
 }
 
-impl Errors for FuturesLocalSpawner {
-    type Error = SpawnError;
-}
-
 impl Spawner<'static> for FuturesLocalSpawner {
+    type Error = SpawnError;
+
     type Task<T>
     = RemoteHandle<T>
     where
