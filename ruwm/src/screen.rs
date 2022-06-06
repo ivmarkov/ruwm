@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::unblocker::asyncs::Unblocker;
-use embedded_svc::utils::asyncs::channel::adapt::merge;
-use embedded_svc::utils::asyncs::select::{select3, select4, Either3, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::unblocker::asynch::Unblocker;
+use embedded_svc::utils::asynch::channel::adapt::merge;
+use embedded_svc::utils::asynch::select::{select3, select4, Either3, Either4};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::utils::{as_static_receiver, as_static_sender};

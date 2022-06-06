@@ -2,12 +2,12 @@ use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::errors::{EitherError, EitherError3};
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::errors::wrap::WrapError;
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::select::{select, Either};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
 use crate::state_snapshot::StateSnapshot;
@@ -15,7 +15,7 @@ use crate::utils::as_static_receiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum WifiCommand {
-    SetConfiguration(Configuration<heapless::String<64>>),
+    SetConfiguration(Configuration),
 }
 
 pub struct Wifi<M>
@@ -68,7 +68,7 @@ pub async fn run(
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
     mut state_sink: impl Sender<Data = Option<Status>>,
-) -> Result<(), AnyError<impl Debug>> {
+) -> Result<(), WrapError<impl Debug>> {
     loop {
         let receiver = state_changed_source.recv();
         let command = command_source.recv();
@@ -83,14 +83,5 @@ pub async fn run(
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf)?,
             },
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct AnyError<E>(pub E);
-
-impl<E: Debug> From<E> for AnyError<E> {
-    fn from(e: E) -> Self {
-        AnyError(e)
     }
 }

@@ -7,16 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use heapless::String;
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::mqtt::client::asyncs::{
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::channel::adapt::merge;
-use embedded_svc::utils::asyncs::select::{select4, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::channel::adapt::merge;
+use embedded_svc::utils::asynch::select::{select4, Either4};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;

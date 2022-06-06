@@ -1,6 +1,6 @@
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::signal::asyncs::Signal;
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::signal::asynch::Signal;
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 // TODO: Something seems wrong here as this signature should
 // be equivalent to as_channel which is being called

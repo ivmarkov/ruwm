@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::asyncs::Sender;
+use embedded_svc::channel::asynch::Sender;
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::timer::asyncs::OnceTimer;
+use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::state_snapshot::StateSnapshot;
 

@@ -1,16 +1,16 @@
 use core::fmt::Debug;
 use core::mem;
 
-use embedded_svc::errors::EitherError;
+use embedded_svc::errors::wrap::{EitherError, WrapError};
 use postcard::{from_bytes, to_slice};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::select::{select, select4, select_all_hvec, Either, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::role::Role;
-use embedded_svc::ws::asyncs::{Acceptor, Receiver as _, Sender as _};
+use embedded_svc::ws::asynch::{Acceptor, Receiver as _, Sender as _};
 use embedded_svc::ws::FrameType;
 
 use crate::battery::BatteryState;
@@ -126,7 +126,7 @@ pub async fn send<A, const N: usize, const F: usize>(
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
-) -> Result<(), AnyError<impl Debug>>
+) -> Result<(), WrapError<impl Debug>>
 where
     A: Acceptor,
 {
@@ -165,7 +165,7 @@ pub async fn receive<A, const N: usize, const F: usize>(
     mut conn_sink: impl Sender<Data = (ConnectionId, WebEvent)>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
-) -> Result<(), AnyError<impl Debug>>
+) -> Result<(), WrapError<impl Debug>>
 where
     A: Acceptor,
 {
@@ -440,23 +440,14 @@ where
 {
     let mut frame_buf = [0_u8; F];
 
-    let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::Second)?;
+    let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
 
     ws_sender
         .send(frame_type, Some(&frame_buf[..size]))
         .await
-        .map_err(EitherError::First)?;
+        .map_err(EitherError::E1)?;
 
     Ok(())
-}
-
-#[derive(Debug)]
-pub struct AnyError<E>(pub E);
-
-impl<E: Debug> From<E> for AnyError<E> {
-    fn from(e: E) -> Self {
-        AnyError(e)
-    }
 }
 
 async fn web_receive<A, const F: usize>(

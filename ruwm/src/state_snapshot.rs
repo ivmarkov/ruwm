@@ -1,4 +1,4 @@
-use embedded_svc::channel::asyncs::Sender;
+use embedded_svc::channel::asynch::Sender;
 use embedded_svc::mutex::Mutex;
 
 use crate::storage::Storage;

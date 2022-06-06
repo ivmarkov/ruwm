@@ -1,8 +1,8 @@
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::select::{select3, Either3};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::select::{select3, Either3};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::utils::as_static_receiver;

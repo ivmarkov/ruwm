@@ -2,8 +2,8 @@ use core::fmt::Debug;
 
 use log::info;
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::utils::asyncs::channel::adapt::{adapt, dummy};
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::utils::asynch::channel::adapt::{adapt, dummy};
 
 pub fn sink<D>(source: &'static str) -> impl Sender<Data = D> + 'static
 where

@@ -14,9 +14,9 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin;
 
-use embedded_svc::event_bus::asyncs::EventBus;
-use embedded_svc::executor::asyncs::{Executor, WaitableExecutor};
-use embedded_svc::timer::asyncs::TimerService;
+use embedded_svc::event_bus::asynch::EventBus;
+use embedded_svc::executor::asynch::{Executor, WaitableExecutor};
+use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::forever::Forever;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
@@ -28,8 +28,8 @@ use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
-use esp_idf_svc::executor::asyncs::isr::{local_tasks_spawner, tasks_spawner};
-use esp_idf_svc::http::server::ws::asyncs::{EspHttpWsAcceptor, EspHttpWsProcessor};
+use esp_idf_svc::executor::asynch::isr::{local_tasks_spawner, tasks_spawner};
+use esp_idf_svc::http::server::ws::asynch::{EspHttpWsAcceptor, EspHttpWsProcessor};
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;

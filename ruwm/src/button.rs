@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::select::{select, Either};
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::utils::asynch::select::{select, Either};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {

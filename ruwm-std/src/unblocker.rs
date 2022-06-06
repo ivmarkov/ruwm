@@ -3,7 +3,7 @@ use core::future::Future;
 extern crate alloc;
 use alloc::boxed::Box;
 
-use embedded_svc::unblocker::asyncs::{Blocker, Unblocker};
+use embedded_svc::unblocker::asynch::{Blocker, Unblocker};
 
 #[derive(Clone)]
 pub struct SmolBlocker;

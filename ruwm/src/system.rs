@@ -6,16 +6,16 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_hal::adc;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
-use embedded_svc::channel::asyncs::Receiver;
-use embedded_svc::mqtt::client::asyncs::{Client, Connection, Publish};
+use embedded_svc::channel::asynch::Receiver;
+use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::channel::adapt::{dummy, merge};
-use embedded_svc::utils::asyncs::signal::AtomicSignal;
+use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use embedded_svc::wifi::Wifi as WifiTrait;
-use embedded_svc::ws::asyncs::Acceptor;
+use embedded_svc::ws::asynch::Acceptor;
 
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};

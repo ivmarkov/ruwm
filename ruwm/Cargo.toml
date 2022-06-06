@@ -16,7 +16,7 @@ anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2.7", features = [ "unproven" ] }
-embedded-svc = { version = "0.21", features = [ "experimental", "heapless" ] }
+embedded-svc = { version = "0.21", features = [ "experimental" ] }
 embedded-graphics = "0.7"
 profont = "0.5"
 postcard = "0.7"

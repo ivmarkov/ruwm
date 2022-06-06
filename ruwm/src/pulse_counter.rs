@@ -1,7 +1,5 @@
 use core::fmt::Debug;
 
-use embedded_svc::errors;
-
 #[derive(Clone, Debug)]
 pub struct Data {
     pub debounce_edges: u16,
@@ -22,7 +20,7 @@ impl Default for Data {
 }
 
 pub trait PulseCounter {
-    type Error: errors::Error;
+    type Error: Debug;
 
     fn initialize(self) -> Result<Self, Self::Error>
     where

@@ -3,13 +3,13 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::channel::adapt::adapt;
-use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::utils::asynch::channel::adapt::adapt;
+use embedded_svc::utils::asynch::select::{select, Either};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::utils::as_static_receiver;
 
