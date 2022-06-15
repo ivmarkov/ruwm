@@ -21,10 +21,8 @@ impl Blocker<'static> for SmolBlocker {
 pub struct SmolUnblocker;
 
 impl Unblocker for SmolUnblocker {
-    type UnblockFuture<T>
-    where
-        T: Send,
-    = impl Future<Output = T> + Send;
+    type UnblockFuture<T> = impl Future<Output = T> + Send
+    where T: Send;
 
     fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
     where
