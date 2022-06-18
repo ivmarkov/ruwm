@@ -3,7 +3,6 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::errors::wrap::WrapError;
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::select::{select, Either};
