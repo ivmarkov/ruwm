@@ -317,7 +317,7 @@ where
         &'static self,
         wifi: impl WifiTrait,
         state_changed_source: impl Receiver<Data = ()> + 'static,
-    ) -> Result<(), impl Debug> {
+    ) {
         self.wifi
             .process(
                 wifi,

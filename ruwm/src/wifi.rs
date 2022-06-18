@@ -50,7 +50,7 @@ where
         wifi: impl WifiTrait,
         state_changed_source: impl Receiver<Data = ()>,
         state_sink: impl Sender<Data = Option<Status>>,
-    ) -> Result<(), impl Debug> {
+    ) {
         run(
             wifi,
             &self.state,
@@ -68,7 +68,7 @@ pub async fn run(
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
     mut state_sink: impl Sender<Data = Option<Status>>,
-) -> Result<(), WrapError<impl Debug>> {
+) {
     loop {
         let receiver = state_changed_source.recv();
         let command = command_source.recv();
@@ -80,7 +80,7 @@ pub async fn run(
                 state.update(Some(wifi.get_status()), &mut state_sink).await;
             }
             Either::Second(command) => match command {
-                WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf)?,
+                WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),
             },
         }
     }

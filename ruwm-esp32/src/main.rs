@@ -18,9 +18,11 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_svc::event_bus::asynch::EventBus;
 use embedded_svc::executor::asynch::{Executor, WaitableExecutor};
 use embedded_svc::timer::asynch::TimerService;
+use embedded_svc::utils::asynch::executor::SpawnError;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::forever::Forever;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
+use embedded_svc::ws::server::registry::Registry as _;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
 use esp_idf_hal::mutex::Condvar;
@@ -28,6 +30,7 @@ use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
+use esp_idf_svc::errors::EspIOError;
 use esp_idf_svc::executor::asynch::isr::{local_tasks_spawner, tasks_spawner};
 use esp_idf_svc::http::server::ws::asynch::{EspHttpWsAcceptor, EspHttpWsProcessor};
 use esp_idf_svc::http::server::EspHttpServer;
@@ -39,7 +42,7 @@ use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
 use esp_idf_svc::wifi::EspWifi;
 
-use esp_idf_sys::esp_nofail;
+use esp_idf_sys::{esp, EspError};
 
 use edge_frame::assets::serve::*;
 
@@ -66,21 +69,21 @@ const MQTT_MAX_TOPIC_LEN: usize = 64;
 const WS_MAX_CONNECTIONS: usize = 2;
 const WS_MAX_FRAME_SIZE: usize = 512;
 
-fn main() {
-    let wakeup_reason = get_sleep_wakeup_reason()?;
+fn main() -> Result<(), InitError> {
+    let wakeup_reason = get_sleep_wakeup_reason();
 
-    init();
+    init()?;
 
     log::info!("Wakeup reason: {:?}", wakeup_reason);
 
-    run(wakeup_reason);
+    run(wakeup_reason)?;
 
-    sleep();
+    sleep()?;
 
     unreachable!()
 }
 
-fn run(wakeup_reason: SleepWakeupReason) {
+fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let peripherals = Peripherals::take().unwrap();
 
     let mut valve_power_pin = peripherals.pins.gpio10.into_output()?;
@@ -92,7 +95,7 @@ fn run(wakeup_reason: SleepWakeupReason) {
             &mut valve_power_pin,
             &mut valve_open_pin,
             &mut valve_close_pin,
-        )?;
+        );
     }
 
     let button1_pin = peripherals.pins.gpio35;
@@ -192,16 +195,7 @@ fn run(wakeup_reason: SleepWakeupReason) {
 
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
-    for asset in &ASSETS {
-        let url = heapless::String::<64>::new();
-
-        url.push_str("/").unwrap();
-        url.push_str(AssetMetadata::derive(asset.0).name).unwrap();
-
-        httpd
-            .handle_get(&url, move |req, resp| serve(req, resp, asset))
-            .unwrap();
-    }
+    register_assets::<_, 128>(&mut httpd, &ASSETS)?;
 
     httpd.handle_ws("/ws", move |receiver, sender| {
         ws_processor.lock().process(receiver, sender)
@@ -211,15 +205,20 @@ fn run(wakeup_reason: SleepWakeupReason) {
         .spawn(system.wm_stats(timers.timer().unwrap(), EspSystemTime))
         .unwrap()
         .spawn(system.screen())?
-        .spawn(system.screen_draw(display(
-            peripherals.pins.gpio4.into_output()?.degrade(),
-            peripherals.pins.gpio16.into_output()?.degrade(),
-            peripherals.pins.gpio23.into_output()?.degrade(),
-            peripherals.spi2,
-            peripherals.pins.gpio18.into_output()?.degrade(),
-            peripherals.pins.gpio19.into_output()?.degrade(),
-            Some(peripherals.pins.gpio5.into_output()?.degrade()),
-        )?))?
+        .spawn(
+            system.screen_draw(
+                display(
+                    peripherals.pins.gpio4.into_output()?.degrade(),
+                    peripherals.pins.gpio16.into_output()?.degrade(),
+                    peripherals.pins.gpio23.into_output()?.degrade(),
+                    peripherals.spi2,
+                    peripherals.pins.gpio18.into_output()?.degrade(),
+                    peripherals.pins.gpio19.into_output()?.degrade(),
+                    Some(peripherals.pins.gpio5.into_output()?.degrade()),
+                )
+                .unwrap(),
+            ),
+        )?
         .spawn(system.wifi(wifi, wifi_state_changed_source))?
         .spawn(system.mqtt_receive(mqtt_conn))?
         .spawn(system.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
@@ -256,21 +255,25 @@ fn run(wakeup_reason: SleepWakeupReason) {
     executor3.join().unwrap();
 
     log::info!("Finished execution");
+
+    Ok(())
 }
 
-fn init() {
+fn init() -> Result<(), InitError> {
     esp_idf_sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    esp_nofail!(unsafe {
+    esp!(unsafe {
         #[allow(clippy::needless_update)]
         esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
             max_fds: 5,
             ..Default::default()
         })
-    });
+    })?;
+
+    Ok(())
 }
 
 fn emergency_valve_close(
@@ -310,28 +313,32 @@ fn mark_wakeup_pins(
     button1_pin: &impl RTCPin,
     button2_pin: &impl RTCPin,
     button3_pin: &impl RTCPin,
-) {
+) -> Result<(), InitError> {
     unsafe {
-        esp_nofail!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+        esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
             1 << button1_pin.pin(),
             //| (1 << button2_pin.pin())
             //| (1 << button3_pin.pin())
             esp_idf_sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
-        ));
+        ))?;
     }
+
+    Ok(())
 }
 
-fn sleep() {
+fn sleep() -> Result<(), InitError> {
     unsafe {
-        esp_nofail!(esp_idf_sys::esp_sleep_enable_ulp_wakeup());
-        esp_nofail!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
+        esp!(esp_idf_sys::esp_sleep_enable_ulp_wakeup())?;
+        esp!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
             SLEEP_TIME.as_micros() as u64
-        ));
+        ))?;
 
         log::info!("Going to sleep");
 
         esp_idf_sys::esp_deep_sleep_start();
     }
+
+    Ok(())
 }
 
 fn display(
@@ -342,8 +349,8 @@ fn display(
     sclk: gpio::GpioPin<Output>,
     sdo: gpio::GpioPin<Output>,
     cs: Option<gpio::GpioPin<Output>>,
-) -> impl FlushableDrawTarget<Color = impl RgbColor, Error = impl core::fmt::Debug> {
-    backlight.set_high().unwrap();
+) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug>, InitError> {
+    backlight.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
         spi::Master::<SPI2, _, _, _, _>::new(
@@ -355,8 +362,7 @@ fn display(
                 cs,
             },
             <spi::config::Config as Default>::default().baudrate(26.MHz().into()),
-        )
-        .unwrap(),
+        )?,
         dc,
     );
 
@@ -377,5 +383,33 @@ fn display(
         display,
     ));
 
-    display
+    Ok(display)
 }
+
+#[derive(Debug)]
+pub enum InitError {
+    EspError(EspError),
+    EspIOError(EspIOError),
+    SpawnError(SpawnError),
+}
+
+impl From<EspError> for InitError {
+    fn from(e: EspError) -> Self {
+        Self::EspError(e)
+    }
+}
+
+impl From<EspIOError> for InitError {
+    fn from(e: EspIOError) -> Self {
+        Self::EspIOError(e)
+    }
+}
+
+impl From<SpawnError> for InitError {
+    fn from(e: SpawnError) -> Self {
+        Self::SpawnError(e)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InitError {}
