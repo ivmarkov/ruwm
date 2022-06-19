@@ -14,10 +14,9 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
-[patch.crates-io]
-embedded-svc = { path = "../../embedded-svc" }
-edge-frame = { path = "../../edge-frame/edge-frame" }
-
+#[patch.crates-io]
+#embedded-svc = { path = "../../embedded-svc" }
+#edge-frame = { path = "../../edge-frame/edge-frame" }
 
 [profile.release]
 lto = true
@@ -38,8 +37,8 @@ gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
-embedded-svc = { version = "0.21", features = ["experimental"] }
-edge-frame = "0.1.6"
+embedded-svc = { version = "0.22", features = ["experimental"] }
+edge-frame = "0.2"
 ruwm = { version = "0.1", path = "../ruwm" }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
