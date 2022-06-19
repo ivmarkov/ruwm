@@ -7,16 +7,16 @@ use serde::{Deserialize, Serialize};
 
 use heapless::String;
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
-use embedded_svc::mqtt::client::asyncs::{
+use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::channel::adapt::merge;
-use embedded_svc::utils::asyncs::select::{select4, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::channel::adapt::merge;
+use embedded_svc::utils::asynch::select::{select4, Either4};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
@@ -74,8 +74,8 @@ where
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
-    ) -> error::Result<()> {
-        send::<L>(
+    ) {
+        send::<_, L>(
             topic_prefix,
             mqtt,
             as_static_receiver(&self.conn_signal),
@@ -85,6 +85,7 @@ where
             pub_sink,
         )
         .await
+        .unwrap(); // TODO
     }
 
     pub async fn receive(
@@ -94,7 +95,7 @@ where
         notif_sink: impl Sender<Data = MqttClientNotification>,
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
-    ) -> error::Result<()> {
+    ) {
         receive(
             connection,
             merge(as_static_sender(&self.conn_signal), conn_sink),
@@ -106,36 +107,39 @@ where
     }
 }
 
-pub async fn send<const L: usize>(
+pub async fn send<M, const L: usize>(
     topic_prefix: impl AsRef<str>,
-    mut mqtt: impl Client + Publish,
+    mut mqtt: M,
     mut conn_source: impl Receiver<Data = bool>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
     mut pub_sink: impl Sender<Data = MessageId>,
-) -> error::Result<()> {
+) -> Result<(), M::Error>
+where
+    M: Client + Publish,
+{
     let mut connected = false;
 
     let topic = |topic_suffix| {
         String::<L>::from_str(topic_prefix.as_ref())
             .and_then(|mut s| s.push_str(topic_suffix).map(|_| s))
-            .map_err(error::heapless)
+            .unwrap_or_else(|_| panic!(""))
     };
 
-    let topic_commands = topic("/commands/#")?;
+    let topic_commands = topic("/commands/#");
 
-    let topic_valve = topic("/valve")?;
+    let topic_valve = topic("/valve");
 
-    let topic_meter_edges = topic("/meter/edges")?;
-    let topic_meter_armed = topic("/meter/armed")?;
-    let topic_meter_leak = topic("/meter/leak")?;
+    let topic_meter_edges = topic("/meter/edges");
+    let topic_meter_armed = topic("/meter/armed");
+    let topic_meter_leak = topic("/meter/leak");
 
-    let topic_battery_voltage = topic("/battery/voltage")?;
-    let topic_battery_low = topic("/battery/low")?;
-    let topic_battery_charged = topic("/battery/charged")?;
+    let topic_battery_voltage = topic("/battery/voltage");
+    let topic_battery_low = topic("/battery/low");
+    let topic_battery_charged = topic("/battery/charged");
 
-    let topic_powered = topic("/powered")?;
+    let topic_powered = topic("/powered");
 
     let mut published_wm_state: Option<WaterMeterState> = None;
     let mut published_battery_state: Option<BatteryState> = None;
@@ -150,31 +154,25 @@ pub async fn send<const L: usize>(
             //pin_mut!(conn, valve, wm, battery);
 
             match select4(conn, valve, wm, battery).await {
-                Either4::First(conn_state) => {
-                    (Some(conn_state.map_err(error::svc)?), None, None, None)
-                }
-                Either4::Second(valve_state) => {
-                    (None, Some(valve_state.map_err(error::svc)?), None, None)
-                }
-                Either4::Third(wm_state) => (None, None, Some(wm_state.map_err(error::svc)?), None),
-                Either4::Fourth(battery_state) => {
-                    (None, None, None, Some(battery_state.map_err(error::svc)?))
-                }
+                Either4::First(conn_state) => (Some(conn_state), None, None, None),
+                Either4::Second(valve_state) => (None, Some(valve_state), None, None),
+                Either4::Third(wm_state) => (None, None, Some(wm_state), None),
+                Either4::Fourth(battery_state) => (None, None, None, Some(battery_state)),
             }
         } else {
             let conn_state = conn_source.recv().await;
 
-            (Some(conn_state.map_err(error::svc)?), None, None, None)
+            (Some(conn_state), None, None, None)
         };
 
         if let Some(conn_state) = conn_state {
             if conn_state {
                 info!("MQTT is now connected, subscribing");
 
-                error::check!(mqtt
-                    .subscribe(topic_commands.as_str(), QoS::AtLeastOnce)
-                    .await
-                    .map_err(error::svc));
+                error::check!(
+                    mqtt.subscribe(topic_commands.as_str(), QoS::AtLeastOnce)
+                        .await
+                )?;
 
                 connected = true;
             } else {
@@ -341,24 +339,23 @@ pub async fn send<const L: usize>(
     }
 }
 
-async fn publish(
+async fn publish<M>(
     connected: bool,
-    mqtt: &mut impl Publish,
+    mqtt: &mut M,
     pub_sink: &mut impl Sender<Data = MessageId>,
     topic: &str,
     qos: QoS,
     payload: &[u8],
-) -> error::Result<()> {
+) -> Result<(), M::Error>
+where
+    M: Publish,
+{
     if connected {
-        if let Some(msg_id) = error::check!(mqtt
-            .publish(topic, qos, false, payload)
-            .await
-            .map_err(error::svc))
-        {
+        if let Ok(msg_id) = error::check!(mqtt.publish(topic, qos, false, payload).await) {
             info!("Published to {}", topic);
 
             if qos >= QoS::AtLeastOnce {
-                pub_sink.send(msg_id).await.map_err(error::svc)?;
+                pub_sink.send(msg_id).await;
             }
         }
     } else {
@@ -374,47 +371,46 @@ pub async fn receive(
     mut notif_sink: impl Sender<Data = MqttClientNotification>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
-) -> error::Result<()> {
+) {
     loop {
         let message = connection.next().await;
 
         if let Some(message) = message {
             if let Ok(Event::Received(Some(cmd))) = &message {
                 match cmd {
-                    MqttCommand::Valve(open) => valve_command_sink
-                        .send(if *open {
-                            ValveCommand::Open
-                        } else {
-                            ValveCommand::Close
-                        })
-                        .await
-                        .map_err(error::svc)?,
-                    MqttCommand::FlowWatch(enable) => wm_command_sink
-                        .send(if *enable {
-                            WaterMeterCommand::Arm
-                        } else {
-                            WaterMeterCommand::Disarm
-                        })
-                        .await
-                        .map_err(error::svc)?,
+                    MqttCommand::Valve(open) => {
+                        valve_command_sink
+                            .send(if *open {
+                                ValveCommand::Open
+                            } else {
+                                ValveCommand::Close
+                            })
+                            .await;
+                    }
+                    MqttCommand::FlowWatch(enable) => {
+                        wm_command_sink
+                            .send(if *enable {
+                                WaterMeterCommand::Arm
+                            } else {
+                                WaterMeterCommand::Disarm
+                            })
+                            .await;
+                    }
                     _ => (),
                 }
             } else if matches!(&message, Ok(Event::Connected(_))) {
-                conn_sink.send(true).await.map_err(error::svc)?;
+                conn_sink.send(true);
             } else if matches!(&message, Ok(Event::Disconnected)) {
-                conn_sink.send(false).await.map_err(error::svc)?;
+                conn_sink.send(false);
             }
 
             notif_sink
-                .send(message.map_err(|_| ()))
-                .await
-                .map_err(error::svc)?;
+                .send(message.map_err(|_| ())) // TODO
+                .await;
         } else {
             break;
         }
     }
-
-    Ok(())
 }
 
 #[derive(Default)]
@@ -448,13 +444,13 @@ impl MessageParser {
         M: Message,
     {
         match message.details() {
-            Details::Complete => Self::parse_command(message.topic().unwrap().as_ref())
-                .and_then(|parser| parser(message.data().as_ref())),
+            Details::Complete => Self::parse_command(message.topic().unwrap())
+                .and_then(|parser| parser(message.data())),
             Details::InitialChunk(initial_chunk_data) => {
                 if initial_chunk_data.total_data_size > self.payload_buf.len() {
                     self.command_parser = None;
                 } else {
-                    self.command_parser = Self::parse_command(message.topic().unwrap().as_ref());
+                    self.command_parser = Self::parse_command(message.topic().unwrap());
 
                     self.payload_buf[..message.data().len()]
                         .copy_from_slice(message.data().as_ref());

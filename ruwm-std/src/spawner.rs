@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 
-use embedded_svc::{errors::Errors, executor::asyncs::Spawner};
 use futures::{
     executor::LocalPool,
     future::RemoteHandle,
@@ -8,6 +7,8 @@ use futures::{
 };
 
 use smol::{LocalExecutor, Task};
+
+use embedded_svc::executor::asynch::Spawner;
 
 pub struct SmolLocalSpawner<'a>(LocalExecutor<'a>);
 
@@ -21,15 +22,13 @@ impl<'a> SmolLocalSpawner<'a> {
     }
 }
 
-impl<'a> Errors for SmolLocalSpawner<'a> {
-    type Error = Infallible;
-}
-
 impl<'a> Spawner<'a> for SmolLocalSpawner<'a> {
+    type Error = Infallible;
+
     type Task<T>
+    = Task<T>
     where
-        T: 'a,
-    = Task<T>;
+        T: 'a;
 
     fn spawn<F, T>(&mut self, fut: F) -> Result<Self::Task<T>, Self::Error>
     where
@@ -52,15 +51,13 @@ impl FuturesLocalSpawner {
     }
 }
 
-impl Errors for FuturesLocalSpawner {
-    type Error = SpawnError;
-}
-
 impl Spawner<'static> for FuturesLocalSpawner {
+    type Error = SpawnError;
+
     type Task<T>
+    = RemoteHandle<T>
     where
-        T: 'static,
-    = RemoteHandle<T>;
+        T: 'static;
 
     fn spawn<F, T>(&mut self, fut: F) -> Result<Self::Task<T>, Self::Error>
     where

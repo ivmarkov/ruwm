@@ -1,11 +1,10 @@
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::select::{select3, Either3};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::select::{select3, Either3};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
-use crate::error;
 use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
@@ -43,10 +42,7 @@ where
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn process(
-        &'static self,
-        valve_command: impl Sender<Data = ValveCommand>,
-    ) -> error::Result<()> {
+    pub async fn process(&'static self, valve_command: impl Sender<Data = ValveCommand>) {
         process(
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
@@ -62,7 +58,7 @@ pub async fn process(
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
-) -> error::Result<()> {
+) {
     let mut valve_state = None;
 
     loop {
@@ -74,20 +70,12 @@ pub async fn process(
 
         let emergency_close = match select3(valve, wm, battery).await {
             Either3::First(valve) => {
-                let valve = valve.map_err(error::svc)?;
-
                 valve_state = valve;
 
                 false
             }
-            Either3::Second(wm) => {
-                let wm = wm.map_err(error::svc)?;
-
-                wm.leaking
-            }
+            Either3::Second(wm) => wm.leaking,
             Either3::Third(battery) => {
-                let battery = battery.map_err(error::svc)?;
-
                 let battery_low = battery
                     .voltage
                     .map(|voltage| voltage <= BatteryState::LOW_VOLTAGE)
@@ -105,10 +93,7 @@ pub async fn process(
                 Some(ValveState::Closing) | Some(ValveState::Closed)
             )
         {
-            valve_command_sink
-                .send(ValveCommand::Close)
-                .await
-                .map_err(error::svc)?;
+            valve_command_sink.send(ValveCommand::Close).await;
         }
     }
 }

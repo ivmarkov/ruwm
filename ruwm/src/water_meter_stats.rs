@@ -3,16 +3,15 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asyncs::Receiver;
-use embedded_svc::channel::asyncs::Sender;
+use embedded_svc::channel::asynch::Receiver;
+use embedded_svc::channel::asynch::Sender;
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::select::select;
-use embedded_svc::utils::asyncs::select::Either;
+use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::utils::asynch::select::select;
+use embedded_svc::utils::asynch::select::Either;
 
-use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::*;
 use crate::utils::as_static_receiver;
@@ -133,9 +132,8 @@ impl WaterMeterStatsState {
 
         for (index, snapshot) in self.snapshots.iter_mut().enumerate() {
             if snapshot.is_measurement_due(DURATIONS[index], now) {
-                let prev = mem::replace(snapshot, self.most_recent.clone());
-                self.measurements[index] =
-                    Some(FlowMeasurement::new(prev, self.most_recent.clone()));
+                let prev = mem::replace(snapshot, self.most_recent);
+                self.measurements[index] = Some(FlowMeasurement::new(prev, self.most_recent));
 
                 updated = true;
             }
@@ -173,7 +171,7 @@ where
         timer: impl OnceTimer,
         sys_time: impl SystemTime,
         state_sink: impl Sender<Data = WaterMeterStatsState>,
-    ) -> error::Result<()> {
+    ) {
         process(
             timer,
             sys_time,
@@ -191,31 +189,31 @@ pub async fn process(
     state: &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut state_sink: impl Sender<Data = WaterMeterStatsState>,
-) -> error::Result<()> {
+) {
     loop {
         let wm_state = wm_state_source.recv();
         let tick = timer
             .after(Duration::from_secs(10) /*Duration::from_millis(200)*/)
-            .map_err(error::svc)?;
+            .unwrap();
 
         //pin_mut!(wm_state, tick);
 
         let edges_count = match select(wm_state, tick).await {
-            Either::First(wm_state) => wm_state.map_err(error::svc)?.edges_count,
+            Either::First(wm_state) => wm_state.edges_count,
             Either::Second(_) => state.get().most_recent.edges_count,
         };
 
         state
             .update_with(
                 |state| {
-                    let mut state = state.clone();
+                    let mut state = *state;
 
                     state.update(edges_count, sys_time.now());
 
-                    Ok(state)
+                    state
                 },
                 &mut state_sink,
             )
-            .await?;
+            .await;
     }
 }

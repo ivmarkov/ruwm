@@ -3,14 +3,13 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::timer::asyncs::OnceTimer;
-use embedded_svc::utils::asyncs::select::{select, Either};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::utils::asynch::select::{select, Either};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
-use crate::error;
 use crate::pulse_counter::PulseCounter;
 use crate::state_snapshot::StateSnapshot;
 
@@ -59,7 +58,7 @@ where
         timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
         state_sink: impl Sender<Data = WaterMeterState>,
-    ) -> error::Result<()> {
+    ) {
         process(
             timer,
             pulse_counter,
@@ -77,22 +76,20 @@ pub async fn process(
     state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     mut command_source: impl Receiver<Data = WaterMeterCommand>,
     mut state_sink: impl Sender<Data = WaterMeterState>,
-) -> error::Result<()> {
-    pulse_counter.start().map_err(error::svc)?;
+) {
+    pulse_counter.start().unwrap();
 
     loop {
         let command = command_source.recv();
         let tick = timer
             .after(Duration::from_secs(2) /*Duration::from_millis(200)*/)
-            .map_err(error::svc)?;
+            .unwrap();
 
         //pin_mut!(command, tick);
 
         let data = match select(command, tick).await {
             Either::First(command) => {
-                let command = command.map_err(error::svc)?;
-
-                let mut data = pulse_counter.get_data().map_err(error::svc)?;
+                let mut data = pulse_counter.get_data().unwrap();
 
                 data.edges_count = 0;
                 data.wakeup_edges = if command == WaterMeterCommand::Arm {
@@ -101,30 +98,28 @@ pub async fn process(
                     0
                 };
 
-                pulse_counter.swap_data(&data).map_err(error::svc)?
+                pulse_counter.swap_data(&data).unwrap()
             }
             Either::Second(_) => {
-                let mut data = pulse_counter.get_data().map_err(error::svc)?;
+                let mut data = pulse_counter.get_data().unwrap();
 
                 data.edges_count = 0;
 
-                pulse_counter.swap_data(&data).map_err(error::svc)?
+                pulse_counter.swap_data(&data).unwrap()
             }
         };
 
         state
             .update_with(
-                |state| {
-                    Ok(WaterMeterState {
-                        edges_count: state.edges_count + data.edges_count as u64,
-                        armed: data.wakeup_edges > 0,
-                        leaking: state.edges_count < state.edges_count + data.edges_count as u64
-                            && state.armed
-                            && data.wakeup_edges > 0,
-                    })
+                |state| WaterMeterState {
+                    edges_count: state.edges_count + data.edges_count as u64,
+                    armed: data.wakeup_edges > 0,
+                    leaking: state.edges_count < state.edges_count + data.edges_count as u64
+                        && state.armed
+                        && data.wakeup_edges > 0,
                 },
                 &mut state_sink,
             )
-            .await?;
+            .await;
     }
 }

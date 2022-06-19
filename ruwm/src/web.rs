@@ -1,18 +1,19 @@
+use core::fmt::Debug;
 use core::mem;
 
+use embedded_svc::errors::wrap::{EitherError, WrapError};
 use postcard::{from_bytes, to_slice};
 
-use embedded_svc::channel::asyncs::{Receiver, Sender};
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asyncs::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asyncs::select::{select, select4, select_all_hvec, Either, Either4};
-use embedded_svc::utils::asyncs::signal::adapt::as_channel;
+use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
+use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::role::Role;
-use embedded_svc::ws::asyncs::{Acceptor, Receiver as _, Sender as _};
+use embedded_svc::ws::asynch::{Acceptor, Receiver as _, Sender as _};
 use embedded_svc::ws::FrameType;
 
 use crate::battery::BatteryState;
-use crate::error;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
 use crate::utils::{as_static_receiver, as_static_sender};
@@ -83,7 +84,7 @@ where
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn send<const F: usize>(&'static self) -> error::Result<()> {
+    pub async fn send<const F: usize>(&'static self) {
         send::<A, N, F>(
             &self.connections,
             as_static_receiver(&self.conn_signal),
@@ -92,6 +93,7 @@ where
             as_static_receiver(&self.battery_state_signal),
         )
         .await
+        .unwrap(); // TODO
     }
 
     pub async fn receive<const F: usize>(
@@ -102,7 +104,7 @@ where
         battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
-    ) -> error::Result<()> {
+    ) {
         receive::<A, N, F>(
             &self.connections,
             ws_acceptor,
@@ -114,6 +116,7 @@ where
             wm_command,
         )
         .await
+        .unwrap(); // TODO
     }
 }
 
@@ -123,7 +126,7 @@ pub async fn send<A, const N: usize, const F: usize>(
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
-) -> error::Result<()>
+) -> Result<(), WrapError<impl Debug>>
 where
     A: Acceptor,
 {
@@ -136,18 +139,17 @@ where
         //pin_mut!(receiver, valve, wm, battery);
 
         match select4(receiver, valve, wm, battery).await {
-            Either4::First(state) => {
-                let (id, event) = state?;
+            Either4::First((id, event)) => {
                 web_send_single::<A, N, F>(connections, id, &event).await?;
             }
             Either4::Second(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::ValveState(state?)).await?
+                web_send_all::<A, N, F>(connections, &WebEvent::ValveState(state)).await?
             }
             Either4::Third(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::WaterMeterState(state?)).await?
+                web_send_all::<A, N, F>(connections, &WebEvent::WaterMeterState(state)).await?
             }
             Either4::Fourth(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::BatteryState(state?)).await?
+                web_send_all::<A, N, F>(connections, &WebEvent::BatteryState(state)).await?
             }
         }
     }
@@ -163,7 +165,7 @@ pub async fn receive<A, const N: usize, const F: usize>(
     mut conn_sink: impl Sender<Data = (ConnectionId, WebEvent)>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
-) -> error::Result<()>
+) -> Result<(), WrapError<impl Debug>>
 where
     A: Acceptor,
 {
@@ -185,7 +187,7 @@ where
                 .collect::<heapless::Vec<_, N>>();
 
             if ws_receivers.is_empty() {
-                ws_acceptor.accept().await.map_err(error::svc)?.map_or_else(
+                ws_acceptor.accept().await?.map_or_else(
                     || SelectResult::Close,
                     |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
                 )
@@ -196,12 +198,14 @@ where
                 //pin_mut!(ws_acceptor, ws_receivers);
 
                 match select(ws_acceptor, ws_receivers).await {
-                    Either::First(accept) => accept.map_err(error::svc)?.map_or_else(
+                    Either::First(accept) => accept?.map_or_else(
                         || SelectResult::Close,
                         |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
                     ),
                     Either::Second((receive, _)) => {
-                        receive.map(|(size, frame)| SelectResult::Receive(size, frame))?
+                        let (size, frame) = receive?;
+
+                        SelectResult::Receive(size, frame)
                     }
                 }
             }
@@ -223,7 +227,7 @@ where
                     })
                     .unwrap_or_else(|_| panic!());
 
-                ws_receivers.push(new_receiver).map_err(error::heapless)?;
+                ws_receivers.push(new_receiver).unwrap_or_else(|_| panic!());
 
                 process_initial_response(
                     &mut conn_sink,
@@ -233,7 +237,7 @@ where
                     wm_state,
                     battery_state,
                 )
-                .await?;
+                .await;
             }
             SelectResult::Close => break,
             SelectResult::Receive(index, receive) => match receive {
@@ -252,11 +256,11 @@ where
                         &mut conn_sink,
                         &mut valve_command_sink,
                         &mut wm_command_sink,
-                        &valve_state,
-                        &wm_state,
-                        &battery_state,
+                        valve_state,
+                        wm_state,
+                        battery_state,
                     )
-                    .await?;
+                    .await;
                 }
                 WebFrame::Control => (),
                 WebFrame::Close | WebFrame::Unknown => {
@@ -282,8 +286,7 @@ async fn process_request<A, const N: usize>(
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) -> error::Result<()>
-where
+) where
     A: Acceptor,
 {
     let response = request.response(role);
@@ -307,11 +310,11 @@ where
                         water_meter_state,
                         battery_state,
                     )
-                    .await?;
+                    .await;
                 } else {
                     sender
                         .send((connection_id, WebEvent::AuthenticationFailed))
-                        .await?;
+                        .await;
                 }
             }
             WebRequestPayload::Logout => {
@@ -323,33 +326,35 @@ where
 
                 sender
                     .send((connection_id, WebEvent::RoleState(Role::None)))
-                    .await?
+                    .await;
             }
-            WebRequestPayload::ValveCommand(command) => valve_command.send(*command).await?,
+            WebRequestPayload::ValveCommand(command) => {
+                valve_command.send(*command).await;
+            }
             WebRequestPayload::ValveStateRequest => {
                 sender
                     .send((connection_id, WebEvent::ValveState(valve_state.get())))
-                    .await?
+                    .await;
             }
-            WebRequestPayload::WaterMeterCommand(command) => wm_command.send(*command).await?,
+            WebRequestPayload::WaterMeterCommand(command) => {
+                wm_command.send(*command).await;
+            }
             WebRequestPayload::WaterMeterStateRequest => {
                 sender
                     .send((
                         connection_id,
                         WebEvent::WaterMeterState(water_meter_state.get()),
                     ))
-                    .await?
+                    .await;
             }
             WebRequestPayload::BatteryStateRequest => {
                 sender
                     .send((connection_id, WebEvent::BatteryState(battery_state.get())))
-                    .await?
+                    .await;
             }
             WebRequestPayload::WifiStatusRequest => todo!(),
         }
     }
-
-    Ok(())
 }
 
 async fn process_initial_response(
@@ -359,7 +364,7 @@ async fn process_initial_response(
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) -> error::Result<()> {
+) {
     let events = [
         WebEvent::RoleState(role),
         WebEvent::ValveState(valve_state.get()),
@@ -369,21 +374,19 @@ async fn process_initial_response(
 
     for event in events {
         if role >= event.role() {
-            sender.send((connection_id, event)).await?;
+            sender.send((connection_id, event)).await;
         }
     }
-
-    Ok(())
 }
 
-fn authenticate(username: &str, password: &str) -> Option<Role> {
+fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 
 async fn web_send_all<A, const N: usize, const F: usize>(
     sis: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     event: &WebEvent,
-) -> error::Result<()>
+) -> Result<(), EitherError<A::Error, postcard::Error>>
 where
     A: Acceptor,
 {
@@ -405,7 +408,7 @@ async fn web_send_single<A, const N: usize, const F: usize>(
     sis: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     id: ConnectionId,
     event: &WebEvent,
-) -> error::Result<()>
+) -> Result<(), EitherError<A::Error, postcard::Error>>
 where
     A: Acceptor,
 {
@@ -431,15 +434,18 @@ where
 async fn web_send<A, const F: usize>(
     ws_sender: &mut A::Sender,
     event: &WebEvent,
-) -> error::Result<()>
+) -> Result<(), EitherError<A::Error, postcard::Error>>
 where
     A: Acceptor,
 {
     let mut frame_buf = [0_u8; F];
 
-    let (frame_type, size) = to_ws_frame(event, &mut frame_buf).unwrap();
+    let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
 
-    ws_sender.send(frame_type, Some(&frame_buf[..size])).await?;
+    ws_sender
+        .send(frame_type, Some(&frame_buf[..size]))
+        .await
+        .map_err(EitherError::E1)?;
 
     Ok(())
 }
@@ -447,7 +453,7 @@ where
 async fn web_receive<A, const F: usize>(
     ws_receiver: &mut A::Receiver,
     index: usize,
-) -> error::Result<(usize, WebFrame)>
+) -> Result<(usize, WebFrame), A::Error>
 where
     A: Acceptor,
 {
@@ -475,8 +481,11 @@ fn from_ws_frame(frame_type: FrameType, frame_buf: &[u8]) -> WebFrame {
     }
 }
 
-fn to_ws_frame(event: &WebEvent, frame_buf: &mut [u8]) -> error::Result<(FrameType, usize)> {
-    let slice = to_slice(event, frame_buf).map_err(|e| anyhow::anyhow!(e))?;
+fn to_ws_frame(
+    event: &WebEvent,
+    frame_buf: &mut [u8],
+) -> Result<(FrameType, usize), postcard::Error> {
+    let slice = to_slice(event, frame_buf)?;
 
     Ok((FrameType::Binary(false), slice.len()))
 }
