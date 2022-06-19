@@ -2,7 +2,6 @@ use heapless::String;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::utils::role::Role;
-use embedded_svc::wifi::Status;
 
 use crate::battery::BatteryState;
 use crate::valve::{ValveCommand, ValveState};

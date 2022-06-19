@@ -67,7 +67,7 @@ const SLEEP_TIME: Duration = Duration::from_secs(30);
 
 const MQTT_MAX_TOPIC_LEN: usize = 64;
 const WS_MAX_CONNECTIONS: usize = 2;
-const WS_MAX_FRAME_SIZE: usize = 512;
+const WS_MAX_FRAME_SIZE: usize = 4096;
 
 fn main() -> Result<(), InitError> {
     let wakeup_reason = get_sleep_wakeup_reason();
@@ -311,8 +311,8 @@ fn get_sleep_wakeup_reason() -> SleepWakeupReason {
 
 fn mark_wakeup_pins(
     button1_pin: &impl RTCPin,
-    button2_pin: &impl RTCPin,
-    button3_pin: &impl RTCPin,
+    _button2_pin: &impl RTCPin,
+    _button3_pin: &impl RTCPin,
 ) -> Result<(), InitError> {
     unsafe {
         esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(

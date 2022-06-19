@@ -444,13 +444,13 @@ impl MessageParser {
         M: Message,
     {
         match message.details() {
-            Details::Complete => Self::parse_command(message.topic().unwrap().as_ref())
-                .and_then(|parser| parser(message.data().as_ref())),
+            Details::Complete => Self::parse_command(message.topic().unwrap())
+                .and_then(|parser| parser(message.data())),
             Details::InitialChunk(initial_chunk_data) => {
                 if initial_chunk_data.total_data_size > self.payload_buf.len() {
                     self.command_parser = None;
                 } else {
-                    self.command_parser = Self::parse_command(message.topic().unwrap().as_ref());
+                    self.command_parser = Self::parse_command(message.topic().unwrap());
 
                     self.payload_buf[..message.data().len()]
                         .copy_from_slice(message.data().as_ref());

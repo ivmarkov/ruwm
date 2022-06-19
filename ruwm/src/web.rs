@@ -256,9 +256,9 @@ where
                         &mut conn_sink,
                         &mut valve_command_sink,
                         &mut wm_command_sink,
-                        &valve_state,
-                        &wm_state,
-                        &battery_state,
+                        valve_state,
+                        wm_state,
+                        battery_state,
                     )
                     .await;
                 }
@@ -379,7 +379,7 @@ async fn process_initial_response(
     }
 }
 
-fn authenticate(username: &str, password: &str) -> Option<Role> {
+fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 

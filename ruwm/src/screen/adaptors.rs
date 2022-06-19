@@ -123,7 +123,7 @@ impl<const N: usize> Diff<N> {
 
                 (index, unioned, ratio)
             })
-            .min_by(|(_, _, ratio1), (_, _, ratio2)| ratio1.cmp(&ratio2));
+            .min_by(|(_, _, ratio1), (_, _, ratio2)| ratio1.cmp(ratio2));
 
         let placeholder =
             self.0
@@ -304,7 +304,7 @@ where
     {
         let mut colors = colors.into_iter();
 
-        for (byte_offset, bits_offset) in Self::offsets(area.clone()) {
+        for (byte_offset, bits_offset) in Self::offsets(*area) {
             if let Some(color) = colors.next() {
                 self.set(byte_offset, bits_offset, color);
             }
@@ -314,7 +314,7 @@ where
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        for (byte_offset, bits_offset) in Self::offsets(area.clone()) {
+        for (byte_offset, bits_offset) in Self::offsets(*area) {
             self.set(byte_offset, bits_offset, color);
         }
 
@@ -327,7 +327,7 @@ where
                 *byte = 0;
             }
         } else {
-            for (byte_offset, bits_offset) in Self::offsets(self.bounding_box().clone()) {
+            for (byte_offset, bits_offset) in Self::offsets(self.bounding_box()) {
                 self.set(byte_offset, bits_offset, color);
             }
         }

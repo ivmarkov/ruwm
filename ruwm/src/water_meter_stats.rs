@@ -132,9 +132,8 @@ impl WaterMeterStatsState {
 
         for (index, snapshot) in self.snapshots.iter_mut().enumerate() {
             if snapshot.is_measurement_due(DURATIONS[index], now) {
-                let prev = mem::replace(snapshot, self.most_recent.clone());
-                self.measurements[index] =
-                    Some(FlowMeasurement::new(prev, self.most_recent.clone()));
+                let prev = mem::replace(snapshot, self.most_recent);
+                self.measurements[index] = Some(FlowMeasurement::new(prev, self.most_recent));
 
                 updated = true;
             }
@@ -207,7 +206,7 @@ pub async fn process(
         state
             .update_with(
                 |state| {
-                    let mut state = state.clone();
+                    let mut state = *state;
 
                     state.update(edges_count, sys_time.now());
 

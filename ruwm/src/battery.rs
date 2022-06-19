@@ -70,8 +70,8 @@ where
 
 pub async fn process<ADC, BP>(
     mut timer: impl OnceTimer,
-    mut one_shot: impl adc::OneShot<ADC, u16, BP>,
-    mut battery_pin: BP,
+    _one_shot: impl adc::OneShot<ADC, u16, BP>,
+    _battery_pin: BP,
     power_pin: impl InputPin,
     state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
     mut state_sink: impl Sender<Data = BatteryState>,
@@ -91,7 +91,7 @@ pub async fn process<ADC, BP>(
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
         state
-            .update_with(|state| BatteryState { voltage, powered }, &mut state_sink)
+            .update_with(|_state| BatteryState { voltage, powered }, &mut state_sink)
             .await;
     }
 }
