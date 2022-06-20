@@ -131,8 +131,8 @@ fn to_request(action: &AppAction, request_id_gen: &mut RequestId) -> Option<WebR
             username,
             password,
         }))) => Some(WebRequestPayload::Authenticate(
-            username.clone(),
-            password.clone(),
+            username.as_str().into(),
+            password.as_str().into(),
         )),
         AppAction::Role(RoleAction::Update(RoleStateValue::LoggingOut(_))) => {
             Some(WebRequestPayload::Logout)

@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::mem;
 
 use embedded_svc::errors::wrap::{EitherError, WrapError};
+use log::info;
 use postcard::{from_bytes, to_slice};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
@@ -30,6 +31,7 @@ pub struct SenderInfo<A: Acceptor> {
     sender: Option<A::Sender>,
 }
 
+#[derive(Debug)]
 enum WebFrame {
     Request(WebRequest),
     Control,
@@ -173,6 +175,7 @@ where
     let mut ws_receivers = heapless::Vec::<_, N>::new();
 
     loop {
+        #[derive(Debug)]
         enum SelectResult<A: Acceptor> {
             Accept(A::Sender, A::Receiver),
             Close,
@@ -213,6 +216,8 @@ where
 
         match result {
             SelectResult::Accept(new_sender, new_receiver) => {
+                info!("WS ACCEPT");
+
                 let role = Role::None;
 
                 let id = next_connection_id;
@@ -239,35 +244,42 @@ where
                 )
                 .await;
             }
-            SelectResult::Close => break,
-            SelectResult::Receive(index, receive) => match receive {
-                WebFrame::Request(ref request) => {
-                    let (id, role) = {
-                        let sender = &connections.lock()[index];
+            SelectResult::Close => {
+                info!("WS CLOSE");
+                break;
+            }
+            SelectResult::Receive(index, receive) => {
+                info!("WS RECEIVE: {} / {:?}", index, receive);
 
-                        (sender.id, sender.role)
-                    };
+                match receive {
+                    WebFrame::Request(ref request) => {
+                        let (id, role) = {
+                            let sender = &connections.lock()[index];
 
-                    process_request(
-                        connections,
-                        id,
-                        role,
-                        request,
-                        &mut conn_sink,
-                        &mut valve_command_sink,
-                        &mut wm_command_sink,
-                        valve_state,
-                        wm_state,
-                        battery_state,
-                    )
-                    .await;
-                }
-                WebFrame::Control => (),
-                WebFrame::Close | WebFrame::Unknown => {
-                    ws_receivers.swap_remove(index);
-                    connections.lock().swap_remove(index);
-                }
-            },
+                            (sender.id, sender.role)
+                        };
+
+                        process_request(
+                            connections,
+                            id,
+                            role,
+                            request,
+                            &mut conn_sink,
+                            &mut valve_command_sink,
+                            &mut wm_command_sink,
+                            valve_state,
+                            wm_state,
+                            battery_state,
+                        )
+                        .await;
+                    }
+                    WebFrame::Control => (),
+                    WebFrame::Close | WebFrame::Unknown => {
+                        ws_receivers.swap_remove(index);
+                        connections.lock().swap_remove(index);
+                    }
+                };
+            }
         }
     }
 
@@ -296,6 +308,8 @@ async fn process_request<A, const N: usize>(
         match request.payload() {
             WebRequestPayload::Authenticate(username, password) => {
                 if let Some(role) = authenticate(username, password) {
+                    info!("WS: Authenticated; role: {}", role);
+
                     sis.lock()
                         .iter_mut()
                         .find(|si| si.id == connection_id)
@@ -312,12 +326,16 @@ async fn process_request<A, const N: usize>(
                     )
                     .await;
                 } else {
+                    info!("WS: Authentication failed");
+
                     sender
                         .send((connection_id, WebEvent::AuthenticationFailed))
                         .await;
                 }
             }
             WebRequestPayload::Logout => {
+                info!("WS: Logout");
+
                 sis.lock()
                     .iter_mut()
                     .find(|si| si.id == connection_id)
@@ -374,6 +392,8 @@ async fn process_initial_response(
 
     for event in events {
         if role >= event.role() {
+            info!("WS SEND INITIAL RESPONSE: {:?}", event);
+
             sender.send((connection_id, event)).await;
         }
     }
@@ -438,6 +458,8 @@ async fn web_send<A, const F: usize>(
 where
     A: Acceptor,
 {
+    info!("WS SEND: {:?}", event);
+
     let mut frame_buf = [0_u8; F];
 
     let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;

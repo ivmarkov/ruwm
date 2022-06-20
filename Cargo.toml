@@ -14,7 +14,7 @@ smol = { git = "https://github.com/esp-rs-compat/smol" }
 socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
 polling = { git = "https://github.com/esp-rs-compat/polling" }
 #embedded-svc = { path = "../embedded-svc" }
-#esp-idf-sys = { path = "../esp-idf-sys" }
+esp-idf-sys = { path = "../esp-idf-sys" }
 #esp-idf-hal = { path = "../esp-idf-hal" }
 #esp-idf-svc = { path = "../esp-idf-svc" }
 #embuild = { path = "../embuild" }
