@@ -17,7 +17,7 @@ use embedded_svc::ws::FrameType;
 use crate::battery::BatteryState;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
-use crate::utils::{as_static_receiver, as_static_sender};
+use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -98,9 +98,9 @@ where
     pub async fn receive<const F: usize>(
         &'static self,
         ws_acceptor: A,
-        valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-        wm_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-        battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
+        valve_state: &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+        wm_state: &'static StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+        battery_state: &'static StateSnapshot<impl Mutex<Data = BatteryState>>,
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
     ) {
@@ -150,11 +150,11 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub async fn receive<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    connections: &'static impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     mut ws_acceptor: A,
-    valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    wm_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-    battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
+    valve_state: &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    wm_state: &'static StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    battery_state: &'static StateSnapshot<impl Mutex<Data = BatteryState>>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
 ) -> Result<(), WrapError<impl Debug>>
@@ -179,10 +179,14 @@ where
                 .collect::<heapless::Vec<_, N>>();
 
             if ws_receivers.is_empty() {
-                ws_acceptor.accept().await?.map_or_else(
-                    || SelectResult::Close,
-                    |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
-                )
+                ws_acceptor
+                    .accept()
+                    .await
+                    .map_err(EitherError::E2)?
+                    .map_or_else(
+                        || SelectResult::Close,
+                        |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
+                    )
             } else {
                 let ws_acceptor = ws_acceptor.accept();
                 let ws_receivers = select_all_hvec(ws_receivers);
@@ -190,12 +194,12 @@ where
                 //pin_mut!(ws_acceptor, ws_receivers);
 
                 match select(ws_acceptor, ws_receivers).await {
-                    Either::First(accept) => accept?.map_or_else(
+                    Either::First(accept) => accept.map_err(EitherError::E2)?.map_or_else(
                         || SelectResult::Close,
                         |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
                     ),
                     Either::Second((receive, _)) => {
-                        let (size, frame) = receive?;
+                        let (size, frame) = receive.map_err(EitherError::E2)?;
 
                         SelectResult::Receive(size, frame)
                     }
@@ -231,7 +235,8 @@ where
                     wm_state,
                     battery_state,
                 )
-                .await;
+                .await
+                .map_err(EitherError::E1)?;
             }
             SelectResult::Close => {
                 info!("[WS CLOSE]");
@@ -246,7 +251,7 @@ where
                             (sender.id, sender.role)
                         };
 
-                        process_request(
+                        process_request::<A, N, F>(
                             connections,
                             id,
                             role,
@@ -257,7 +262,8 @@ where
                             wm_state,
                             battery_state,
                         )
-                        .await;
+                        .await
+                        .map_err(EitherError::E1)?;
                     }
                     WebFrame::Control => (),
                     WebFrame::Close | WebFrame::Unknown => {
@@ -272,6 +278,7 @@ where
     Ok(())
 }
 
+// TODO: Do not send data directly, but flag the requested data in the connections vector, and signal the sender
 #[allow(clippy::too_many_arguments)]
 async fn process_request<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
@@ -283,7 +290,8 @@ async fn process_request<A, const N: usize, const F: usize>(
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) where
+) -> Result<(), EitherError<A::Error, postcard::Error>>
+where
     A: Acceptor,
 {
     let response = request.response(role);
@@ -310,7 +318,7 @@ async fn process_request<A, const N: usize, const F: usize>(
                         water_meter_state,
                         battery_state,
                     )
-                    .await;
+                    .await?;
                 } else {
                     info!("[WS] Authentication failed");
 
@@ -319,7 +327,7 @@ async fn process_request<A, const N: usize, const F: usize>(
                         connection_id,
                         &WebEvent::AuthenticationFailed,
                     )
-                    .await;
+                    .await?;
                 }
             }
             WebRequestPayload::Logout => {
@@ -335,7 +343,7 @@ async fn process_request<A, const N: usize, const F: usize>(
                     connection_id,
                     &WebEvent::RoleState(Role::None),
                 )
-                .await;
+                .await?;
             }
             WebRequestPayload::ValveCommand(command) => {
                 valve_command.send(*command).await;
@@ -346,7 +354,7 @@ async fn process_request<A, const N: usize, const F: usize>(
                     connection_id,
                     &WebEvent::ValveState(valve_state.get()),
                 )
-                .await;
+                .await?;
             }
             WebRequestPayload::WaterMeterCommand(command) => {
                 wm_command.send(*command).await;
@@ -357,7 +365,7 @@ async fn process_request<A, const N: usize, const F: usize>(
                     connection_id,
                     &WebEvent::WaterMeterState(water_meter_state.get()),
                 )
-                .await;
+                .await?;
             }
             WebRequestPayload::BatteryStateRequest => {
                 web_send_single::<A, N, F>(
@@ -365,13 +373,16 @@ async fn process_request<A, const N: usize, const F: usize>(
                     connection_id,
                     &WebEvent::BatteryState(battery_state.get()),
                 )
-                .await;
+                .await?;
             }
             WebRequestPayload::WifiStatusRequest => todo!(),
         }
     }
+
+    Ok(())
 }
 
+// TODO: Do not send data directly, but flag the requested data in the connections vector, and signal the sender
 async fn process_initial_response<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     connection_id: usize,
@@ -379,7 +390,8 @@ async fn process_initial_response<A, const N: usize, const F: usize>(
     valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
     water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
     battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) where
+) -> Result<(), EitherError<A::Error, postcard::Error>>
+where
     A: Acceptor,
 {
     let events = [
@@ -391,9 +403,11 @@ async fn process_initial_response<A, const N: usize, const F: usize>(
 
     for event in events {
         if role >= event.role() {
-            web_send_single::<A, N, F>(connections, connection_id, &event).await;
+            web_send_single::<A, N, F>(connections, connection_id, &event).await?;
         }
     }
+
+    Ok(())
 }
 
 fn authenticate(_username: &str, _password: &str) -> Option<Role> {
