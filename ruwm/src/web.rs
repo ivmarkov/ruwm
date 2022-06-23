@@ -35,15 +35,15 @@ pub struct SenderInfo<A: Acceptor> {
 
 #[derive(Debug, EnumSetType)]
 enum ResponseType {
-    Role,
     AuthFailed,
+    Role,
     WifiStatus,
     // WifiConf,
     // MqttStatus,
     // MqttConf,
     Valve,
-    Battery,
     WM,
+    Battery,
 }
 
 #[derive(Debug)]
@@ -167,35 +167,46 @@ where
             Either4::Fourth(_) => (EnumSet::only(ResponseType::Battery), false),
         };
 
-        for response_type in response_types {
-            let c_r = {
-                let mut connections = connections.lock();
+        for response_type in [
+            ResponseType::AuthFailed,
+            ResponseType::Role,
+            ResponseType::WifiStatus,
+            ResponseType::Valve,
+            ResponseType::Battery,
+            ResponseType::WM,
+        ]
+        // Important to first reply to auth requests which failed, then to role requests, and then to everything else
+        {
+            if response_types.contains(response_type) {
+                let c_r = {
+                    let mut connections = connections.lock();
 
-                let c_r = connections
-                    .iter()
-                    .filter(|si| !pending_only || si.pending_responses.contains(response_type))
-                    .map(|si| (si.id, si.role))
-                    .collect::<heapless::Vec<_, N>>();
+                    let c_r = connections
+                        .iter()
+                        .filter(|si| !pending_only || si.pending_responses.contains(response_type))
+                        .map(|si| (si.id, si.role))
+                        .collect::<heapless::Vec<_, N>>();
 
-                for connection in &mut *connections {
-                    connection.pending_responses.remove(response_type);
-                }
+                    for connection in &mut *connections {
+                        connection.pending_responses.remove(response_type);
+                    }
 
-                c_r
-            };
-
-            for (connection_id, role) in c_r {
-                let event = match response_type {
-                    ResponseType::Role => WebEvent::RoleState(role),
-                    ResponseType::AuthFailed => WebEvent::AuthenticationFailed,
-                    ResponseType::WifiStatus => todo!(),
-                    ResponseType::Valve => WebEvent::ValveState(valve_state.get()),
-                    ResponseType::Battery => WebEvent::BatteryState(battery_state.get()),
-                    ResponseType::WM => WebEvent::WaterMeterState(wm_state.get()),
+                    c_r
                 };
 
-                if event.role() >= role {
-                    web_send_single::<A, N, F>(connections, connection_id, &event).await?;
+                for (connection_id, role) in c_r {
+                    let event = match response_type {
+                        ResponseType::AuthFailed => WebEvent::AuthenticationFailed,
+                        ResponseType::Role => WebEvent::RoleState(role),
+                        ResponseType::WifiStatus => todo!(),
+                        ResponseType::Valve => WebEvent::ValveState(valve_state.get()),
+                        ResponseType::WM => WebEvent::WaterMeterState(wm_state.get()),
+                        ResponseType::Battery => WebEvent::BatteryState(battery_state.get()),
+                    };
+
+                    if event.role() >= role {
+                        web_send_single::<A, N, F>(connections, connection_id, &event).await?;
+                    }
                 }
             }
         }
