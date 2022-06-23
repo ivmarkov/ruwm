@@ -297,19 +297,14 @@ where
     }
 
     pub async fn web_send<const F: usize>(&'static self) {
-        self.web.send::<F>().await
+        self.web
+            .send::<F>(self.valve.state(), self.wm.state(), self.battery.state())
+            .await
     }
 
     pub async fn web_receive<const F: usize>(&'static self, acceptor: A) {
         self.web
-            .receive::<F>(
-                acceptor,
-                self.valve.state(),
-                self.wm.state(),
-                self.battery.state(),
-                self.valve.command_sink(),
-                self.wm.command_sink(),
-            )
+            .receive::<F>(acceptor, self.valve.command_sink(), self.wm.command_sink())
             .await
     }
 

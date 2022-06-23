@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use core::mem;
 
+use enumset::{EnumSet, EnumSetType};
 use log::info;
 use postcard::{from_bytes, to_slice};
 
@@ -8,7 +9,7 @@ use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::errors::wrap::{EitherError, WrapError};
 use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asynch::select::{select, select3, select_all_hvec, Either, Either3};
+use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::role::Role;
 use embedded_svc::ws::asynch::{Acceptor, Receiver as _, Sender as _};
@@ -17,7 +18,7 @@ use embedded_svc::ws::FrameType;
 use crate::battery::BatteryState;
 use crate::state_snapshot::StateSnapshot;
 use crate::storage::Storage;
-use crate::utils::as_static_receiver;
+use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -28,7 +29,21 @@ pub type ConnectionId = usize;
 pub struct SenderInfo<A: Acceptor> {
     id: ConnectionId,
     role: Role,
+    pending_responses: EnumSet<ResponseType>,
     sender: Option<A::Sender>,
+}
+
+#[derive(Debug, EnumSetType)]
+enum ResponseType {
+    Role,
+    AuthFailed,
+    WifiStatus,
+    // WifiConf,
+    // MqttStatus,
+    // MqttConf,
+    Valve,
+    Battery,
+    WM,
 }
 
 #[derive(Debug)]
@@ -45,6 +60,7 @@ where
     A: Acceptor,
 {
     connections: M::Mutex<heapless::Vec<SenderInfo<A>, N>>,
+    pending_responses_signal: M::Signal<()>,
     valve_state_signal: M::Signal<Option<ValveState>>,
     wm_state_signal: M::Signal<WaterMeterState>,
     wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
@@ -59,6 +75,7 @@ where
     pub fn new() -> Self {
         Self {
             connections: M::Mutex::new(heapless::Vec::<_, N>::new()),
+            pending_responses_signal: M::Signal::new(),
             valve_state_signal: M::Signal::new(),
             wm_state_signal: M::Signal::new(),
             wm_stats_state_signal: M::Signal::new(),
@@ -84,12 +101,21 @@ where
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn send<const F: usize>(&'static self) {
+    pub async fn send<const F: usize>(
+        &'static self,
+        valve_state: &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+        wm_state: &'static StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+        battery_state: &'static StateSnapshot<impl Mutex<Data = BatteryState>>,
+    ) {
         send::<A, N, F>(
             &self.connections,
+            as_static_receiver(&self.pending_responses_signal),
             as_static_receiver(&self.valve_state_signal),
             as_static_receiver(&self.wm_state_signal),
             as_static_receiver(&self.battery_state_signal),
+            valve_state,
+            wm_state,
+            battery_state,
         )
         .await
         .unwrap(); // TODO
@@ -98,18 +124,13 @@ where
     pub async fn receive<const F: usize>(
         &'static self,
         ws_acceptor: A,
-        valve_state: &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-        wm_state: &'static StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-        battery_state: &'static StateSnapshot<impl Mutex<Data = BatteryState>>,
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
     ) {
         receive::<A, N, F>(
             &self.connections,
             ws_acceptor,
-            valve_state,
-            wm_state,
-            battery_state,
+            as_static_sender(&self.pending_responses_signal),
             valve_command,
             wm_command,
         )
@@ -120,41 +141,71 @@ where
 
 pub async fn send<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    mut pending_responses_source: impl Receiver<Data = ()>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut battery_state_source: impl Receiver<Data = BatteryState>,
+    valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    wm_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
 ) -> Result<(), WrapError<impl Debug>>
 where
     A: Acceptor,
 {
     loop {
+        let pending = pending_responses_source.recv();
         let valve = valve_state_source.recv();
         let wm = wm_state_source.recv();
         let battery = battery_state_source.recv();
 
-        //pin_mut!(receiver, valve, wm, battery);
+        //pin_mut!(pending, valve, wm, battery);
 
-        match select3(valve, wm, battery).await {
-            Either3::First(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::ValveState(state)).await?
-            }
-            Either3::Second(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::WaterMeterState(state)).await?
-            }
-            Either3::Third(state) => {
-                web_send_all::<A, N, F>(connections, &WebEvent::BatteryState(state)).await?
+        let (response_types, pending_only) = match select4(pending, valve, wm, battery).await {
+            Either4::First(_) => (EnumSet::all(), true),
+            Either4::Second(_) => (EnumSet::only(ResponseType::Valve), false),
+            Either4::Third(_) => (EnumSet::only(ResponseType::WM), false),
+            Either4::Fourth(_) => (EnumSet::only(ResponseType::Battery), false),
+        };
+
+        for response_type in response_types {
+            let c_r = {
+                let mut connections = connections.lock();
+
+                let c_r = connections
+                    .iter()
+                    .filter(|si| !pending_only || si.pending_responses.contains(response_type))
+                    .map(|si| (si.id, si.role))
+                    .collect::<heapless::Vec<_, N>>();
+
+                for connection in &mut *connections {
+                    connection.pending_responses.remove(response_type);
+                }
+
+                c_r
+            };
+
+            for (connection_id, role) in c_r {
+                let event = match response_type {
+                    ResponseType::Role => WebEvent::RoleState(role),
+                    ResponseType::AuthFailed => WebEvent::AuthenticationFailed,
+                    ResponseType::WifiStatus => todo!(),
+                    ResponseType::Valve => WebEvent::ValveState(valve_state.get()),
+                    ResponseType::Battery => WebEvent::BatteryState(battery_state.get()),
+                    ResponseType::WM => WebEvent::WaterMeterState(wm_state.get()),
+                };
+
+                if event.role() >= role {
+                    web_send_single::<A, N, F>(connections, connection_id, &event).await?;
+                }
             }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn receive<A, const N: usize, const F: usize>(
     connections: &'static impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     mut ws_acceptor: A,
-    valve_state: &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    wm_state: &'static StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-    battery_state: &'static StateSnapshot<impl Mutex<Data = BatteryState>>,
+    mut pending_responses_sink: impl Sender<Data = ()>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
     mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
 ) -> Result<(), WrapError<impl Debug>>
@@ -182,7 +233,7 @@ where
                 ws_acceptor
                     .accept()
                     .await
-                    .map_err(EitherError::E2)?
+                    .map_err(EitherError::E1)?
                     .map_or_else(
                         || SelectResult::Close,
                         |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
@@ -221,22 +272,14 @@ where
                     .push(SenderInfo {
                         id,
                         role,
+                        pending_responses: EnumSet::all(),
                         sender: Some(new_sender),
                     })
                     .unwrap_or_else(|_| panic!());
 
                 ws_receivers.push(new_receiver).unwrap_or_else(|_| panic!());
 
-                process_initial_response::<A, N, F>(
-                    connections,
-                    id,
-                    role,
-                    valve_state,
-                    wm_state,
-                    battery_state,
-                )
-                .await
-                .map_err(EitherError::E1)?;
+                pending_responses_sink.send(()).await;
             }
             SelectResult::Close => {
                 info!("[WS CLOSE]");
@@ -256,14 +299,11 @@ where
                             id,
                             role,
                             request,
+                            &mut pending_responses_sink,
                             &mut valve_command_sink,
                             &mut wm_command_sink,
-                            valve_state,
-                            wm_state,
-                            battery_state,
                         )
-                        .await
-                        .map_err(EitherError::E1)?;
+                        .await;
                     }
                     WebFrame::Control => (),
                     WebFrame::Close | WebFrame::Unknown => {
@@ -278,20 +318,16 @@ where
     Ok(())
 }
 
-// TODO: Do not send data directly, but flag the requested data in the connections vector, and signal the sender
 #[allow(clippy::too_many_arguments)]
 async fn process_request<A, const N: usize, const F: usize>(
     connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
     connection_id: ConnectionId,
     role: Role,
     request: &WebRequest,
+    pending_responses_sink: &mut impl Sender<Data = ()>,
     valve_command: &mut impl Sender<Data = ValveCommand>,
     wm_command: &mut impl Sender<Data = WaterMeterCommand>,
-    valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-    battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) -> Result<(), EitherError<A::Error, postcard::Error>>
-where
+) where
     A: Acceptor,
 {
     let response = request.response(role);
@@ -299,140 +335,61 @@ where
 
     if accepted {
         match request.payload() {
-            WebRequestPayload::Authenticate(username, password) => {
-                if let Some(role) = authenticate(username, password) {
-                    info!("[WS] Authenticated; role: {}", role);
-
-                    connections
-                        .lock()
-                        .iter_mut()
-                        .find(|si| si.id == connection_id)
-                        .unwrap()
-                        .role = role;
-
-                    process_initial_response::<A, N, F>(
-                        connections,
-                        connection_id,
-                        role,
-                        valve_state,
-                        water_meter_state,
-                        battery_state,
-                    )
-                    .await?;
-                } else {
-                    info!("[WS] Authentication failed");
-
-                    web_send_single::<A, N, F>(
-                        connections,
-                        connection_id,
-                        &WebEvent::AuthenticationFailed,
-                    )
-                    .await?;
-                }
-            }
-            WebRequestPayload::Logout => {
-                connections
-                    .lock()
-                    .iter_mut()
-                    .find(|si| si.id == connection_id)
-                    .unwrap()
-                    .role = Role::None;
-
-                web_send_single::<A, N, F>(
-                    connections,
-                    connection_id,
-                    &WebEvent::RoleState(Role::None),
-                )
-                .await?;
-            }
             WebRequestPayload::ValveCommand(command) => {
                 valve_command.send(*command).await;
-            }
-            WebRequestPayload::ValveStateRequest => {
-                web_send_single::<A, N, F>(
-                    connections,
-                    connection_id,
-                    &WebEvent::ValveState(valve_state.get()),
-                )
-                .await?;
             }
             WebRequestPayload::WaterMeterCommand(command) => {
                 wm_command.send(*command).await;
             }
-            WebRequestPayload::WaterMeterStateRequest => {
-                web_send_single::<A, N, F>(
-                    connections,
-                    connection_id,
-                    &WebEvent::WaterMeterState(water_meter_state.get()),
-                )
-                .await?;
+            other => {
+                {
+                    let mut connections = connections.lock();
+
+                    let mut si = connections
+                        .iter_mut()
+                        .find(|si| si.id == connection_id)
+                        .unwrap();
+
+                    match other {
+                        WebRequestPayload::Authenticate(username, password) => {
+                            if let Some(role) = authenticate(username, password) {
+                                info!("[WS] Authenticated; role: {}", role);
+
+                                si.role = role;
+                                si.pending_responses.insert(ResponseType::Role);
+                            } else {
+                                info!("[WS] Authentication failed");
+
+                                si.role = Role::None;
+                                si.pending_responses.insert(ResponseType::AuthFailed);
+                            }
+                        }
+                        WebRequestPayload::Logout => {
+                            si.role = Role::None;
+                            si.pending_responses.insert(ResponseType::Role);
+                        }
+                        WebRequestPayload::ValveStateRequest => {
+                            si.pending_responses.insert(ResponseType::Valve);
+                        }
+                        WebRequestPayload::WaterMeterStateRequest => {
+                            si.pending_responses.insert(ResponseType::WM);
+                        }
+                        WebRequestPayload::BatteryStateRequest => {
+                            si.pending_responses.insert(ResponseType::Battery);
+                        }
+                        WebRequestPayload::WifiStatusRequest => todo!(),
+                        _ => unreachable!(),
+                    }
+                }
+
+                pending_responses_sink.send(()).await;
             }
-            WebRequestPayload::BatteryStateRequest => {
-                web_send_single::<A, N, F>(
-                    connections,
-                    connection_id,
-                    &WebEvent::BatteryState(battery_state.get()),
-                )
-                .await?;
-            }
-            WebRequestPayload::WifiStatusRequest => todo!(),
         }
     }
-
-    Ok(())
-}
-
-// TODO: Do not send data directly, but flag the requested data in the connections vector, and signal the sender
-async fn process_initial_response<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
-    connection_id: usize,
-    role: Role,
-    valve_state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
-    water_meter_state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
-    battery_state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-) -> Result<(), EitherError<A::Error, postcard::Error>>
-where
-    A: Acceptor,
-{
-    let events = [
-        WebEvent::RoleState(role),
-        WebEvent::ValveState(valve_state.get()),
-        WebEvent::WaterMeterState(water_meter_state.get()),
-        WebEvent::BatteryState(battery_state.get()),
-    ];
-
-    for event in events {
-        if role >= event.role() {
-            web_send_single::<A, N, F>(connections, connection_id, &event).await?;
-        }
-    }
-
-    Ok(())
 }
 
 fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
-}
-
-async fn web_send_all<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
-    event: &WebEvent,
-) -> Result<(), EitherError<A::Error, postcard::Error>>
-where
-    A: Acceptor,
-{
-    let connection_ids = connections
-        .lock()
-        .iter()
-        .filter(|si| si.role >= event.role())
-        .map(|si| si.id)
-        .collect::<heapless::Vec<_, N>>();
-
-    for connection_id in connection_ids {
-        web_send_single::<A, N, F>(connections, connection_id, event).await?;
-    }
-
-    Ok(())
 }
 
 async fn web_send_single<A, const N: usize, const F: usize>(
