@@ -13,43 +13,26 @@ use crate::{
     water_meter::WaterMeterState,
 };
 
-pub struct Summary {
-    valve_state: Option<Option<ValveState>>,
-    water_meter_state: Option<WaterMeterState>,
-    battery_state: Option<BatteryState>,
-}
+pub struct Summary;
 
 impl Summary {
-    pub fn new() -> Self {
-        Self {
-            valve_state: None,
-            water_meter_state: None,
-            battery_state: None,
-        }
-    }
-
     pub fn draw<D>(
-        &mut self,
         target: &mut D,
-        valve_state: Option<ValveState>,
-        water_meter_state: WaterMeterState,
-        battery_state: BatteryState,
+        valve_state: Option<&Option<ValveState>>,
+        water_meter_state: Option<&WaterMeterState>,
+        battery_state: Option<&BatteryState>,
     ) -> Result<(), D::Error>
     where
         D: DrawTarget,
         D::Color: RgbColor,
     {
-        if self.valve_state != Some(valve_state) {
-            self.valve_state = Some(valve_state);
-
+        if let Some(valve_state) = valve_state {
             // TODO
         }
 
-        if self.water_meter_state != Some(water_meter_state) {
-            self.water_meter_state = Some(water_meter_state);
-
+        if let Some(water_meter_state) = water_meter_state {
             let wm_shape = shapes::WaterMeterClassic::<8>::new(
-                self.water_meter_state.map(|wm| wm.edges_count),
+                water_meter_state.map(|wm| wm.edges_count),
                 1,
                 true,
             );
@@ -62,9 +45,7 @@ impl Summary {
             wm_shape.draw(&mut target)?;
         }
 
-        if self.battery_state != Some(battery_state) {
-            self.battery_state = Some(battery_state);
-
+        if let Some(battery_state) = battery_state {
             let percentage = battery_state.voltage.map(|voltage| {
                 (voltage as u32 * 100
                     / (BatteryState::MAX_VOLTAGE as u32 + BatteryState::LOW_VOLTAGE as u32))

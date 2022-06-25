@@ -2,12 +2,12 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
@@ -30,28 +30,23 @@ pub enum ValveCommand {
     Close,
 }
 
-pub struct Valve<S, Q>
-where
-    S: StateCell<Data = Option<ValveState>>,
-    Q: SendSyncSignalFamily,
-{
+pub struct Valve<S> {
     state: S,
-    command_signal: Q::Signal<ValveCommand>,
-    spin_command_signal: Q::Signal<ValveCommand>,
-    spin_finished_signal: Q::Signal<()>,
+    command_signal: AtomicSignal<ValveCommand>,
+    spin_command_signal: AtomicSignal<ValveCommand>,
+    spin_finished_signal: AtomicSignal<()>,
 }
 
-impl<S, Q> Valve<S, Q>
+impl<S> Valve<S>
 where
     S: StateCell<Data = Option<ValveState>>,
-    Q: SendSyncSignalFamily,
 {
     pub fn new(state: S) -> Self {
         Self {
             state,
-            command_signal: Q::Signal::new(),
-            spin_command_signal: Q::Signal::new(),
-            spin_finished_signal: Q::Signal::new(),
+            command_signal: AtomicSignal::new(),
+            spin_command_signal: AtomicSignal::new(),
+            spin_finished_signal: AtomicSignal::new(),
         }
     }
 

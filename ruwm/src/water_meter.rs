@@ -1,10 +1,11 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::signal::asynch::Signal;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
@@ -25,24 +26,19 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<S, Q>
-where
-    S: StateCell<Data = WaterMeterState>,
-    Q: SendSyncSignalFamily,
-{
+pub struct WaterMeter<S> {
     state: S,
-    command_signal: Q::Signal<WaterMeterCommand>,
+    command_signal: AtomicSignal<WaterMeterCommand>,
 }
 
-impl<S, Q> WaterMeter<S, Q>
+impl<S> WaterMeter<S>
 where
     S: StateCell<Data = WaterMeterState>,
-    Q: SendSyncSignalFamily,
 {
     pub fn new(state: S) -> Self {
         Self {
             state,
-            command_signal: Q::Signal::new(),
+            command_signal: AtomicSignal::new(),
         }
     }
 

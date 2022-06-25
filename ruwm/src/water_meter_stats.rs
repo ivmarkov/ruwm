@@ -1,11 +1,12 @@
 use core::mem;
 use core::time::Duration;
 
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::channel::asynch::Sender;
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::signal::asynch::Signal;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::select;
@@ -141,24 +142,19 @@ impl WaterMeterStatsState {
     }
 }
 
-pub struct WaterMeterStats<S, Q>
-where
-    S: StateCell<Data = WaterMeterStatsState>,
-    Q: SendSyncSignalFamily,
-{
+pub struct WaterMeterStats<S> {
     state: S,
-    wm_state_signal: Q::Signal<WaterMeterState>,
+    wm_state_signal: AtomicSignal<WaterMeterState>,
 }
 
-impl<S, Q> WaterMeterStats<S, Q>
+impl<S> WaterMeterStats<S>
 where
     S: StateCell<Data = WaterMeterStatsState>,
-    Q: SendSyncSignalFamily,
 {
     pub fn new(state: S) -> Self {
         Self {
             state,
-            wm_state_signal: Q::Signal::new(),
+            wm_state_signal: AtomicSignal::new(),
         }
     }
 

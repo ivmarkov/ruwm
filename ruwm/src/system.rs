@@ -25,9 +25,7 @@ use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::pulse_counter::PulseCounter;
 use crate::screen::{FlushableDrawTarget, Screen};
-use crate::state::{
-    CachingStateCell, MemoryStateCell, STMemoryStateCell, STMutRefStateCell, StateCellRead,
-};
+use crate::state::{CachingStateCell, MemoryStateCell, STMemoryStateCell, STMutRefStateCell};
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
@@ -43,63 +41,61 @@ pub struct SlowMem {
     wm_stats: WaterMeterStatsState,
 }
 
+type ValveStateCell<M: MutexFamily> = CachingStateCell<
+    M::Mutex<(
+        STMemoryStateCell<Option<Option<ValveState>>>,
+        STMutRefStateCell<Option<ValveState>>,
+    )>,
+>;
+type WaterMeterStateCell<M: MutexFamily> = CachingStateCell<
+    M::Mutex<(
+        STMemoryStateCell<Option<WaterMeterState>>,
+        STMutRefStateCell<WaterMeterState>,
+    )>,
+>;
+type WaterMeterStatsStateCell<M: MutexFamily> = CachingStateCell<
+    M::Mutex<(
+        STMemoryStateCell<Option<WaterMeterStatsState>>,
+        STMutRefStateCell<WaterMeterStatsState>,
+    )>,
+>;
+type BatteryStateCell<M: MutexFamily> = MemoryStateCell<M::Mutex<BatteryState>>;
+type WifiStateCell<M: MutexFamily> = MemoryStateCell<M::Mutex<Option<Status>>>;
+
 pub struct System<Q, M, A, const N: usize>
 where
     Q: SendSyncSignalFamily,
     M: MutexFamily,
     A: Acceptor,
 {
-    valve: Valve<
-        CachingStateCell<
-            M::Mutex<(
-                STMemoryStateCell<Option<Option<ValveState>>>,
-                STMutRefStateCell<Option<ValveState>>,
-            )>,
-        >,
-        Q,
-    >,
-    wm: WaterMeter<
-        CachingStateCell<
-            M::Mutex<(
-                STMemoryStateCell<Option<WaterMeterState>>,
-                STMutRefStateCell<WaterMeterState>,
-            )>,
-        >,
-        Q,
-    >,
-    wm_stats: WaterMeterStats<
-        CachingStateCell<
-            M::Mutex<(
-                STMemoryStateCell<Option<WaterMeterStatsState>>,
-                STMutRefStateCell<WaterMeterStatsState>,
-            )>,
-        >,
-        Q,
-    >,
-    battery: Battery<MemoryStateCell<M::Mutex<BatteryState>>>,
+    valve: Valve<ValveStateCell<M>>,
+    wm: WaterMeter<WaterMeterStateCell<M>>,
+    wm_stats: WaterMeterStats<WaterMeterStatsStateCell<M>>,
+    battery: Battery<BatteryStateCell<M>>,
 
     button1: NotifSignal,
     button2: NotifSignal,
     button3: NotifSignal,
 
-    emergency: Emergency<Q>,
-    keepalive: Keepalive<Q>,
+    emergency: Emergency,
+    keepalive: Keepalive,
 
     remaining_time: Q::Signal<RemainingTime>,
 
     quit: NotifSignal,
 
-    screen: Screen<Q>,
+    screen: Screen<M>,
 
     wifi: Wifi<MemoryStateCell<M::Mutex<Option<Status>>>, Q>,
-    web: Web<M, Q, A, N>,
-    mqtt: Mqtt<Q>,
+    web: Web<M, A, N>,
+    mqtt: Mqtt,
 }
 
 impl<Q, M, A, const N: usize> System<Q, M, A, N>
 where
     Q: SendSyncSignalFamily,
     M: MutexFamily,
+    //M::Mutex: Send + Sync + 'static,
     A: Acceptor,
 {
     pub fn new(slow_mem: &'static mut SlowMem) -> Self {
@@ -116,7 +112,7 @@ where
                 STMemoryStateCell::new(None),
                 STMutRefStateCell::new(&mut slow_mem.wm_stats),
             )),
-            battery: Battery::new(MemoryStateCell::new(BatteryState::new())),
+            battery: Battery::new(MemoryStateCell::new(Default::default())),
             button1: NotifSignal::new(),
             button2: NotifSignal::new(),
             button3: NotifSignal::new(),
@@ -267,7 +263,14 @@ where
     }
 
     pub async fn emergency(&'static self) {
-        self.emergency.process(self.valve.command_sink()).await // TODO: Screen
+        self.emergency
+            .process(
+                self.valve.command_sink(),
+                self.valve.state(),
+                self.wm.state(),
+                self.battery.state(),
+            )
+            .await // TODO: Screen
     }
 
     pub async fn keepalive(&'static self, timer: impl OnceTimer, system_time: impl SystemTime) {
@@ -299,9 +302,10 @@ where
     pub async fn screen(&'static self) {
         self.screen
             .process(
-                self.valve.state().get(),
-                self.wm.state().get(),
-                self.battery.state().get(),
+                self.valve.state(),
+                self.wm.state(),
+                self.wm_stats.state(),
+                self.battery.state(),
                 event_logger::sink("SCREEN"),
             )
             .await

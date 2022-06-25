@@ -1,10 +1,11 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::signal::asynch::Signal;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::channel::adapt::adapt;
@@ -22,20 +23,14 @@ pub enum RemainingTime {
     Duration(Duration),
 }
 
-pub struct Keepalive<S>
-where
-    S: SendSyncSignalFamily,
-{
-    event_signal: S::Signal<()>,
+pub struct Keepalive {
+    event_signal: AtomicSignal<()>,
 }
 
-impl<S> Keepalive<S>
-where
-    S: SendSyncSignalFamily,
-{
+impl Keepalive {
     pub fn new() -> Self {
         Self {
-            event_signal: S::Signal::new(),
+            event_signal: AtomicSignal::new(),
         }
     }
 

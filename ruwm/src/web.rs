@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use core::mem;
 
+use embedded_svc::utils::asynch::channel::adapt;
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use enumset::{EnumSet, EnumSetType};
 use log::info;
 use postcard::{from_bytes, to_slice};
@@ -8,7 +10,6 @@ use postcard::{from_bytes, to_slice};
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::errors::wrap::{EitherError, WrapError};
 use embedded_svc::mutex::{Mutex, MutexFamily};
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::role::Role;
@@ -20,7 +21,6 @@ use crate::state::StateCellRead;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
-use crate::water_meter_stats::WaterMeterStatsState;
 use crate::web_dto::*;
 
 pub type ConnectionId = usize;
@@ -53,71 +53,69 @@ enum WebFrame {
     Unknown,
 }
 
-pub struct Web<M, Q, A, const N: usize>
+pub struct Web<M, A, const N: usize>
 where
     M: MutexFamily,
-    Q: SendSyncSignalFamily,
     A: Acceptor,
 {
     connections: M::Mutex<heapless::Vec<SenderInfo<A>, N>>,
-    pending_responses_signal: Q::Signal<()>,
-    valve_state_signal: Q::Signal<Option<ValveState>>,
-    wm_state_signal: Q::Signal<WaterMeterState>,
-    wm_stats_state_signal: Q::Signal<WaterMeterStatsState>,
-    battery_state_signal: Q::Signal<BatteryState>,
+    pending_responses_signal: AtomicSignal<()>,
+    valve_state_signal: AtomicSignal<()>,
+    wm_state_signal: AtomicSignal<()>,
+    wm_stats_state_signal: AtomicSignal<()>,
+    battery_state_signal: AtomicSignal<()>,
 }
 
-impl<M, Q, A, const N: usize> Web<M, Q, A, N>
+impl<M, A, const N: usize> Web<M, A, N>
 where
     M: MutexFamily,
-    Q: SendSyncSignalFamily,
     A: Acceptor,
 {
     pub fn new() -> Self {
         Self {
             connections: M::Mutex::new(heapless::Vec::<_, N>::new()),
-            pending_responses_signal: Q::Signal::new(),
-            valve_state_signal: Q::Signal::new(),
-            wm_state_signal: Q::Signal::new(),
-            wm_stats_state_signal: Q::Signal::new(),
-            battery_state_signal: Q::Signal::new(),
+            pending_responses_signal: AtomicSignal::new(),
+            valve_state_signal: AtomicSignal::new(),
+            wm_state_signal: AtomicSignal::new(),
+            wm_stats_state_signal: AtomicSignal::new(),
+            battery_state_signal: AtomicSignal::new(),
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.wm_state_signal)
     }
 
-    pub fn wm_stats_state_sink(
-        &'static self,
-    ) -> impl Sender<Data = WaterMeterStatsState> + 'static {
+    pub fn wm_stats_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.wm_stats_state_signal)
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn send<const F: usize, V, W, B>(
+    pub async fn send<const F: usize>(
         &'static self,
-        valve_state: &'static V,
-        wm_state: &'static W,
-        battery_state: &'static B,
-    ) where
-        V: StateCellRead<Data = Option<ValveState>>,
-        W: StateCellRead<Data = WaterMeterState>,
-        B: StateCellRead<Data = BatteryState>,
-    {
+        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
+    ) {
         send::<A, N, F>(
             &self.connections,
             as_static_receiver(&self.pending_responses_signal),
-            as_static_receiver(&self.valve_state_signal),
-            as_static_receiver(&self.wm_state_signal),
-            as_static_receiver(&self.battery_state_signal),
+            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+                Some(valve_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+                Some(wm_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+                Some(battery_state.get())
+            }),
             valve_state,
             wm_state,
             battery_state,

@@ -5,23 +5,15 @@ use crate::{
     screen::shapes::{self, BatteryChargedText},
 };
 
-pub struct Battery {
-    state: Option<BatteryState>,
-}
+pub struct Battery;
 
 impl Battery {
-    pub fn new() -> Self {
-        Self { state: None }
-    }
-
-    pub fn draw<D>(&mut self, target: &mut D, state: BatteryState) -> Result<(), D::Error>
+    pub fn draw<D>(target: &mut D, state: Option<&BatteryState>) -> Result<(), D::Error>
     where
         D: DrawTarget,
         D::Color: RgbColor,
     {
-        if self.state != Some(state) {
-            self.state = Some(state);
-
+        if let Some(state) = state {
             let percentage = state.voltage.map(|voltage| {
                 (voltage * 100 / (BatteryState::MAX_VOLTAGE + BatteryState::LOW_VOLTAGE)) as u8
             });

@@ -1,6 +1,7 @@
 use core::str::{self, FromStr};
 use core::time::Duration;
 
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 use log::{error, info};
 
 use serde::{Deserialize, Serialize};
@@ -12,13 +13,13 @@ use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
-use embedded_svc::utils::asynch::channel::adapt::merge;
+use embedded_svc::utils::asynch::channel::adapt::{self, merge};
 use embedded_svc::utils::asynch::select::{select4, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
+use crate::state::StateCell;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
@@ -33,38 +34,32 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub struct Mqtt<S>
-where
-    S: SendSyncSignalFamily,
-{
-    conn_signal: S::Signal<bool>,
-    valve_state_signal: S::Signal<Option<ValveState>>,
-    wm_state_signal: S::Signal<WaterMeterState>,
-    battery_state_signal: S::Signal<BatteryState>,
+pub struct Mqtt {
+    conn_signal: AtomicSignal<bool>,
+    valve_state_signal: AtomicSignal<()>,
+    wm_state_signal: AtomicSignal<()>,
+    battery_state_signal: AtomicSignal<()>,
 }
 
-impl<S> Mqtt<S>
-where
-    S: SendSyncSignalFamily,
-{
+impl Mqtt {
     pub fn new() -> Self {
         Self {
-            conn_signal: S::Signal::new(),
-            valve_state_signal: S::Signal::new(),
-            wm_state_signal: S::Signal::new(),
-            battery_state_signal: S::Signal::new(),
+            conn_signal: AtomicSignal::new(),
+            valve_state_signal: AtomicSignal::new(),
+            wm_state_signal: AtomicSignal::new(),
+            battery_state_signal: AtomicSignal::new(),
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.wm_state_signal)
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.battery_state_signal)
     }
 
@@ -72,15 +67,24 @@ where
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
+        valve_state: &(impl StateCell<Data = Option<ValveState>> + Sync),
+        wm_state: &(impl StateCell<Data = WaterMeterState> + Sync),
+        battery_state: &(impl StateCell<Data = BatteryState> + Sync),
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) {
         send::<_, L>(
             topic_prefix,
             mqtt,
             as_static_receiver(&self.conn_signal),
-            as_static_receiver(&self.valve_state_signal),
-            as_static_receiver(&self.wm_state_signal),
-            as_static_receiver(&self.battery_state_signal),
+            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+                Some(valve_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+                Some(wm_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+                Some(battery_state.get())
+            }),
             pub_sink,
         )
         .await

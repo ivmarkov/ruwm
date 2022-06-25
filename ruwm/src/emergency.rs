@@ -1,51 +1,59 @@
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::select::{select3, Either3};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
+use embedded_svc::utils::asynch::signal::AtomicSignal;
 
 use crate::battery::BatteryState;
+use crate::state::StateCellRead;
 use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
-pub struct Emergency<S>
-where
-    S: SendSyncSignalFamily,
-{
-    valve_state_signal: S::Signal<Option<ValveState>>,
-    wm_state_signal: S::Signal<WaterMeterState>,
-    battery_state_signal: S::Signal<BatteryState>,
+pub struct Emergency {
+    valve_state_signal: AtomicSignal<()>,
+    wm_state_signal: AtomicSignal<()>,
+    battery_state_signal: AtomicSignal<()>,
 }
 
-impl<S> Emergency<S>
-where
-    S: SendSyncSignalFamily,
-{
+impl Emergency {
     pub fn new() -> Self {
         Self {
-            valve_state_signal: S::Signal::new(),
-            wm_state_signal: S::Signal::new(),
-            battery_state_signal: S::Signal::new(),
+            valve_state_signal: AtomicSignal::new(),
+            wm_state_signal: AtomicSignal::new(),
+            battery_state_signal: AtomicSignal::new(),
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = Option<ValveState>> + 'static {
+    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.valve_state_signal)
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = WaterMeterState> + 'static {
+    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.wm_state_signal)
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = BatteryState> + 'static {
+    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn process(&'static self, valve_command: impl Sender<Data = ValveCommand>) {
+    pub async fn process(
+        &'static self,
+        valve_command: impl Sender<Data = ValveCommand>,
+        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
+    ) {
         process(
-            as_static_receiver(&self.valve_state_signal),
-            as_static_receiver(&self.wm_state_signal),
-            as_static_receiver(&self.battery_state_signal),
+            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+                Some(valve_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+                Some(wm_state.get())
+            }),
+            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+                Some(battery_state.get())
+            }),
             valve_command,
         )
         .await
