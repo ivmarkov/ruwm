@@ -7,10 +7,9 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::asynch::Sender;
-use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::timer::asynch::OnceTimer;
 
-use crate::state_snapshot::StateSnapshot;
+use crate::state::{update_with, StateCell, StateCellRead};
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
@@ -25,24 +24,19 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub struct Battery<M>
-where
-    M: MutexFamily,
-{
-    state: StateSnapshot<M::Mutex<BatteryState>>,
+pub struct Battery<S> {
+    state: S,
 }
 
-impl<M> Battery<M>
+impl<S> Battery<S>
 where
-    M: MutexFamily,
+    S: StateCell<Data = BatteryState>,
 {
-    pub fn new() -> Self {
-        Self {
-            state: StateSnapshot::new(),
-        }
+    pub fn new(state: S) -> Self {
+        Self { state }
     }
 
-    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = BatteryState>> {
+    pub fn state(&self) -> &impl StateCellRead<Data = BatteryState> {
         &self.state
     }
 
@@ -52,7 +46,7 @@ where
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
         power_pin: impl InputPin,
-        state_sink: impl Sender<Data = BatteryState>,
+        state_sink: impl Sender<Data = ()>,
     ) where
         BP: adc::Channel<ADC>,
     {
@@ -73,8 +67,8 @@ pub async fn process<ADC, BP>(
     _one_shot: impl adc::OneShot<ADC, u16, BP>,
     _battery_pin: BP,
     power_pin: impl InputPin,
-    state: &StateSnapshot<impl Mutex<Data = BatteryState>>,
-    mut state_sink: impl Sender<Data = BatteryState>,
+    state: &impl StateCell<Data = BatteryState>,
+    mut state_sink: impl Sender<Data = ()>,
 ) where
     BP: adc::Channel<ADC>,
 {
@@ -90,8 +84,11 @@ pub async fn process<ADC, BP>(
 
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
-        state
-            .update_with(|_state| BatteryState { voltage, powered }, &mut state_sink)
-            .await;
+        update_with(
+            state,
+            |_state| BatteryState { voltage, powered },
+            &mut state_sink,
+        )
+        .await;
     }
 }

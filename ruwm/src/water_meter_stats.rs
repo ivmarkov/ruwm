@@ -5,15 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::channel::asynch::Sender;
-use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::select;
 use embedded_svc::utils::asynch::select::Either;
 
-use crate::state_snapshot::StateSnapshot;
-use crate::storage::*;
+use crate::state::*;
 use crate::utils::as_static_receiver;
 use crate::water_meter::WaterMeterState;
 
@@ -143,26 +141,28 @@ impl WaterMeterStatsState {
     }
 }
 
-pub struct WaterMeterStats<M>
+pub struct WaterMeterStats<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = WaterMeterStatsState>,
+    Q: SendSyncSignalFamily,
 {
-    state: StateSnapshot<M::Mutex<WaterMeterStatsState>>,
-    wm_state_signal: M::Signal<WaterMeterState>,
+    state: S,
+    wm_state_signal: Q::Signal<WaterMeterState>,
 }
 
-impl<M> WaterMeterStats<M>
+impl<S, Q> WaterMeterStats<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = WaterMeterStatsState>,
+    Q: SendSyncSignalFamily,
 {
-    pub fn new() -> Self {
+    pub fn new(state: S) -> Self {
         Self {
-            state: StateSnapshot::new(),
-            wm_state_signal: M::Signal::new(),
+            state,
+            wm_state_signal: Q::Signal::new(),
         }
     }
 
-    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>> {
+    pub fn state(&self) -> &impl StateCellRead<Data = WaterMeterStatsState> {
         &self.state
     }
 
@@ -170,7 +170,7 @@ where
         &'static self,
         timer: impl OnceTimer,
         sys_time: impl SystemTime,
-        state_sink: impl Sender<Data = WaterMeterStatsState>,
+        state_sink: impl Sender<Data = ()>,
     ) {
         process(
             timer,
@@ -186,9 +186,9 @@ where
 pub async fn process(
     mut timer: impl OnceTimer,
     sys_time: impl SystemTime,
-    state: &StateSnapshot<impl Mutex<Data = WaterMeterStatsState>>,
+    state: &impl StateCell<Data = WaterMeterStatsState>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
-    mut state_sink: impl Sender<Data = WaterMeterStatsState>,
+    mut state_sink: impl Sender<Data = ()>,
 ) {
     loop {
         let wm_state = wm_state_source.recv();
@@ -203,17 +203,15 @@ pub async fn process(
             Either::Second(_) => state.get().most_recent.edges_count,
         };
 
-        state
-            .update_with(
-                |state| {
-                    let mut state = *state;
+        update_with(
+            state,
+            |mut state| {
+                state.update(edges_count, sys_time.now());
 
-                    state.update(edges_count, sys_time.now());
-
-                    state
-                },
-                &mut state_sink,
-            )
-            .await;
+                state
+            },
+            &mut state_sink,
+        )
+        .await;
     }
 }

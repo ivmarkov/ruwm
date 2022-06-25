@@ -12,7 +12,6 @@ use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
-use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::channel::adapt::merge;
 use embedded_svc::utils::asynch::select::{select4, Either4};
@@ -34,26 +33,26 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub struct Mqtt<M>
+pub struct Mqtt<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
-    conn_signal: M::Signal<bool>,
-    valve_state_signal: M::Signal<Option<ValveState>>,
-    wm_state_signal: M::Signal<WaterMeterState>,
-    battery_state_signal: M::Signal<BatteryState>,
+    conn_signal: S::Signal<bool>,
+    valve_state_signal: S::Signal<Option<ValveState>>,
+    wm_state_signal: S::Signal<WaterMeterState>,
+    battery_state_signal: S::Signal<BatteryState>,
 }
 
-impl<M> Mqtt<M>
+impl<S> Mqtt<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            conn_signal: M::Signal::new(),
-            valve_state_signal: M::Signal::new(),
-            wm_state_signal: M::Signal::new(),
-            battery_state_signal: M::Signal::new(),
+            conn_signal: S::Signal::new(),
+            valve_state_signal: S::Signal::new(),
+            wm_state_signal: S::Signal::new(),
+            battery_state_signal: S::Signal::new(),
         }
     }
 

@@ -7,14 +7,12 @@ use serde::{Deserialize, Serialize};
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
-use crate::state_snapshot::StateSnapshot;
-use crate::storage::Storage;
+use crate::state::{update, StateCell, StateCellRead};
 
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
@@ -32,30 +30,32 @@ pub enum ValveCommand {
     Close,
 }
 
-pub struct Valve<M>
+pub struct Valve<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = Option<ValveState>>,
+    Q: SendSyncSignalFamily,
 {
-    state: StateSnapshot<M::Mutex<Option<ValveState>>>,
-    command_signal: M::Signal<ValveCommand>,
-    spin_command_signal: M::Signal<ValveCommand>,
-    spin_finished_signal: M::Signal<()>,
+    state: S,
+    command_signal: Q::Signal<ValveCommand>,
+    spin_command_signal: Q::Signal<ValveCommand>,
+    spin_finished_signal: Q::Signal<()>,
 }
 
-impl<M> Valve<M>
+impl<S, Q> Valve<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = Option<ValveState>>,
+    Q: SendSyncSignalFamily,
 {
-    pub fn new() -> Self {
+    pub fn new(state: S) -> Self {
         Self {
-            state: StateSnapshot::new(),
-            command_signal: M::Signal::new(),
-            spin_command_signal: M::Signal::new(),
-            spin_finished_signal: M::Signal::new(),
+            state,
+            command_signal: Q::Signal::new(),
+            spin_command_signal: Q::Signal::new(),
+            spin_finished_signal: Q::Signal::new(),
         }
     }
 
-    pub fn state(&'static self) -> &'static StateSnapshot<impl Mutex<Data = Option<ValveState>>> {
+    pub fn state(&'static self) -> &'static impl StateCellRead<Data = Option<ValveState>> {
         &self.state
     }
 
@@ -81,7 +81,7 @@ where
         .await
     }
 
-    pub async fn process(&'static self, notif: impl Sender<Data = Option<ValveState>>) {
+    pub async fn process(&'static self, notif: impl Sender<Data = ()>) {
         process(
             &self.state,
             as_channel(&self.command_signal),
@@ -159,11 +159,11 @@ pub fn start_spin(
 }
 
 pub async fn process(
-    state: &StateSnapshot<impl Mutex<Data = Option<ValveState>>>,
+    state: &impl StateCell<Data = Option<ValveState>>,
     mut command_source: impl Receiver<Data = ValveCommand>,
     mut spin_finished_source: impl Receiver<Data = ()>,
     mut spin_command_sink: impl Sender<Data = ValveCommand>,
-    mut state_sink: impl Sender<Data = Option<ValveState>>,
+    mut state_sink: impl Sender<Data = ()>,
 ) {
     loop {
         let current_state = {
@@ -207,6 +207,6 @@ pub async fn process(
             }
         };
 
-        state.update(current_state, &mut state_sink).await;
+        update(state, current_state, &mut state_sink).await;
     }
 }

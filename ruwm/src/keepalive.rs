@@ -22,20 +22,20 @@ pub enum RemainingTime {
     Duration(Duration),
 }
 
-pub struct Keepalive<M>
+pub struct Keepalive<S>
 where
-    M: SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
-    event_signal: M::Signal<()>,
+    event_signal: S::Signal<()>,
 }
 
-impl<M> Keepalive<M>
+impl<S> Keepalive<S>
 where
-    M: SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            event_signal: M::Signal::new(),
+            event_signal: S::Signal::new(),
         }
     }
 

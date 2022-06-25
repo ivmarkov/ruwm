@@ -3,13 +3,13 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::mutex::Mutex;
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
-use crate::state_snapshot::StateSnapshot;
+use crate::state::{update, StateCell, StateCellRead};
 use crate::utils::as_static_receiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
@@ -17,26 +17,28 @@ pub enum WifiCommand {
     SetConfiguration(Configuration),
 }
 
-pub struct Wifi<M>
+pub struct Wifi<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = Option<Status>>,
+    Q: SendSyncSignalFamily,
 {
-    state: StateSnapshot<M::Mutex<Option<Status>>>,
-    command: M::Signal<WifiCommand>,
+    state: S,
+    command: Q::Signal<WifiCommand>,
 }
 
-impl<M> Wifi<M>
+impl<S, Q> Wifi<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = Option<Status>>,
+    Q: SendSyncSignalFamily,
 {
-    pub fn new() -> Self {
+    pub fn new(state: S) -> Self {
         Self {
-            state: StateSnapshot::new(),
-            command: M::Signal::new(),
+            state,
+            command: Q::Signal::new(),
         }
     }
 
-    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = Option<Status>>> {
+    pub fn state(&self) -> &impl StateCellRead<Data = Option<Status>> {
         &self.state
     }
 
@@ -48,7 +50,7 @@ where
         &'static self,
         wifi: impl WifiTrait,
         state_changed_source: impl Receiver<Data = ()>,
-        state_sink: impl Sender<Data = Option<Status>>,
+        state_sink: impl Sender<Data = ()>,
     ) {
         run(
             wifi,
@@ -63,10 +65,10 @@ where
 
 pub async fn run(
     mut wifi: impl WifiTrait,
-    state: &StateSnapshot<impl Mutex<Data = Option<Status>>>,
+    state: &impl StateCell<Data = Option<Status>>,
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
-    mut state_sink: impl Sender<Data = Option<Status>>,
+    mut state_sink: impl Sender<Data = ()>,
 ) {
     loop {
         let receiver = state_changed_source.recv();
@@ -76,7 +78,7 @@ pub async fn run(
 
         match select(receiver, command).await {
             Either::First(_) => {
-                state.update(Some(wifi.get_status()), &mut state_sink).await;
+                update(state, Some(wifi.get_status()), &mut state_sink).await;
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),

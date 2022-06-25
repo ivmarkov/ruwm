@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::unblocker::asynch::Unblocker;
 use embedded_svc::utils::asynch::channel::adapt::merge;
@@ -54,34 +53,34 @@ pub struct DrawRequest {
     battery: BatteryState,
 }
 
-pub struct Screen<M>
+pub struct Screen<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
-    button1_pressed_signal: M::Signal<()>,
-    button2_pressed_signal: M::Signal<()>,
-    button3_pressed_signal: M::Signal<()>,
-    valve_state_signal: M::Signal<Option<ValveState>>,
-    wm_state_signal: M::Signal<WaterMeterState>,
-    wm_stats_state_signal: M::Signal<WaterMeterStatsState>,
-    battery_state_signal: M::Signal<BatteryState>,
-    draw_request_signal: M::Signal<DrawRequest>,
+    button1_pressed_signal: S::Signal<()>,
+    button2_pressed_signal: S::Signal<()>,
+    button3_pressed_signal: S::Signal<()>,
+    valve_state_signal: S::Signal<Option<ValveState>>,
+    wm_state_signal: S::Signal<WaterMeterState>,
+    wm_stats_state_signal: S::Signal<WaterMeterStatsState>,
+    battery_state_signal: S::Signal<BatteryState>,
+    draw_request_signal: S::Signal<DrawRequest>,
 }
 
-impl<M> Screen<M>
+impl<S> Screen<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            button1_pressed_signal: M::Signal::new(),
-            button2_pressed_signal: M::Signal::new(),
-            button3_pressed_signal: M::Signal::new(),
-            valve_state_signal: M::Signal::new(),
-            wm_state_signal: M::Signal::new(),
-            wm_stats_state_signal: M::Signal::new(),
-            battery_state_signal: M::Signal::new(),
-            draw_request_signal: M::Signal::new(),
+            button1_pressed_signal: S::Signal::new(),
+            button2_pressed_signal: S::Signal::new(),
+            button3_pressed_signal: S::Signal::new(),
+            valve_state_signal: S::Signal::new(),
+            wm_state_signal: S::Signal::new(),
+            wm_stats_state_signal: S::Signal::new(),
+            battery_state_signal: S::Signal::new(),
+            draw_request_signal: S::Signal::new(),
         }
     }
 

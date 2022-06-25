@@ -4,14 +4,13 @@ use core::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::{Mutex, MutexFamily};
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::pulse_counter::PulseCounter;
-use crate::state_snapshot::StateSnapshot;
+use crate::state::{update_with, StateCell, StateCellRead};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
@@ -26,26 +25,28 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<M>
+pub struct WaterMeter<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = WaterMeterState>,
+    Q: SendSyncSignalFamily,
 {
-    state: StateSnapshot<M::Mutex<WaterMeterState>>,
-    command_signal: M::Signal<WaterMeterCommand>,
+    state: S,
+    command_signal: Q::Signal<WaterMeterCommand>,
 }
 
-impl<M> WaterMeter<M>
+impl<S, Q> WaterMeter<S, Q>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: StateCell<Data = WaterMeterState>,
+    Q: SendSyncSignalFamily,
 {
-    pub fn new() -> Self {
+    pub fn new(state: S) -> Self {
         Self {
-            state: StateSnapshot::new(),
-            command_signal: M::Signal::new(),
+            state,
+            command_signal: Q::Signal::new(),
         }
     }
 
-    pub fn state(&self) -> &StateSnapshot<impl Mutex<Data = WaterMeterState>> {
+    pub fn state(&self) -> &impl StateCellRead<Data = WaterMeterState> {
         &self.state
     }
 
@@ -57,7 +58,7 @@ where
         &'static self,
         timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
-        state_sink: impl Sender<Data = WaterMeterState>,
+        state_sink: impl Sender<Data = ()>,
     ) {
         process(
             timer,
@@ -73,9 +74,9 @@ where
 pub async fn process(
     mut timer: impl OnceTimer,
     mut pulse_counter: impl PulseCounter,
-    state: &StateSnapshot<impl Mutex<Data = WaterMeterState>>,
+    state: &impl StateCell<Data = WaterMeterState>,
     mut command_source: impl Receiver<Data = WaterMeterCommand>,
-    mut state_sink: impl Sender<Data = WaterMeterState>,
+    mut state_sink: impl Sender<Data = ()>,
 ) {
     pulse_counter.start().unwrap();
 
@@ -109,17 +110,17 @@ pub async fn process(
             }
         };
 
-        state
-            .update_with(
-                |state| WaterMeterState {
-                    edges_count: state.edges_count + data.edges_count as u64,
-                    armed: data.wakeup_edges > 0,
-                    leaking: state.edges_count < state.edges_count + data.edges_count as u64
-                        && state.armed
-                        && data.wakeup_edges > 0,
-                },
-                &mut state_sink,
-            )
-            .await;
+        update_with(
+            state,
+            |state| WaterMeterState {
+                edges_count: state.edges_count + data.edges_count as u64,
+                armed: data.wakeup_edges > 0,
+                leaking: state.edges_count < state.edges_count + data.edges_count as u64
+                    && state.armed
+                    && data.wakeup_edges > 0,
+            },
+            &mut state_sink,
+        )
+        .await;
     }
 }

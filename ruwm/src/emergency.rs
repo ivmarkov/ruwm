@@ -1,5 +1,4 @@
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::MutexFamily;
 use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::select::{select3, Either3};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
@@ -9,24 +8,24 @@ use crate::utils::as_static_receiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
-pub struct Emergency<M>
+pub struct Emergency<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
-    valve_state_signal: M::Signal<Option<ValveState>>,
-    wm_state_signal: M::Signal<WaterMeterState>,
-    battery_state_signal: M::Signal<BatteryState>,
+    valve_state_signal: S::Signal<Option<ValveState>>,
+    wm_state_signal: S::Signal<WaterMeterState>,
+    battery_state_signal: S::Signal<BatteryState>,
 }
 
-impl<M> Emergency<M>
+impl<S> Emergency<S>
 where
-    M: MutexFamily + SendSyncSignalFamily,
+    S: SendSyncSignalFamily,
 {
     pub fn new() -> Self {
         Self {
-            valve_state_signal: M::Signal::new(),
-            wm_state_signal: M::Signal::new(),
-            battery_state_signal: M::Signal::new(),
+            valve_state_signal: S::Signal::new(),
+            wm_state_signal: S::Signal::new(),
+            battery_state_signal: S::Signal::new(),
         }
     }
 
