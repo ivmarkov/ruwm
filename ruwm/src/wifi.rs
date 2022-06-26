@@ -1,15 +1,15 @@
 use core::fmt::Debug;
 
+use embedded_svc::mutex::RawMutex;
+use embedded_svc::utils::asynch::signal::MutexSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::mutex::Mutex;
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
-use crate::state::{update, StateCell, StateCellRead};
+use crate::state::{update, MemoryStateCell, StateCell, StateCellRead};
 use crate::utils::as_static_receiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
@@ -17,24 +17,22 @@ pub enum WifiCommand {
     SetConfiguration(Configuration),
 }
 
-pub struct Wifi<S, Q>
+pub struct Wifi<R>
 where
-    S: StateCell<Data = Option<Status>>,
-    Q: SendSyncSignalFamily,
+    R: RawMutex,
 {
-    state: S,
-    command: Q::Signal<WifiCommand>,
+    state: MemoryStateCell<R, Option<Status>>,
+    command: MutexSignal<R, WifiCommand>,
 }
 
-impl<S, Q> Wifi<S, Q>
+impl<R> Wifi<R>
 where
-    S: StateCell<Data = Option<Status>>,
-    Q: SendSyncSignalFamily,
+    R: RawMutex,
 {
-    pub fn new(state: S) -> Self {
+    pub fn new() -> Self {
         Self {
-            state,
-            command: Q::Signal::new(),
+            state: MemoryStateCell::new(None),
+            command: MutexSignal::new(),
         }
     }
 

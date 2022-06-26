@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
+use embedded_svc::mutex::{NoopRawMutex, RawMutex};
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,9 @@ use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
-use crate::state::{update, StateCell, StateCellRead};
+use crate::state::{
+    update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
+};
 
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
@@ -30,20 +33,27 @@ pub enum ValveCommand {
     Close,
 }
 
-pub struct Valve<S> {
-    state: S,
+pub struct Valve<R>
+where
+    R: RawMutex,
+{
+    state: CachingStateCell<
+        R,
+        MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
+        MutRefStateCell<NoopRawMutex, Option<ValveState>>,
+    >,
     command_signal: AtomicSignal<ValveCommand>,
     spin_command_signal: AtomicSignal<ValveCommand>,
     spin_finished_signal: AtomicSignal<()>,
 }
 
-impl<S> Valve<S>
+impl<R> Valve<R>
 where
-    S: StateCell<Data = Option<ValveState>>,
+    R: RawMutex,
 {
-    pub fn new(state: S) -> Self {
+    pub fn new(state: &'static mut Option<ValveState>) -> Self {
         Self {
-            state,
+            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
             command_signal: AtomicSignal::new(),
             spin_command_signal: AtomicSignal::new(),
             spin_finished_signal: AtomicSignal::new(),

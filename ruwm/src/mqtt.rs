@@ -19,7 +19,7 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
-use crate::state::StateCell;
+use crate::state::StateCellRead;
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
@@ -67,9 +67,9 @@ impl Mqtt {
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
-        valve_state: &(impl StateCell<Data = Option<ValveState>> + Sync),
-        wm_state: &(impl StateCell<Data = WaterMeterState> + Sync),
-        battery_state: &(impl StateCell<Data = BatteryState> + Sync),
+        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) {
         send::<_, L>(

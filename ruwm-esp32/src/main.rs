@@ -25,7 +25,7 @@ use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry as _;
 
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
-use esp_idf_hal::mutex::Condvar;
+use esp_idf_hal::mutex::RawMutex;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
@@ -52,7 +52,7 @@ use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
-use ruwm::system::System;
+use ruwm::system::{SlowMem, System};
 use ruwm::valve::{self, ValveCommand};
 
 #[cfg(any(esp32, esp32s2))]
@@ -104,9 +104,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
-    static SYSTEM: Forever<System<Condvar, EspHttpWsAcceptor<()>, WS_MAX_CONNECTIONS>> =
+    static mut slow_mem: SlowMem = Default::default();
+
+    static SYSTEM: Forever<System<RawMutex, EspHttpWsAcceptor<()>, WS_MAX_CONNECTIONS>> =
         Forever::new();
-    let system = &*SYSTEM.put(System::new());
+    let system = &*SYSTEM.put(System::new(unsafe { &mut slow_mem }));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 

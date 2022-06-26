@@ -31,11 +31,8 @@ impl Summary {
         }
 
         if let Some(water_meter_state) = water_meter_state {
-            let wm_shape = shapes::WaterMeterClassic::<8>::new(
-                water_meter_state.map(|wm| wm.edges_count),
-                1,
-                true,
-            );
+            let wm_shape =
+                shapes::WaterMeterClassic::<8>::new(Some(water_meter_state.edges_count), 1, true);
 
             //let bbox = target.bounding_box();
 

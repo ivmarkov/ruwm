@@ -1,17 +1,19 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embedded_svc::mutex::{NoopRawMutex, RawMutex};
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::Signal;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::{select, Either};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::pulse_counter::PulseCounter;
-use crate::state::{update_with, StateCell, StateCellRead};
+use crate::state::{
+    update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
@@ -26,18 +28,25 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<S> {
-    state: S,
+pub struct WaterMeter<R>
+where
+    R: RawMutex,
+{
+    state: CachingStateCell<
+        R,
+        MemoryStateCell<NoopRawMutex, Option<WaterMeterState>>,
+        MutRefStateCell<NoopRawMutex, WaterMeterState>,
+    >,
     command_signal: AtomicSignal<WaterMeterCommand>,
 }
 
-impl<S> WaterMeter<S>
+impl<R> WaterMeter<R>
 where
-    S: StateCell<Data = WaterMeterState>,
+    R: RawMutex,
 {
-    pub fn new(state: S) -> Self {
+    pub fn new(state: &'static mut WaterMeterState) -> Self {
         Self {
-            state,
+            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
             command_signal: AtomicSignal::new(),
         }
     }

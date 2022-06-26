@@ -1,15 +1,18 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embedded_svc::mutex::NoopRawMutex;
 use serde::{Deserialize, Serialize};
 
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::asynch::Sender;
 use embedded_svc::timer::asynch::OnceTimer;
+use embedded_svc::{channel::asynch::Sender, mutex::RawMutex};
 
-use crate::state::{update_with, StateCell, StateCellRead};
+use crate::state::{
+    update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
+};
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
@@ -24,19 +27,28 @@ impl BatteryState {
     pub const MAX_VOLTAGE: u16 = 3100;
 }
 
-pub struct Battery<S> {
-    state: S,
+pub struct Battery<R>
+where
+    R: RawMutex,
+{
+    state: CachingStateCell<
+        R,
+        MemoryStateCell<NoopRawMutex, Option<BatteryState>>,
+        MutRefStateCell<NoopRawMutex, BatteryState>,
+    >,
 }
 
-impl<S> Battery<S>
+impl<R> Battery<R>
 where
-    S: StateCell<Data = BatteryState>,
+    R: RawMutex + 'static,
 {
-    pub fn new(state: S) -> Self {
-        Self { state }
+    pub fn new(state: &'static mut BatteryState) -> Self {
+        Self {
+            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
+        }
     }
 
-    pub fn state(&self) -> &impl StateCellRead<Data = BatteryState> {
+    pub fn state(&self) -> &(impl StateCellRead<Data = BatteryState> + Sync + 'static) {
         &self.state
     }
 

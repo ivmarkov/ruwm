@@ -1,12 +1,13 @@
 use core::mem;
 use core::time::Duration;
 
+use embedded_svc::channel::asynch::Sender;
+use embedded_svc::mutex::NoopRawMutex;
+use embedded_svc::mutex::RawMutex;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::Receiver;
-use embedded_svc::channel::asynch::Sender;
-use embedded_svc::signal::asynch::Signal;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::select::select;
@@ -142,18 +143,25 @@ impl WaterMeterStatsState {
     }
 }
 
-pub struct WaterMeterStats<S> {
-    state: S,
+pub struct WaterMeterStats<R>
+where
+    R: RawMutex,
+{
+    state: CachingStateCell<
+        R,
+        MemoryStateCell<NoopRawMutex, Option<WaterMeterStatsState>>,
+        MutRefStateCell<NoopRawMutex, WaterMeterStatsState>,
+    >,
     wm_state_signal: AtomicSignal<WaterMeterState>,
 }
 
-impl<S> WaterMeterStats<S>
+impl<R> WaterMeterStats<R>
 where
-    S: StateCell<Data = WaterMeterStatsState>,
+    R: RawMutex,
 {
-    pub fn new(state: S) -> Self {
+    pub fn new(state: &'static mut WaterMeterStatsState) -> Self {
         Self {
-            state,
+            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
             wm_state_signal: AtomicSignal::new(),
         }
     }

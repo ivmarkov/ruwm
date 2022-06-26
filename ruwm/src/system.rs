@@ -8,13 +8,13 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
-use embedded_svc::mutex::MutexFamily;
-use embedded_svc::signal::asynch::{SendSyncSignalFamily, Signal};
+use embedded_svc::mutex::RawMutex;
+use embedded_svc::signal::asynch::Signal;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
-use embedded_svc::utils::asynch::signal::AtomicSignal;
-use embedded_svc::wifi::{Status, Wifi as WifiTrait};
+use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
+use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asynch::Acceptor;
 
 use crate::battery::{Battery, BatteryState};
@@ -25,7 +25,6 @@ use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::pulse_counter::PulseCounter;
 use crate::screen::{FlushableDrawTarget, Screen};
-use crate::state::{CachingStateCell, MemoryStateCell, STMemoryStateCell, STMutRefStateCell};
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
@@ -33,95 +32,62 @@ use crate::water_meter_stats::{WaterMeterStats, WaterMeterStatsState};
 use crate::web::Web;
 use crate::wifi::Wifi;
 
-type NotifSignal = AtomicSignal<()>;
-
+#[derive(Default)]
 pub struct SlowMem {
     valve: Option<ValveState>,
     wm: WaterMeterState,
     wm_stats: WaterMeterStatsState,
+    battery: BatteryState,
 }
 
-type ValveStateCell<M: MutexFamily> = CachingStateCell<
-    M::Mutex<(
-        STMemoryStateCell<Option<Option<ValveState>>>,
-        STMutRefStateCell<Option<ValveState>>,
-    )>,
->;
-type WaterMeterStateCell<M: MutexFamily> = CachingStateCell<
-    M::Mutex<(
-        STMemoryStateCell<Option<WaterMeterState>>,
-        STMutRefStateCell<WaterMeterState>,
-    )>,
->;
-type WaterMeterStatsStateCell<M: MutexFamily> = CachingStateCell<
-    M::Mutex<(
-        STMemoryStateCell<Option<WaterMeterStatsState>>,
-        STMutRefStateCell<WaterMeterStatsState>,
-    )>,
->;
-type BatteryStateCell<M: MutexFamily> = MemoryStateCell<M::Mutex<BatteryState>>;
-type WifiStateCell<M: MutexFamily> = MemoryStateCell<M::Mutex<Option<Status>>>;
-
-pub struct System<Q, M, A, const N: usize>
+pub struct System<R, A, const N: usize>
 where
-    Q: SendSyncSignalFamily,
-    M: MutexFamily,
+    R: RawMutex,
     A: Acceptor,
 {
-    valve: Valve<ValveStateCell<M>>,
-    wm: WaterMeter<WaterMeterStateCell<M>>,
-    wm_stats: WaterMeterStats<WaterMeterStatsStateCell<M>>,
-    battery: Battery<BatteryStateCell<M>>,
+    valve: Valve<R>,
+    wm: WaterMeter<R>,
+    wm_stats: WaterMeterStats<R>,
+    battery: Battery<R>,
 
-    button1: NotifSignal,
-    button2: NotifSignal,
-    button3: NotifSignal,
+    button1: AtomicSignal<()>,
+    button2: AtomicSignal<()>,
+    button3: AtomicSignal<()>,
 
     emergency: Emergency,
     keepalive: Keepalive,
 
-    remaining_time: Q::Signal<RemainingTime>,
+    remaining_time: MutexSignal<R, RemainingTime>,
 
-    quit: NotifSignal,
+    quit: AtomicSignal<()>,
 
-    screen: Screen<M>,
+    screen: Screen<R>,
 
-    wifi: Wifi<MemoryStateCell<M::Mutex<Option<Status>>>, Q>,
-    web: Web<M, A, N>,
+    wifi: Wifi<R>,
+    web: Web<R, A, N>,
     mqtt: Mqtt,
 }
 
-impl<Q, M, A, const N: usize> System<Q, M, A, N>
+impl<R, A, const N: usize> System<R, A, N>
 where
-    Q: SendSyncSignalFamily,
-    M: MutexFamily,
-    //M::Mutex: Send + Sync + 'static,
+    R: RawMutex,
     A: Acceptor,
 {
     pub fn new(slow_mem: &'static mut SlowMem) -> Self {
         Self {
-            valve: Valve::new(CachingStateCell::new(
-                STMemoryStateCell::new(None),
-                STMutRefStateCell::new(&mut slow_mem.valve),
-            )),
-            wm: WaterMeter::new(CachingStateCell::new(
-                STMemoryStateCell::new(None),
-                STMutRefStateCell::new(&mut slow_mem.wm),
-            )),
-            wm_stats: WaterMeterStats::new(CachingStateCell::new(
-                STMemoryStateCell::new(None),
-                STMutRefStateCell::new(&mut slow_mem.wm_stats),
-            )),
-            battery: Battery::new(MemoryStateCell::new(Default::default())),
-            button1: NotifSignal::new(),
-            button2: NotifSignal::new(),
-            button3: NotifSignal::new(),
+            valve: Valve::new(&mut slow_mem.valve),
+            wm: WaterMeter::new(&mut slow_mem.wm),
+            wm_stats: WaterMeterStats::new(&mut slow_mem.wm_stats),
+            battery: Battery::new(&mut slow_mem.battery),
+            button1: AtomicSignal::new(),
+            button2: AtomicSignal::new(),
+            button3: AtomicSignal::new(),
             emergency: Emergency::new(),
             keepalive: Keepalive::new(),
-            remaining_time: Q::Signal::new(),
-            quit: NotifSignal::new(),
+            remaining_time: MutexSignal::new(),
+            quit: AtomicSignal::new(),
             screen: Screen::new(),
-            wifi: Wifi::new(MemoryStateCell::new(None)),
+            wifi: Wifi::new(),
             web: Web::new(),
             mqtt: Mqtt::new(),
         }
@@ -320,6 +286,9 @@ where
             .send::<L>(
                 topic_prefix,
                 mqtt,
+                self.valve.state(),
+                self.wm.state(),
+                self.battery.state(),
                 merge(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
             )
             .await
@@ -345,7 +314,7 @@ where
 
     pub async fn web_send<const F: usize>(&'static self) {
         self.web
-            .send::<F, _, _, _>(self.valve.state(), self.wm.state(), self.battery.state())
+            .send::<F>(self.valve.state(), self.wm.state(), self.battery.state())
             .await
     }
 

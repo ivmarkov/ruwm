@@ -9,9 +9,10 @@ use postcard::{from_bytes, to_slice};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::errors::wrap::{EitherError, WrapError};
-use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::mutex::RawMutex;
 use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
+use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::utils::role::Role;
 use embedded_svc::ws::asynch::{Acceptor, Receiver as _, Sender as _};
 use embedded_svc::ws::FrameType;
@@ -53,12 +54,12 @@ enum WebFrame {
     Unknown,
 }
 
-pub struct Web<M, A, const N: usize>
+pub struct Web<R, A, const N: usize>
 where
-    M: MutexFamily,
+    R: RawMutex,
     A: Acceptor,
 {
-    connections: M::Mutex<heapless::Vec<SenderInfo<A>, N>>,
+    connections: Mutex<R, heapless::Vec<SenderInfo<A>, N>>,
     pending_responses_signal: AtomicSignal<()>,
     valve_state_signal: AtomicSignal<()>,
     wm_state_signal: AtomicSignal<()>,
@@ -66,14 +67,14 @@ where
     battery_state_signal: AtomicSignal<()>,
 }
 
-impl<M, A, const N: usize> Web<M, A, N>
+impl<R, A, const N: usize> Web<R, A, N>
 where
-    M: MutexFamily,
+    R: RawMutex,
     A: Acceptor,
 {
     pub fn new() -> Self {
         Self {
-            connections: M::Mutex::new(heapless::Vec::<_, N>::new()),
+            connections: Mutex::new(heapless::Vec::<_, N>::new()),
             pending_responses_signal: AtomicSignal::new(),
             valve_state_signal: AtomicSignal::new(),
             wm_state_signal: AtomicSignal::new(),
@@ -143,7 +144,7 @@ where
 }
 
 pub async fn send<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
     mut pending_responses_source: impl Receiver<Data = ()>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
@@ -217,7 +218,7 @@ where
 }
 
 pub async fn receive<A, const N: usize, const F: usize>(
-    connections: &'static impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    connections: &'static Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
     mut ws_acceptor: A,
     mut pending_responses_sink: impl Sender<Data = ()>,
     mut valve_command_sink: impl Sender<Data = ValveCommand>,
@@ -334,7 +335,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn process_request<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
     connection_id: ConnectionId,
     role: Role,
     request: &WebRequest,
@@ -407,7 +408,7 @@ fn authenticate(_username: &str, _password: &str) -> Option<Role> {
 }
 
 async fn web_send_single<A, const N: usize, const F: usize>(
-    connections: &impl Mutex<Data = heapless::Vec<SenderInfo<A>, N>>,
+    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
     id: ConnectionId,
     event: &WebEvent,
 ) -> Result<(), EitherError<A::Error, postcard::Error>>

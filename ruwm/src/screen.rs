@@ -1,7 +1,8 @@
 use core::fmt::Debug;
 
-use embedded_svc::mutex::{Mutex, MutexFamily};
+use embedded_svc::mutex::RawMutex;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
+use embedded_svc::utils::mutex::Mutex;
 use enumset::{EnumSet, EnumSetType};
 use serde::{Deserialize, Serialize};
 
@@ -92,11 +93,11 @@ impl ScreenState {
     }
 }
 
-pub struct Screen<M>
+pub struct Screen<R>
 where
-    M: MutexFamily,
+    R: RawMutex,
 {
-    state: M::Mutex<ScreenState>,
+    state: Mutex<R, ScreenState>,
     button1_pressed_signal: AtomicSignal<()>,
     button2_pressed_signal: AtomicSignal<()>,
     button3_pressed_signal: AtomicSignal<()>,
@@ -107,13 +108,13 @@ where
     draw_request_signal: AtomicSignal<()>,
 }
 
-impl<M> Screen<M>
+impl<R> Screen<R>
 where
-    M: MutexFamily,
+    R: RawMutex,
 {
     pub fn new() -> Self {
         Self {
-            state: M::Mutex::new(ScreenState {
+            state: Mutex::new(ScreenState {
                 changeset: EnumSet::all(),
                 ..Default::default()
             }),
@@ -204,7 +205,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub async fn process(
-    screen_state: &impl Mutex<Data = ScreenState>,
+    screen_state: &Mutex<impl RawMutex, ScreenState>,
     mut button1_pressed_source: impl Receiver<Data = ()>,
     mut button2_pressed_source: impl Receiver<Data = ()>,
     mut button3_pressed_source: impl Receiver<Data = ()>,
@@ -263,16 +264,11 @@ pub async fn process(
     }
 }
 
-enum PageDrawable {
-    Summary(pages::Summary),
-    Battery(pages::Battery),
-}
-
 pub async fn unblock_run_draw<U, D>(
     unblocker: U,
     mut draw_request: impl Receiver<Data = ()>,
     mut display: D,
-    screen_state: &impl Mutex<Data = ScreenState>,
+    screen_state: &Mutex<impl RawMutex, ScreenState>,
 ) -> Result<(), D::Error>
 where
     U: Unblocker,
@@ -302,7 +298,7 @@ where
 pub async fn run_draw<D>(
     mut draw_request: impl Receiver<Data = ()>,
     mut display: D,
-    screen_state: &impl Mutex<Data = ScreenState>,
+    screen_state: &Mutex<impl RawMutex, ScreenState>,
 ) -> Result<(), D::Error>
 where
     D: FlushableDrawTarget + Send + 'static,
