@@ -42,7 +42,7 @@ pub struct SlowMem {
 
 pub struct System<R, A, const N: usize>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
     A: Acceptor,
 {
     valve: Valve<R>,
@@ -70,7 +70,7 @@ where
 
 impl<R, A, const N: usize> System<R, A, N>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
     A: Acceptor,
 {
     pub fn new(slow_mem: &'static mut SlowMem) -> Self {
