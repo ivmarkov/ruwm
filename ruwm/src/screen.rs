@@ -4,7 +4,6 @@ use embedded_svc::mutex::RawMutex;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 use embedded_svc::utils::mutex::Mutex;
 use enumset::{EnumSet, EnumSetType};
-use futures::Future;
 use serde::{Deserialize, Serialize};
 
 use embedded_graphics::prelude::RgbColor;
@@ -12,12 +11,12 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::unblocker::asynch::Unblocker;
 use embedded_svc::utils::asynch::channel::adapt::merge;
-use embedded_svc::utils::asynch::select::{select, select3, select4, Either, Either3, Either4};
+use embedded_svc::utils::asynch::select::{select3, select4, Either3, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, I64552};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -177,10 +176,14 @@ where
 
     pub async fn process(
         &'static self,
-        valve_state: I64552<impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static>,
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync + 'static),
-        wm_stats_state: &'static (impl StateCellRead<Data = WaterMeterStatsState> + Sync + 'static),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync + 'static),
+        valve_state: StaticRef<
+            impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static,
+        >,
+        wm_state: StaticRef<impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static>,
+        wm_stats_state: StaticRef<
+            impl StateCellRead<Data = WaterMeterStatsState> + Send + Sync + 'static,
+        >,
+        battery_state: StaticRef<impl StateCellRead<Data = BatteryState> + Send + Sync + 'static>,
         draw_request_sink: impl Sender<Data = ()> + Send + 'static,
     ) {
         process(
@@ -188,17 +191,15 @@ where
             as_static_receiver(&self.button1_pressed_signal),
             as_static_receiver(&self.button2_pressed_signal),
             as_static_receiver(&self.button3_pressed_signal),
-            adapt_static_receiver(
-                as_static_receiver(&self.valve_state_signal),
-                //as_channel(&self.valve_state_signal),
-                move |_| Some(valve_state.0.get()),
-            ),
-            // adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-            //     Some(wm_state.get())
-            // }),
-            // adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-            //     Some(battery_state.get())
-            // }),
+            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
+                Some(valve_state.0.get())
+            }),
+            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
+                Some(wm_state.0.get())
+            }),
+            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
+                Some(battery_state.0.get())
+            }),
             merge(
                 as_static_sender(&self.draw_request_signal),
                 draw_request_sink,
@@ -215,8 +216,8 @@ pub async fn process(
     mut button2_pressed_source: impl Receiver<Data = ()>,
     mut button3_pressed_source: impl Receiver<Data = ()>,
     mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
-    //mut wm_state_source: impl Receiver<Data = WaterMeterState>,
-    //mut battery_state_source: impl Receiver<Data = BatteryState>,
+    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
+    mut battery_state_source: impl Receiver<Data = BatteryState>,
     mut draw_request_sink: impl Sender<Data = ()>,
 ) {
     loop {
@@ -224,16 +225,16 @@ pub async fn process(
         let button2_command = button2_pressed_source.recv();
         let button3_command = button3_pressed_source.recv();
         let valve = valve_state_source.recv();
-        //let wm = wm_state_source.recv();
-        //let battery = battery_state_source.recv();
+        let wm = wm_state_source.recv();
+        let battery = battery_state_source.recv();
 
         //pin_mut!(button1_command, button2_command, button3_command, valve, wm, battery);
 
-        let sr = select(
+        let sr = select4(
             select3(button1_command, button2_command, button3_command),
             valve,
-            //wm,
-            //battery,
+            wm,
+            battery,
         )
         .await;
 
@@ -241,26 +242,27 @@ pub async fn process(
             let mut screen_state = screen_state.lock();
 
             match sr {
-                Either::First(Either3::First(_)) => {
+                Either4::First(Either3::First(_)) => {
                     screen_state.active_page = screen_state.active_page.prev();
                     screen_state.changeset.insert(DataSource::Page);
                 }
-                Either::First(Either3::Second(_)) => {
+                Either4::First(Either3::Second(_)) => {
                     screen_state.active_page = screen_state.active_page.next();
                     screen_state.changeset.insert(DataSource::Page);
                 }
-                Either::First(Either3::Third(_)) => {}
-                Either::Second(valve) => {
+                Either4::First(Either3::Third(_)) => {}
+                Either4::Second(valve) => {
                     screen_state.valve = valve;
                     screen_state.changeset.insert(DataSource::Valve);
-                } // Either2::Third(wm) => {
-                  //     screen_state.wm = wm;
-                  //     screen_state.changeset.insert(DataSource::WM);
-                  // }
-                  // Either2::Fourth(battery) => {
-                  //     screen_state.battery = battery;
-                  //     screen_state.changeset.insert(DataSource::Battery);
-                  // }
+                }
+                Either4::Third(wm) => {
+                    screen_state.wm = wm;
+                    screen_state.changeset.insert(DataSource::WM);
+                }
+                Either4::Fourth(battery) => {
+                    screen_state.battery = battery;
+                    screen_state.changeset.insert(DataSource::Battery);
+                }
             }
         }
 

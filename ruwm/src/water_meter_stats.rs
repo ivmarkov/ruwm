@@ -15,6 +15,7 @@ use embedded_svc::utils::asynch::select::Either;
 
 use crate::state::*;
 use crate::utils::as_static_receiver;
+use crate::utils::StaticRef;
 use crate::water_meter::WaterMeterState;
 
 const FLOW_STATS_INSTANCES: usize = 8;
@@ -166,8 +167,10 @@ where
         }
     }
 
-    pub fn state(&self) -> &impl StateCellRead<Data = WaterMeterStatsState> {
-        &self.state
+    pub fn state(
+        &'static self,
+    ) -> StaticRef<impl StateCellRead<Data = WaterMeterStatsState> + Send + Sync + 'static> {
+        StaticRef(&self.state)
     }
 
     pub async fn process(

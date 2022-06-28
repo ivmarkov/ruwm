@@ -230,10 +230,10 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn(system.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
         .release();
 
-    // let (mut executor3, tasks3) = tasks_spawner::<4, _>()
-    //     //.spawn(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
-    //     //.spawn(system.web_send::<WS_MAX_FRAME_SIZE>())?
-    //     .release();
+    let (mut executor3, tasks3) = tasks_spawner::<4, _>()
+        .spawn(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
+        .spawn(system.web_send::<WS_MAX_FRAME_SIZE>())?
+        .release();
 
     log::info!("Starting execution");
 
@@ -243,11 +243,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         });
     });
 
-    // let executor3 = std::thread::spawn(move || {
-    //     executor3.with_context(|exec, ctx| {
-    //         exec.run(ctx, || system.should_quit(), Some(tasks3));
-    //     });
-    // });
+    let executor3 = std::thread::spawn(move || {
+        executor3.with_context(|exec, ctx| {
+            exec.run(ctx, || system.should_quit(), Some(tasks3));
+        });
+    });
 
     executor1.with_context(|exec, ctx| {
         exec.run(ctx, || system.should_quit(), Some(tasks1));

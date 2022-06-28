@@ -18,7 +18,7 @@ use embedded_svc::ws::FrameType;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
@@ -100,25 +100,31 @@ where
 
     pub async fn send<const F: usize>(
         &'static self,
-        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: StaticRef<
+            impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static,
+        >,
+        wm_state: StaticRef<impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static>,
+        battery_state: StaticRef<impl StateCellRead<Data = BatteryState> + Send + Sync + 'static>,
     ) {
+        let valve_state_ref = valve_state.0;
+        let wm_state_ref = wm_state.0;
+        let battery_state_ref = battery_state.0;
+
         send::<A, N, F>(
             &self.connections,
             as_static_receiver(&self.pending_responses_signal),
             adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state.get())
+                Some(valve_state.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state.get())
+                Some(wm_state.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state.get())
+                Some(battery_state.0.get())
             }),
-            valve_state,
-            wm_state,
-            battery_state,
+            valve_state_ref,
+            wm_state_ref,
+            battery_state_ref,
         )
         .await
         .unwrap(); // TODO

@@ -20,7 +20,7 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use crate::battery::BatteryState;
 use crate::error;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -67,9 +67,11 @@ impl Mqtt {
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
-        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: StaticRef<
+            impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static,
+        >,
+        wm_state: StaticRef<impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static>,
+        battery_state: StaticRef<impl StateCellRead<Data = BatteryState> + Send + Sync + 'static>,
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) {
         send::<_, L>(
@@ -77,13 +79,13 @@ impl Mqtt {
             mqtt,
             as_static_receiver(&self.conn_signal),
             adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state.get())
+                Some(valve_state.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state.get())
+                Some(wm_state.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state.get())
+                Some(battery_state.0.get())
             }),
             pub_sink,
         )

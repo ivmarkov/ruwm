@@ -233,8 +233,8 @@ where
             .process(
                 self.valve.command_sink(),
                 self.valve.state().0,
-                self.wm.state(),
-                self.battery.state(),
+                self.wm.state().0,
+                self.battery.state().0,
             )
             .await // TODO: Screen
     }
@@ -286,7 +286,7 @@ where
             .send::<L>(
                 topic_prefix,
                 mqtt,
-                self.valve.state().0,
+                self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
                 merge(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
@@ -314,7 +314,7 @@ where
 
     pub async fn web_send<const F: usize>(&'static self) {
         self.web
-            .send::<F>(self.valve.state().0, self.wm.state(), self.battery.state())
+            .send::<F>(self.valve.state(), self.wm.state(), self.battery.state())
             .await
     }
 

@@ -4,7 +4,9 @@ use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 
-pub struct I64552<C>(pub &'static C)
+// Workaround, as we are possibly hit by this: https://github.com/rust-lang/rust/issues/64552
+#[derive(Clone)]
+pub struct StaticRef<C>(pub &'static C)
 where
     C: 'static;
 
