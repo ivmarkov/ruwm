@@ -25,7 +25,7 @@ use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::pulse_counter::PulseCounter;
 use crate::screen::{FlushableDrawTarget, Screen, Q};
-use crate::utils::{as_static_receiver, as_static_sender, StaticRef};
+use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
 use crate::water_meter_stats::{WaterMeterStats, WaterMeterStatsState};

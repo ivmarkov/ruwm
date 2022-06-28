@@ -26,12 +26,6 @@ pub enum ValveState {
     Closing,
 }
 
-pub type ValveStateCell<R> = CachingStateCell<
-    R,
-    MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
-    MutRefStateCell<NoopRawMutex, Option<ValveState>>,
->;
-
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ValveCommand {
     Open,
