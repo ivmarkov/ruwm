@@ -2,7 +2,6 @@ use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::signal::asynch::Signal;
 use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
 
 // Workaround, as we are possibly hit by this: https://github.com/rust-lang/rust/issues/64552
 #[derive(Clone)]

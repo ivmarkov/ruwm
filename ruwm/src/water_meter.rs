@@ -14,7 +14,6 @@ use crate::pulse_counter::PulseCounter;
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
-use crate::utils::StaticRef;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
@@ -52,10 +51,8 @@ where
         }
     }
 
-    pub fn state(
-        &'static self,
-    ) -> StaticRef<impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static> {
-        StaticRef(&self.state)
+    pub fn state(&self) -> &(impl StateCellRead<Data = WaterMeterState> + Send + Sync) {
+        &self.state
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = WaterMeterCommand> + 'static {

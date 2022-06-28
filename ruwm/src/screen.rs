@@ -176,29 +176,32 @@ where
 
     pub async fn process(
         &'static self,
-        valve_state: StaticRef<
-            impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static,
-        >,
-        wm_state: StaticRef<impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static>,
-        wm_stats_state: StaticRef<
-            impl StateCellRead<Data = WaterMeterStatsState> + Send + Sync + 'static,
-        >,
-        battery_state: StaticRef<impl StateCellRead<Data = BatteryState> + Send + Sync + 'static>,
+        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static),
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
+        wm_stats_state: &'static (impl StateCellRead<Data = WaterMeterStatsState>
+                      + Send
+                      + Sync
+                      + 'static),
+        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
         draw_request_sink: impl Sender<Data = ()> + Send + 'static,
     ) {
+        let battery_state_wrapper = StaticRef(battery_state);
+        let valve_state_wrapper = StaticRef(valve_state);
+        let wm_state_wrapper = StaticRef(wm_state);
+
         process(
             &self.state,
             as_static_receiver(&self.button1_pressed_signal),
             as_static_receiver(&self.button2_pressed_signal),
             as_static_receiver(&self.button3_pressed_signal),
             adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state.0.get())
+                Some(valve_state_wrapper.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state.0.get())
+                Some(wm_state_wrapper.0.get())
             }),
             adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state.0.get())
+                Some(battery_state_wrapper.0.get())
             }),
             merge(
                 as_static_sender(&self.draw_request_signal),

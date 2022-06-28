@@ -13,7 +13,6 @@ use embedded_svc::{channel::asynch::Sender, mutex::RawMutex};
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
-use crate::utils::StaticRef;
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
@@ -49,10 +48,8 @@ where
         }
     }
 
-    pub fn state(
-        &'static self,
-    ) -> StaticRef<impl StateCellRead<Data = BatteryState> + Send + Sync + 'static> {
-        StaticRef(&self.state)
+    pub fn state(&self) -> &(impl StateCellRead<Data = BatteryState> + Send + Sync) {
+        &self.state
     }
 
     pub async fn process<ADC, BP>(

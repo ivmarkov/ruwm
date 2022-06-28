@@ -16,8 +16,6 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use crate::state::{
     update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
-use crate::utils::StaticRef;
-
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,10 +65,8 @@ where
         }
     }
 
-    pub fn state(
-        &'static self,
-    ) -> StaticRef<impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static> {
-        StaticRef(&self.state)
+    pub fn state(&self) -> &(impl StateCellRead<Data = Option<ValveState>> + Send + Sync) {
+        &self.state
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {
