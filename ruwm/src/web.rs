@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 use core::mem;
 
-use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 use enumset::{EnumSet, EnumSetType};
 use log::info;
@@ -19,7 +18,7 @@ use embedded_svc::ws::FrameType;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::{as_static_receiver, as_static_sender};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
@@ -101,20 +100,20 @@ where
 
     pub async fn send<const F: usize>(
         &'static self,
-        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
     ) {
         send::<A, N, F>(
             &self.connections,
             as_static_receiver(&self.pending_responses_signal),
-            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
                 Some(valve_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
                 Some(wm_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
                 Some(battery_state.get())
             }),
             valve_state,

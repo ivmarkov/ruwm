@@ -1,12 +1,11 @@
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::select::{select3, Either3};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::as_static_receiver;
+use crate::utils::{adapt_static_receiver, as_static_receiver};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
@@ -40,18 +39,18 @@ impl Emergency {
     pub async fn process(
         &'static self,
         valve_command: impl Sender<Data = ValveCommand>,
-        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
     ) {
         process(
-            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
                 Some(valve_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
                 Some(wm_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
                 Some(battery_state.get())
             }),
             valve_command,

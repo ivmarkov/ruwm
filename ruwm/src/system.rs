@@ -24,7 +24,7 @@ use crate::event_logger;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::pulse_counter::PulseCounter;
-use crate::screen::{FlushableDrawTarget, Screen};
+use crate::screen::{FlushableDrawTarget, Screen, Q};
 use crate::utils::{as_static_receiver, as_static_sender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
@@ -232,7 +232,7 @@ where
         self.emergency
             .process(
                 self.valve.command_sink(),
-                self.valve.state(),
+                self.valve.state().0,
                 self.wm.state(),
                 self.battery.state(),
             )
@@ -286,7 +286,7 @@ where
             .send::<L>(
                 topic_prefix,
                 mqtt,
-                self.valve.state(),
+                self.valve.state().0,
                 self.wm.state(),
                 self.battery.state(),
                 merge(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
@@ -314,7 +314,7 @@ where
 
     pub async fn web_send<const F: usize>(&'static self) {
         self.web
-            .send::<F>(self.valve.state(), self.wm.state(), self.battery.state())
+            .send::<F>(self.valve.state().0, self.wm.state(), self.battery.state())
             .await
     }
 

@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use serde::{de::DeserializeOwned, Serialize};
 
 use embedded_svc::channel::asynch::Sender;
-use embedded_svc::mutex::{NoopRawMutex, RawMutex};
+use embedded_svc::mutex::RawMutex;
 use embedded_svc::storage::SerDe;
 use embedded_svc::utils::mutex::Mutex;
 
@@ -108,7 +108,7 @@ where
 impl<R, T> StateCellRead for MutRefStateCell<R, T>
 where
     R: RawMutex,
-    T: Clone + 'static,
+    T: Clone,
 {
     type Data = T;
 
@@ -120,7 +120,7 @@ where
 impl<R, T> StateCell for MutRefStateCell<R, T>
 where
     R: RawMutex,
-    T: Clone + 'static,
+    T: Clone,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         let mut guard = self.0.lock();
@@ -195,8 +195,6 @@ where
     }
 }
 
-pub type STWearLevelingStateCell<C> = WearLevelingStateCell<NoopRawMutex, (C, usize, usize)>;
-
 pub struct WearLevelingStateCell<R, C>(Mutex<R, (C, usize, usize)>);
 
 impl<R, C> StateCellRead for WearLevelingStateCell<R, C>
@@ -215,30 +213,38 @@ impl<R, C> StateCell for WearLevelingStateCell<R, C>
 where
     R: RawMutex,
     C: StateCell,
+    C::Data: PartialEq,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         let mut guard = self.0.lock();
 
-        if guard.1 >= guard.2 {
-            guard.1 = 0;
+        let old_data = guard.0.get();
+        if old_data != data {
+            if guard.1 >= guard.2 {
+                guard.1 = 0;
 
-            guard.0.set(data)
-        } else {
-            guard.1 += 1;
-
-            guard.0.get()
+                guard.0.set(data);
+            } else {
+                guard.1 += 1;
+            }
         }
+
+        old_data
     }
 }
 
-pub struct StorageStateCell<'a, R, S, T> {
-    storage: &'a Mutex<R, S>,
-    name: &'a str,
-    _data: PhantomData<T>,
+pub struct StorageStateCell<R, S, T>
+where
+    R: 'static,
+    S: 'static,
+{
+    storage: &'static Mutex<R, S>,
+    name: &'static str,
+    _data: PhantomData<fn() -> T>,
 }
 
-impl<'a, R, S, T> StorageStateCell<'a, R, S, T> {
-    fn new(storage: &'a Mutex<R, S>, name: &'a str) -> Self {
+impl<R, S, T> StorageStateCell<R, S, T> {
+    pub fn new(storage: &'static Mutex<R, S>, name: &'static str) -> Self {
         Self {
             storage,
             name,
@@ -247,11 +253,11 @@ impl<'a, R, S, T> StorageStateCell<'a, R, S, T> {
     }
 }
 
-impl<'a, R, S, T> StateCellRead for StorageStateCell<'a, R, S, T>
+impl<R, S, T> StateCellRead for StorageStateCell<R, S, T>
 where
-    R: RawMutex,
-    S: embedded_svc::storage::Storage,
-    T: Serialize + DeserializeOwned,
+    R: RawMutex + 'static,
+    S: embedded_svc::storage::Storage + 'static,
+    T: Serialize + DeserializeOwned + 'static,
 {
     type Data = T;
 
@@ -260,11 +266,11 @@ where
     }
 }
 
-impl<'a, R, S, T> StateCell for StorageStateCell<'a, R, S, T>
+impl<R, S, T> StateCell for StorageStateCell<R, S, T>
 where
-    R: RawMutex,
-    S: embedded_svc::storage::Storage,
-    T: Serialize + DeserializeOwned,
+    R: RawMutex + 'static,
+    S: embedded_svc::storage::Storage + 'static,
+    T: Serialize + DeserializeOwned + 'static,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         let mut guard = self.storage.lock();
@@ -277,8 +283,8 @@ where
     }
 }
 
-pub type PostcardStorageStateCell<'a, const N: usize, R, S, T> =
-    StorageStateCell<'a, R, PostcardStorage<N, S>, T>;
+pub type PostcardStorageStateCell<const N: usize, R, S, T> =
+    StorageStateCell<R, PostcardStorage<N, S>, T>;
 
 pub type PostcardStorage<const N: usize, S> =
     embedded_svc::storage::StorageImpl<N, S, PostcardSerDe>;

@@ -27,6 +27,16 @@ pub enum ValveState {
     Closing,
 }
 
+pub type ValveStateCell<R> = CachingStateCell<
+    R,
+    MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
+    MutRefStateCell<NoopRawMutex, Option<ValveState>>,
+>;
+
+pub struct ValveStateCellW<R>(pub &'static ValveStateCell<R>)
+where
+    R: RawMutex + 'static;
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ValveCommand {
     Open,
@@ -35,7 +45,7 @@ pub enum ValveCommand {
 
 pub struct Valve<R>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
 {
     state: CachingStateCell<
         R,
@@ -49,7 +59,7 @@ where
 
 impl<R> Valve<R>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
 {
     pub fn new(state: &'static mut Option<ValveState>) -> Self {
         Self {
@@ -60,8 +70,8 @@ where
         }
     }
 
-    pub fn state(&'static self) -> &'static impl StateCellRead<Data = Option<ValveState>> {
-        &self.state
+    pub fn state(&'static self) -> ValveStateCellW<R> {
+        ValveStateCellW(&self.state)
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {

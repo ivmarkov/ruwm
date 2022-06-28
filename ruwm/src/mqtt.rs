@@ -13,14 +13,14 @@ use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
-use embedded_svc::utils::asynch::channel::adapt::{self, merge};
+use embedded_svc::utils::asynch::channel::adapt::merge;
 use embedded_svc::utils::asynch::select::{select4, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
 use crate::state::StateCellRead;
-use crate::utils::{as_static_receiver, as_static_sender};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -67,22 +67,22 @@ impl Mqtt {
         &'static self,
         topic_prefix: impl AsRef<str>,
         mqtt: impl Client + Publish,
-        valve_state: &(impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &(impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &(impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
+        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) {
         send::<_, L>(
             topic_prefix,
             mqtt,
             as_static_receiver(&self.conn_signal),
-            adapt::adapt(as_static_receiver(&self.valve_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
                 Some(valve_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.wm_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
                 Some(wm_state.get())
             }),
-            adapt::adapt(as_static_receiver(&self.battery_state_signal), |_| {
+            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
                 Some(battery_state.get())
             }),
             pub_sink,

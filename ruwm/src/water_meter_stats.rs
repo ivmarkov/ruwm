@@ -157,7 +157,7 @@ where
 
 impl<R> WaterMeterStats<R>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
 {
     pub fn new(state: &'static mut WaterMeterStatsState) -> Self {
         Self {

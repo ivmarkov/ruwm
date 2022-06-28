@@ -1,6 +1,7 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 #![feature(explicit_generic_args_with_impl_trait)]
+#![feature(nll)]
 
 use core::fmt::Debug;
 use core::time::Duration;
@@ -54,6 +55,7 @@ use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::system::{SlowMem, System};
 use ruwm::valve::{self, ValveCommand};
+use ruwm::water_meter::WaterMeterState;
 
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
@@ -104,11 +106,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
-    static mut slow_mem: SlowMem = Default::default();
+    static mut slow_mem: Option<SlowMem> = None;
+
+    unsafe { slow_mem = Some(Default::default()) };
 
     static SYSTEM: Forever<System<RawMutex, EspHttpWsAcceptor<()>, WS_MAX_CONNECTIONS>> =
         Forever::new();
-    let system = &*SYSTEM.put(System::new(unsafe { &mut slow_mem }));
+    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
@@ -226,10 +230,10 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn(system.web_receive::<WS_MAX_FRAME_SIZE>(ws_acceptor))?
         .release();
 
-    let (mut executor3, tasks3) = tasks_spawner::<4, _>()
-        .spawn(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
-        .spawn(system.web_send::<WS_MAX_FRAME_SIZE>())?
-        .release();
+    // let (mut executor3, tasks3) = tasks_spawner::<4, _>()
+    //     //.spawn(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
+    //     //.spawn(system.web_send::<WS_MAX_FRAME_SIZE>())?
+    //     .release();
 
     log::info!("Starting execution");
 
@@ -239,11 +243,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         });
     });
 
-    let executor3 = std::thread::spawn(move || {
-        executor3.with_context(|exec, ctx| {
-            exec.run(ctx, || system.should_quit(), Some(tasks3));
-        });
-    });
+    // let executor3 = std::thread::spawn(move || {
+    //     executor3.with_context(|exec, ctx| {
+    //         exec.run(ctx, || system.should_quit(), Some(tasks3));
+    //     });
+    // });
 
     executor1.with_context(|exec, ctx| {
         exec.run(ctx, || system.should_quit(), Some(tasks1));
@@ -254,7 +258,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     std::thread::sleep(Duration::from_millis(2000));
 
     executor2.join().unwrap();
-    executor3.join().unwrap();
+    //executor3.join().unwrap();
 
     log::info!("Finished execution");
 

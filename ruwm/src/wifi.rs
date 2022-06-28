@@ -27,7 +27,7 @@ where
 
 impl<R> Wifi<R>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
 {
     pub fn new() -> Self {
         Self {
