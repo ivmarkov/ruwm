@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use embedded_svc::mutex::NoopRawMutex;
 use serde::{Deserialize, Serialize};
 
 use embedded_hal::adc;
@@ -10,9 +9,7 @@ use embedded_hal::digital::v2::InputPin;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::{channel::asynch::Sender, mutex::RawMutex};
 
-use crate::state::{
-    update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
-};
+use crate::state::{update_with, MemoryStateCell, StateCell, StateCellRead};
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
@@ -31,20 +28,16 @@ pub struct Battery<R>
 where
     R: RawMutex,
 {
-    state: CachingStateCell<
-        R,
-        MemoryStateCell<NoopRawMutex, Option<BatteryState>>,
-        MutRefStateCell<NoopRawMutex, BatteryState>,
-    >,
+    state: MemoryStateCell<R, BatteryState>,
 }
 
 impl<R> Battery<R>
 where
     R: RawMutex + 'static,
 {
-    pub fn new(state: &'static mut BatteryState) -> Self {
+    pub fn new() -> Self {
         Self {
-            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
+            state: MemoryStateCell::new(Default::default()),
         }
     }
 

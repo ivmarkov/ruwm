@@ -22,6 +22,7 @@ use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asynch::executor::SpawnError;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::utils::forever::Forever;
+use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::server::registry::Registry as _;
 
@@ -38,6 +39,7 @@ use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
 use esp_idf_svc::nvs::EspDefaultNvs;
+use esp_idf_svc::nvs_storage::EspNvsStorage;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
@@ -53,6 +55,7 @@ use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
+use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
 use ruwm::valve::{self, ValveCommand};
 use ruwm::water_meter::WaterMeterState;
@@ -110,9 +113,23 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     unsafe { slow_mem = Some(Default::default()) };
 
-    static SYSTEM: Forever<System<RawMutex, EspHttpWsAcceptor<()>, WS_MAX_CONNECTIONS>> =
-        Forever::new();
-    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }));
+    let nvs_stack = Arc::new(EspDefaultNvs::new()?);
+
+    static STORAGE: Forever<Mutex<RawMutex, PostcardStorage<500, EspNvsStorage>>> = Forever::new();
+    let storage = &*STORAGE.put(Mutex::new(PostcardStorage::<500, _>::new(
+        EspNvsStorage::new_default(nvs_stack.clone(), "WM", true)?,
+        PostcardSerDe,
+    )));
+
+    static SYSTEM: Forever<
+        System<
+            RawMutex,
+            PostcardStorage<500, EspNvsStorage>,
+            EspHttpWsAcceptor<()>,
+            WS_MAX_CONNECTIONS,
+        >,
+    > = Forever::new();
+    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }, &storage));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
@@ -169,7 +186,6 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
-    let nvs_stack = Arc::new(EspDefaultNvs::new()?);
     let mut wifi = EspWifi::new(netif_stack, sysloop_stack, nvs_stack)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
@@ -258,7 +274,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     std::thread::sleep(Duration::from_millis(2000));
 
     executor2.join().unwrap();
-    //executor3.join().unwrap();
+    executor3.join().unwrap();
 
     log::info!("Finished execution");
 

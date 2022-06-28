@@ -2,7 +2,9 @@ use core::fmt::Debug;
 use core::time::Duration;
 
 use embedded_svc::mutex::{NoopRawMutex, RawMutex};
+use embedded_svc::storage::Storage;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
+use embedded_svc::utils::mutex::Mutex;
 use serde::{Deserialize, Serialize};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
@@ -13,6 +15,7 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use crate::pulse_counter::PulseCounter;
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
+    StorageStateCell,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -28,25 +31,37 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<R>
+pub struct WaterMeter<R, S>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
+    S: Storage + Send + 'static,
 {
     state: CachingStateCell<
         R,
         MemoryStateCell<NoopRawMutex, Option<WaterMeterState>>,
-        MutRefStateCell<NoopRawMutex, WaterMeterState>,
+        CachingStateCell<
+            NoopRawMutex,
+            MutRefStateCell<NoopRawMutex, Option<WaterMeterState>>,
+            StorageStateCell<'static, R, S, WaterMeterState>,
+        >,
     >,
     command_signal: AtomicSignal<WaterMeterCommand>,
 }
 
-impl<R> WaterMeter<R>
+impl<R, S> WaterMeter<R, S>
 where
     R: RawMutex + 'static,
+    S: Storage + Send + 'static,
 {
-    pub fn new(state: &'static mut WaterMeterState) -> Self {
+    pub fn new(state: &'static mut Option<WaterMeterState>, storage: &'static Mutex<R, S>) -> Self {
         Self {
-            state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
+            state: CachingStateCell::new(
+                MemoryStateCell::new(None),
+                CachingStateCell::new(
+                    MutRefStateCell::new(state),
+                    StorageStateCell::new(storage, "wm"),
+                ),
+            ),
             command_signal: AtomicSignal::new(),
         }
     }

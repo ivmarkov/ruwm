@@ -10,14 +10,16 @@ use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::mutex::RawMutex;
 use embedded_svc::signal::asynch::Signal;
+use embedded_svc::storage::Storage;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
 use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
+use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asynch::Acceptor;
 
-use crate::battery::{Battery, BatteryState};
+use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
 use crate::emergency::Emergency;
 use crate::event_logger;
@@ -35,18 +37,19 @@ use crate::wifi::Wifi;
 #[derive(Default)]
 pub struct SlowMem {
     valve: Option<ValveState>,
-    wm: WaterMeterState,
+    wm: Option<WaterMeterState>,
     wm_stats: WaterMeterStatsState,
-    battery: BatteryState,
 }
 
-pub struct System<R, A, const N: usize>
+pub struct System<R, S, A, const N: usize>
 where
     R: RawMutex + 'static,
+    S: Storage + Send + 'static,
     A: Acceptor,
 {
+    storage: &'static Mutex<R, S>,
     valve: Valve<R>,
-    wm: WaterMeter<R>,
+    wm: WaterMeter<R, S>,
     wm_stats: WaterMeterStats<R>,
     battery: Battery<R>,
 
@@ -68,17 +71,19 @@ where
     mqtt: Mqtt,
 }
 
-impl<R, A, const N: usize> System<R, A, N>
+impl<R, S, A, const N: usize> System<R, S, A, N>
 where
     R: RawMutex + 'static,
+    S: Storage + Send + 'static,
     A: Acceptor,
 {
-    pub fn new(slow_mem: &'static mut SlowMem) -> Self {
+    pub fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, S>) -> Self {
         Self {
+            storage,
             valve: Valve::new(&mut slow_mem.valve),
-            wm: WaterMeter::new(&mut slow_mem.wm),
+            wm: WaterMeter::new(&mut slow_mem.wm, storage),
             wm_stats: WaterMeterStats::new(&mut slow_mem.wm_stats),
-            battery: Battery::new(&mut slow_mem.battery),
+            battery: Battery::new(),
             button1: AtomicSignal::new(),
             button2: AtomicSignal::new(),
             button3: AtomicSignal::new(),
