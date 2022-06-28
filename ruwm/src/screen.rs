@@ -17,10 +17,8 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::{
-    adapt_static_receiver, as_static_receiver, as_static_receiver2, as_static_sender, AtomicSignalW,
-};
-use crate::valve::{ValveState, ValveStateCell, ValveStateCellW};
+use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, I64552};
+use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
 
@@ -177,37 +175,36 @@ where
         .unwrap(); // TODO
     }
 
-    pub fn process(
+    pub async fn process(
         &'static self,
-        valve_state: ValveStateCellW<impl RawMutex + 'static>,
+        valve_state: I64552<impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static>,
         wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync + 'static),
         wm_stats_state: &'static (impl StateCellRead<Data = WaterMeterStatsState> + Sync + 'static),
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync + 'static),
         draw_request_sink: impl Sender<Data = ()> + Send + 'static,
-    ) -> impl Future<Output = ()> + 'static {
-        async move {
-            process(
-                &self.state,
-                as_static_receiver(&self.button1_pressed_signal),
-                as_static_receiver(&self.button2_pressed_signal),
-                as_static_receiver(&self.button3_pressed_signal),
-                adapt_static_receiver(
-                    as_static_receiver2(AtomicSignalW(&self.valve_state_signal)),
-                    move |_| Some(valve_state.0.get()),
-                ),
-                // adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                //     Some(wm_state.get())
-                // }),
-                // adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                //     Some(battery_state.get())
-                // }),
-                merge(
-                    as_static_sender(&self.draw_request_signal),
-                    draw_request_sink,
-                ),
-            )
-            .await;
-        }
+    ) {
+        process(
+            &self.state,
+            as_static_receiver(&self.button1_pressed_signal),
+            as_static_receiver(&self.button2_pressed_signal),
+            as_static_receiver(&self.button3_pressed_signal),
+            adapt_static_receiver(
+                as_static_receiver(&self.valve_state_signal),
+                //as_channel(&self.valve_state_signal),
+                move |_| Some(valve_state.0.get()),
+            ),
+            // adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
+            //     Some(wm_state.get())
+            // }),
+            // adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
+            //     Some(battery_state.get())
+            // }),
+            merge(
+                as_static_sender(&self.draw_request_signal),
+                draw_request_sink,
+            ),
+        )
+        .await;
     }
 }
 

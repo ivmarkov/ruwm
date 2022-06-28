@@ -4,6 +4,10 @@ use embedded_svc::utils::asynch::channel::adapt;
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
 
+pub struct I64552<C>(pub &'static C)
+where
+    C: 'static;
+
 // TODO: Something seems wrong here as this signature should
 // be equivalent to as_channel which is being called
 // Late-binding lifetimes?
@@ -15,8 +19,6 @@ where
     as_channel(signal)
 }
 
-pub struct AtomicSignalW(pub &'static AtomicSignal<()>);
-
 // TODO: Something seems wrong here as this signature should
 // be equivalent to as_channel which is being called
 // Late-binding lifetimes?
@@ -26,10 +28,6 @@ where
     T: Send + 'static,
 {
     as_channel(signal)
-}
-
-pub fn as_static_receiver2(signal: AtomicSignalW) -> impl Receiver<Data = ()> + 'static {
-    as_channel(signal.0)
 }
 
 // TODO: Something seems wrong here as this signature should

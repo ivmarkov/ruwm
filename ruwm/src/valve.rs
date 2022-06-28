@@ -16,6 +16,7 @@ use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use crate::state::{
     update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
+use crate::utils::I64552;
 
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
@@ -32,10 +33,6 @@ pub type ValveStateCell<R> = CachingStateCell<
     MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
     MutRefStateCell<NoopRawMutex, Option<ValveState>>,
 >;
-
-pub struct ValveStateCellW<R>(pub &'static ValveStateCell<R>)
-where
-    R: RawMutex + 'static;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ValveCommand {
@@ -70,8 +67,10 @@ where
         }
     }
 
-    pub fn state(&'static self) -> ValveStateCellW<R> {
-        ValveStateCellW(&self.state)
+    pub fn state(
+        &'static self,
+    ) -> I64552<impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static> {
+        I64552(&self.state)
     }
 
     pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {
