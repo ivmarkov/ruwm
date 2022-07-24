@@ -1,49 +1,29 @@
 use core::fmt::Debug;
-use core::mem;
 
+use embedded_svc::utils::asynch::mutex::AsyncMutex;
 use embedded_svc::utils::asynch::signal::AtomicSignal;
-use enumset::{EnumSet, EnumSetType};
+use embedded_svc::utils::asynch::waker::MultiWakerRegistration;
+use embedded_svc::utils::mutex::Mutex;
 use log::info;
 use postcard::{from_bytes, to_slice};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::errors::wrap::{EitherError, WrapError};
 use embedded_svc::mutex::RawMutex;
-use embedded_svc::utils::asynch::select::{select, select4, select_all_hvec, Either, Either4};
+use embedded_svc::utils::asynch::select::select4;
 use embedded_svc::utils::asynch::signal::adapt::as_channel;
-use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::utils::role::Role;
-use embedded_svc::ws::asynch::{Acceptor, Receiver as _, Sender as _};
+use embedded_svc::ws;
 use embedded_svc::ws::FrameType;
 
 use crate::battery::BatteryState;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
+use crate::utils::{adapt_static_receiver, as_static_receiver, StaticRef};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
 
-pub type ConnectionId = usize;
-
-pub struct SenderInfo<A: Acceptor> {
-    id: ConnectionId,
-    role: Role,
-    pending_responses: EnumSet<ResponseType>,
-    sender: Option<A::Sender>,
-}
-
-#[derive(Debug, EnumSetType)]
-enum ResponseType {
-    AuthFailed,
-    Role,
-    WifiStatus,
-    // WifiConf,
-    // MqttStatus,
-    // MqttConf,
-    Valve,
-    WM,
-    Battery,
-}
+type WR = MultiWakerRegistration<4>;
 
 #[derive(Debug)]
 enum WebFrame {
@@ -53,28 +33,16 @@ enum WebFrame {
     Unknown,
 }
 
-pub struct Web<R, A, const N: usize>
-where
-    R: RawMutex,
-    A: Acceptor,
-{
-    connections: Mutex<R, heapless::Vec<SenderInfo<A>, N>>,
-    pending_responses_signal: AtomicSignal<()>,
+pub struct Web {
     valve_state_signal: AtomicSignal<()>,
     wm_state_signal: AtomicSignal<()>,
     wm_stats_state_signal: AtomicSignal<()>,
     battery_state_signal: AtomicSignal<()>,
 }
 
-impl<R, A, const N: usize> Web<R, A, N>
-where
-    R: RawMutex,
-    A: Acceptor,
-{
+impl Web {
     pub fn new() -> Self {
         Self {
-            connections: Mutex::new(heapless::Vec::<_, N>::new()),
-            pending_responses_signal: AtomicSignal::new(),
             valve_state_signal: AtomicSignal::new(),
             wm_state_signal: AtomicSignal::new(),
             wm_stats_state_signal: AtomicSignal::new(),
@@ -98,19 +66,23 @@ where
         as_channel(&self.battery_state_signal)
     }
 
-    pub async fn send<const F: usize>(
+    pub async fn process<R, const F: usize>(
         &'static self,
+        connection: impl ws::asynch::Sender + ws::asynch::Receiver,
+        valve_command: impl Sender<Data = ValveCommand>,
+        wm_command: impl Sender<Data = WaterMeterCommand>,
         valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static),
         wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
-    ) {
+    ) where
+        R: RawMutex,
+    {
         let battery_state_wrapper = StaticRef(battery_state);
         let valve_state_wrapper = StaticRef(valve_state);
         let wm_state_wrapper = StaticRef(wm_state);
 
-        send::<A, N, F>(
-            &self.connections,
-            as_static_receiver(&self.pending_responses_signal),
+        process::<R, F>(
+            connection,
             adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
                 Some(valve_state_wrapper.0.get())
             }),
@@ -120,6 +92,8 @@ where
             adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
                 Some(battery_state_wrapper.0.get())
             }),
+            valve_command,
+            wm_command,
             valve_state,
             wm_state,
             battery_state,
@@ -127,282 +101,133 @@ where
         .await
         .unwrap(); // TODO
     }
+}
 
-    pub async fn receive<const F: usize>(
-        &'static self,
-        ws_acceptor: A,
-        valve_command: impl Sender<Data = ValveCommand>,
-        wm_command: impl Sender<Data = WaterMeterCommand>,
-    ) {
-        receive::<A, N, F>(
-            &self.connections,
-            ws_acceptor,
-            as_static_sender(&self.pending_responses_signal),
+pub async fn process<R: RawMutex, const F: usize>(
+    connection: impl ws::asynch::Sender + ws::asynch::Receiver,
+    valve_state: impl Receiver<Data = Option<ValveState>>,
+    wm_state: impl Receiver<Data = WaterMeterState>,
+    battery_state: impl Receiver<Data = BatteryState>,
+    valve_command: impl Sender<Data = ValveCommand>,
+    wm_command: impl Sender<Data = WaterMeterCommand>,
+    valve: &impl StateCellRead<Data = Option<ValveState>>,
+    wm: &impl StateCellRead<Data = WaterMeterState>,
+    battery: &impl StateCellRead<Data = BatteryState>,
+) -> Result<(), ()> //WrapError<impl Debug>>
+{
+    let connection = AsyncMutex::<R, WR, _>::new(connection);
+
+    let role = Mutex::<R, _>::new(Role::None);
+
+    select4(
+        receive::<F, _>(
+            &connection,
+            &role,
             valve_command,
             wm_command,
-        )
-        .await
-        .unwrap(); // TODO
-    }
+            valve,
+            wm,
+            battery,
+        ),
+        send_state::<F, _, _>(&connection, &role, valve_state, |state| {
+            WebEvent::ValveState(state)
+        }),
+        send_state::<F, _, _>(&connection, &role, wm_state, |state| {
+            WebEvent::WaterMeterState(state)
+        }),
+        send_state::<F, _, _>(&connection, &role, battery_state, |state| {
+            WebEvent::BatteryState(state)
+        }),
+    )
+    .await;
+
+    Ok(())
 }
 
-pub async fn send<A, const N: usize, const F: usize>(
-    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
-    mut pending_responses_source: impl Receiver<Data = ()>,
-    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
-    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
-    mut battery_state_source: impl Receiver<Data = BatteryState>,
-    valve_state: &impl StateCellRead<Data = Option<ValveState>>,
-    wm_state: &impl StateCellRead<Data = WaterMeterState>,
-    battery_state: &impl StateCellRead<Data = BatteryState>,
-) -> Result<(), WrapError<impl Debug>>
-where
-    A: Acceptor,
+async fn receive<const F: usize, R: RawMutex>(
+    connection: &AsyncMutex<R, WR, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    role: &Mutex<R, Role>,
+    mut valve_command: impl Sender<Data = ValveCommand>,
+    mut wm_command: impl Sender<Data = WaterMeterCommand>,
+    valve: &impl StateCellRead<Data = Option<ValveState>>,
+    wm: &impl StateCellRead<Data = WaterMeterState>,
+    battery: &impl StateCellRead<Data = BatteryState>,
+) -> Result<(), ()> //WrapError<impl Debug>>
 {
     loop {
-        let pending = pending_responses_source.recv();
-        let valve = valve_state_source.recv();
-        let wm = wm_state_source.recv();
-        let battery = battery_state_source.recv();
-
-        //pin_mut!(pending, valve, wm, battery);
-
-        let (response_types, pending_only) = match select4(pending, valve, wm, battery).await {
-            Either4::First(_) => (EnumSet::all(), true),
-            Either4::Second(_) => (EnumSet::only(ResponseType::Valve), false),
-            Either4::Third(_) => (EnumSet::only(ResponseType::WM), false),
-            Either4::Fourth(_) => (EnumSet::only(ResponseType::Battery), false),
-        };
-
-        for response_type in [
-            ResponseType::AuthFailed,
-            ResponseType::Role,
-            ResponseType::WifiStatus,
-            ResponseType::Valve,
-            ResponseType::Battery,
-            ResponseType::WM,
-        ]
-        // Important to first reply to auth requests which failed, then to role requests, and then to everything else
+        let request = match web_receive::<F, _>(&mut *connection.lock().await)
+            .await
+            .unwrap()
         {
-            if response_types.contains(response_type) {
-                let c_r = {
-                    let mut connections = connections.lock();
-
-                    let c_r = connections
-                        .iter()
-                        .filter(|si| !pending_only || si.pending_responses.contains(response_type))
-                        .map(|si| (si.id, si.role))
-                        .collect::<heapless::Vec<_, N>>();
-
-                    for connection in &mut *connections {
-                        connection.pending_responses.remove(response_type);
-                    }
-
-                    c_r
-                };
-
-                for (connection_id, role) in c_r {
-                    let event = match response_type {
-                        ResponseType::AuthFailed => WebEvent::AuthenticationFailed,
-                        ResponseType::Role => WebEvent::RoleState(role),
-                        ResponseType::WifiStatus => todo!(),
-                        ResponseType::Valve => WebEvent::ValveState(valve_state.get()),
-                        ResponseType::WM => WebEvent::WaterMeterState(wm_state.get()),
-                        ResponseType::Battery => WebEvent::BatteryState(battery_state.get()),
-                    };
-
-                    if event.role() >= role {
-                        web_send_single::<A, N, F>(connections, connection_id, &event).await?;
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub async fn receive<A, const N: usize, const F: usize>(
-    connections: &'static Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
-    mut ws_acceptor: A,
-    mut pending_responses_sink: impl Sender<Data = ()>,
-    mut valve_command_sink: impl Sender<Data = ValveCommand>,
-    mut wm_command_sink: impl Sender<Data = WaterMeterCommand>,
-) -> Result<(), WrapError<impl Debug>>
-where
-    A: Acceptor,
-{
-    let mut next_connection_id: ConnectionId = 0;
-    let mut ws_receivers = heapless::Vec::<_, N>::new();
-
-    loop {
-        enum SelectResult<A: Acceptor> {
-            Accept(A::Sender, A::Receiver),
-            Close,
-            Receive(usize, WebFrame),
-        }
-
-        let result: SelectResult<A> = {
-            let ws_receivers = ws_receivers
-                .iter_mut()
-                .enumerate()
-                .map(|(index, ws_receiver)| web_receive::<A, F>(ws_receiver, index))
-                .collect::<heapless::Vec<_, N>>();
-
-            if ws_receivers.is_empty() {
-                ws_acceptor
-                    .accept()
-                    .await
-                    .map_err(EitherError::E1)?
-                    .map_or_else(
-                        || SelectResult::Close,
-                        |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
-                    )
-            } else {
-                let ws_acceptor = ws_acceptor.accept();
-                let ws_receivers = select_all_hvec(ws_receivers);
-
-                //pin_mut!(ws_acceptor, ws_receivers);
-
-                match select(ws_acceptor, ws_receivers).await {
-                    Either::First(accept) => accept.map_err(EitherError::E2)?.map_or_else(
-                        || SelectResult::Close,
-                        |(ws_sender, ws_receiver)| SelectResult::Accept(ws_sender, ws_receiver),
-                    ),
-                    Either::Second((receive, _)) => {
-                        let (size, frame) = receive.map_err(EitherError::E2)?;
-
-                        SelectResult::Receive(size, frame)
-                    }
-                }
-            }
+            WebFrame::Request(request) => request,
+            WebFrame::Control => todo!(),
+            WebFrame::Close => break,
+            WebFrame::Unknown => return Err(()),
         };
 
-        match result {
-            SelectResult::Accept(new_sender, new_receiver) => {
-                info!("[WS ACCEPT]");
+        let response = request.response(*role.lock());
 
-                let role = Role::None;
+        let web_event = if response.is_accepted() {
+            match request.payload() {
+                WebRequestPayload::ValveCommand(command) => {
+                    valve_command.send(*command).await;
+                    WebEvent::Response(response)
+                }
+                WebRequestPayload::WaterMeterCommand(command) => {
+                    wm_command.send(*command).await;
+                    WebEvent::Response(response)
+                }
+                WebRequestPayload::Authenticate(username, password) => {
+                    if let Some(new_role) = authenticate(username, password) {
+                        info!("[WS] Authenticated; role: {}", new_role);
 
-                let id = next_connection_id;
-                next_connection_id += 1;
+                        *role.lock() = new_role;
+                        WebEvent::RoleState(new_role)
+                    } else {
+                        info!("[WS] Authentication failed");
 
-                connections
-                    .lock()
-                    .push(SenderInfo {
-                        id,
-                        role,
-                        pending_responses: EnumSet::all(),
-                        sender: Some(new_sender),
-                    })
-                    .unwrap_or_else(|_| panic!());
-
-                ws_receivers.push(new_receiver).unwrap_or_else(|_| panic!());
-
-                pending_responses_sink.send(()).await;
-            }
-            SelectResult::Close => {
-                info!("[WS CLOSE]");
-                break;
-            }
-            SelectResult::Receive(index, receive) => {
-                match receive {
-                    WebFrame::Request(ref request) => {
-                        let (id, role) = {
-                            let sender = &connections.lock()[index];
-
-                            (sender.id, sender.role)
-                        };
-
-                        process_request::<A, N, F>(
-                            connections,
-                            id,
-                            role,
-                            request,
-                            &mut pending_responses_sink,
-                            &mut valve_command_sink,
-                            &mut wm_command_sink,
-                        )
-                        .await;
+                        *role.lock() = Role::None;
+                        WebEvent::AuthenticationFailed
                     }
-                    WebFrame::Control => (),
-                    WebFrame::Close | WebFrame::Unknown => {
-                        ws_receivers.swap_remove(index);
-                        connections.lock().swap_remove(index);
-                    }
-                };
+                }
+                WebRequestPayload::Logout => {
+                    *role.lock() = Role::None;
+                    WebEvent::RoleState(Role::None)
+                }
+                WebRequestPayload::ValveStateRequest => WebEvent::ValveState(valve.get()),
+                WebRequestPayload::WaterMeterStateRequest => WebEvent::WaterMeterState(wm.get()),
+                WebRequestPayload::BatteryStateRequest => WebEvent::BatteryState(battery.get()),
+                WebRequestPayload::WifiStatusRequest => todo!(),
             }
-        }
+        } else {
+            WebEvent::Response(response)
+        };
+
+        web_send::<F, _>(&mut *connection.lock().await, &web_event)
+            .await
+            .unwrap();
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_request<A, const N: usize, const F: usize>(
-    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
-    connection_id: ConnectionId,
-    role: Role,
-    request: &WebRequest,
-    pending_responses_sink: &mut impl Sender<Data = ()>,
-    valve_command: &mut impl Sender<Data = ValveCommand>,
-    wm_command: &mut impl Sender<Data = WaterMeterCommand>,
-) where
-    A: Acceptor,
+async fn send_state<const F: usize, R: RawMutex, T>(
+    connection: &AsyncMutex<R, WR, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    role: &Mutex<R, Role>,
+    mut state: impl Receiver<Data = T>,
+    to_web_event: impl Fn(T) -> WebEvent,
+) -> Result<(), ()> //WrapError<impl Debug>>
 {
-    let response = request.response(role);
-    let accepted = response.is_accepted();
+    loop {
+        let state = state.recv().await;
 
-    if accepted {
-        match request.payload() {
-            WebRequestPayload::ValveCommand(command) => {
-                valve_command.send(*command).await;
-            }
-            WebRequestPayload::WaterMeterCommand(command) => {
-                wm_command.send(*command).await;
-            }
-            other => {
-                {
-                    let mut connections = connections.lock();
-
-                    let mut si = connections
-                        .iter_mut()
-                        .find(|si| si.id == connection_id)
-                        .unwrap();
-
-                    match other {
-                        WebRequestPayload::Authenticate(username, password) => {
-                            if let Some(role) = authenticate(username, password) {
-                                info!("[WS] Authenticated; role: {}", role);
-
-                                si.role = role;
-                                si.pending_responses.insert(ResponseType::Role);
-                            } else {
-                                info!("[WS] Authentication failed");
-
-                                si.role = Role::None;
-                                si.pending_responses.insert(ResponseType::AuthFailed);
-                            }
-                        }
-                        WebRequestPayload::Logout => {
-                            si.role = Role::None;
-                            si.pending_responses.insert(ResponseType::Role);
-                        }
-                        WebRequestPayload::ValveStateRequest => {
-                            si.pending_responses.insert(ResponseType::Valve);
-                        }
-                        WebRequestPayload::WaterMeterStateRequest => {
-                            si.pending_responses.insert(ResponseType::WM);
-                        }
-                        WebRequestPayload::BatteryStateRequest => {
-                            si.pending_responses.insert(ResponseType::Battery);
-                        }
-                        WebRequestPayload::WifiStatusRequest => todo!(),
-                        _ => unreachable!(),
-                    }
-                }
-
-                pending_responses_sink.send(()).await;
-            }
-        }
+        web_send_auth::<F, _>(
+            &mut *connection.lock().await,
+            &to_web_event(state),
+            *role.lock(),
+        )
+        .await
+        .unwrap();
     }
 }
 
@@ -410,39 +235,27 @@ fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 
-async fn web_send_single<A, const N: usize, const F: usize>(
-    connections: &Mutex<impl RawMutex, heapless::Vec<SenderInfo<A>, N>>,
-    id: ConnectionId,
+async fn web_send_auth<const F: usize, S>(
+    ws_sender: S,
     event: &WebEvent,
-) -> Result<(), EitherError<A::Error, postcard::Error>>
+    role: Role,
+) -> Result<(), EitherError<S::Error, postcard::Error>>
 where
-    A: Acceptor,
+    S: ws::asynch::Sender,
 {
-    let sender = if let Some(si) = connections.lock().iter_mut().find(|si| si.id == id) {
-        mem::replace(&mut si.sender, None)
+    if event.role() >= role {
+        web_send::<F, _>(ws_sender, event).await
     } else {
-        None
-    };
-
-    if let Some(mut sender) = sender {
-        let result = web_send::<A, F>(&mut sender, event).await;
-
-        if let Some(si) = connections.lock().iter_mut().find(|si| si.id == id) {
-            si.sender = Some(sender);
-        }
-
-        result?;
+        Ok(())
     }
-
-    Ok(())
 }
 
-async fn web_send<A, const F: usize>(
-    ws_sender: &mut A::Sender,
+async fn web_send<const F: usize, S>(
+    mut ws_sender: S,
     event: &WebEvent,
-) -> Result<(), EitherError<A::Error, postcard::Error>>
+) -> Result<(), EitherError<S::Error, postcard::Error>>
 where
-    A: Acceptor,
+    S: ws::asynch::Sender,
 {
     info!("[WS SEND] {:?}", event);
 
@@ -451,19 +264,16 @@ where
     let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
 
     ws_sender
-        .send(frame_type, Some(&frame_buf[..size]))
+        .send(frame_type, &frame_buf[..size])
         .await
         .map_err(EitherError::E1)?;
 
     Ok(())
 }
 
-async fn web_receive<A, const F: usize>(
-    ws_receiver: &mut A::Receiver,
-    index: usize,
-) -> Result<(usize, WebFrame), A::Error>
+async fn web_receive<const F: usize, R>(mut ws_receiver: R) -> Result<WebFrame, R::Error>
 where
-    A: Acceptor,
+    R: ws::asynch::Receiver,
 {
     let mut frame_buf = [0_u8; F];
 
@@ -471,9 +281,9 @@ where
 
     let receive = from_ws_frame(frame_type, &frame_buf[..size]);
 
-    info!("[WS RECEIVE] {}/{:?}", index, receive);
+    info!("[WS RECEIVE] {:?}", receive);
 
-    Ok((index, receive))
+    Ok(receive)
 }
 
 fn from_ws_frame(frame_type: FrameType, frame_buf: &[u8]) -> WebFrame {
