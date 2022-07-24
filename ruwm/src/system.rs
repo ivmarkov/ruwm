@@ -16,8 +16,8 @@ use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
 use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
 use embedded_svc::utils::mutex::Mutex;
-use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
-use embedded_svc::ws::asynch::Acceptor;
+use embedded_svc::wifi::Wifi as WifiTrait;
+use embedded_svc::ws;
 
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
@@ -41,11 +41,10 @@ pub struct SlowMem {
     wm_stats: WaterMeterStatsState,
 }
 
-pub struct System<R, S, A, const N: usize>
+pub struct System<R, S, const N: usize>
 where
     R: RawMutex + 'static,
     S: Storage + Send + 'static,
-    A: Acceptor,
 {
     storage: &'static Mutex<R, S>,
     valve: Valve<R>,
@@ -67,15 +66,14 @@ where
     screen: Screen<R>,
 
     wifi: Wifi<R>,
-    web: Web<R, A, N>,
+    web: Web,
     mqtt: Mqtt,
 }
 
-impl<R, S, A, const N: usize> System<R, S, A, N>
+impl<R, S, const N: usize> System<R, S, N>
 where
     R: RawMutex + 'static,
     S: Storage + Send + 'static,
-    A: Acceptor,
 {
     pub fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, S>) -> Self {
         Self {
@@ -103,7 +101,7 @@ where
             .process(
                 merge(self.keepalive.event_sink(), event_logger::sink("VALVE"))
                     .and(self.screen.valve_state_sink())
-                    .and(self.web.valve_state_sink())
+                    //.and(self.web.valve_state_sink())
                     .and(self.mqtt.valve_state_sink()),
             )
             .await
@@ -126,7 +124,7 @@ where
                 pulse_counter,
                 merge(self.keepalive.event_sink(), event_logger::sink("WM"))
                     .and(self.screen.wm_state_sink())
-                    .and(self.web.wm_state_sink())
+                    //.and(self.web.wm_state_sink())
                     .and(self.mqtt.wm_state_sink()),
             )
             .await
@@ -138,8 +136,7 @@ where
                 timer,
                 sys_time,
                 merge(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
-                    .and(self.screen.wm_stats_state_sink())
-                    .and(self.web.wm_stats_state_sink()),
+                    .and(self.screen.wm_stats_state_sink()), //.and(self.web.wm_stats_state_sink())
             )
             .await
     }
@@ -161,7 +158,7 @@ where
                 power_pin,
                 merge(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
                     .and(self.screen.battery_state_sink())
-                    .and(self.web.battery_state_sink())
+                    //.and(self.web.battery_state_sink())
                     .and(self.mqtt.battery_state_sink()),
             )
             .await
@@ -317,15 +314,19 @@ where
             .await
     }
 
-    pub async fn web_send<const F: usize>(&'static self) {
+    pub async fn web<const F: usize>(
+        &'static self,
+        connection: impl ws::asynch::Sender + ws::asynch::Receiver,
+    ) {
         self.web
-            .send::<F>(self.valve.state(), self.wm.state(), self.battery.state())
-            .await
-    }
-
-    pub async fn web_receive<const F: usize>(&'static self, acceptor: A) {
-        self.web
-            .receive::<F>(acceptor, self.valve.command_sink(), self.wm.command_sink())
+            .process::<R, F>(
+                connection,
+                self.valve.command_sink(),
+                self.wm.command_sink(),
+                self.valve.state(),
+                self.wm.state(),
+                self.battery.state(),
+            )
             .await
     }
 

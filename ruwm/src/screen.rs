@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::unblocker::asynch::Unblocker;
+use embedded_svc::executor::asynch::Unblocker;
 use embedded_svc::utils::asynch::channel::adapt::merge;
 use embedded_svc::utils::asynch::select::{select3, select4, Either3, Either4};
 use embedded_svc::utils::asynch::signal::adapt::as_channel;

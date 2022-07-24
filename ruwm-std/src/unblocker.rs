@@ -3,12 +3,12 @@ use core::future::Future;
 extern crate alloc;
 use alloc::boxed::Box;
 
-use embedded_svc::unblocker::asynch::{Blocker, Unblocker};
+use embedded_svc::executor::asynch::{Blocker, Unblocker};
 
 #[derive(Clone)]
 pub struct SmolBlocker;
 
-impl Blocker<'static> for SmolBlocker {
+impl Blocker for SmolBlocker {
     fn block_on<F>(&self, f: F) -> F::Output
     where
         F: Future,
