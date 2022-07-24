@@ -24,6 +24,15 @@ use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, 
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct MqttConfiguration {
+    protocol_311: bool,
+    url: heapless::String<128>,
+    client_id: heapless::String<64>,
+    username: heapless::String<64>,
+    password: heapless::String<64>,
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum MqttCommand {
     KeepAlive(Duration),

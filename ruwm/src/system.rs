@@ -16,7 +16,7 @@ use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
 use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
 use embedded_svc::utils::mutex::Mutex;
-use embedded_svc::wifi::Wifi as WifiTrait;
+use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 use embedded_svc::ws::asynch::Acceptor;
 
 use crate::battery::Battery;
@@ -37,7 +37,7 @@ use crate::wifi::Wifi;
 #[derive(Default)]
 pub struct SlowMem {
     valve: Option<ValveState>,
-    wm: Option<WaterMeterState>,
+    wm: Option<WaterMeterState>, // Only a cache for NVS
     wm_stats: WaterMeterStatsState,
 }
 

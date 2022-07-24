@@ -18,7 +18,7 @@ embedded-svc = { path = "../embedded-svc" }
 esp-idf-hal = { path = "../esp-idf-hal" }
 esp-idf-svc = { path = "../esp-idf-svc" }
 #embuild = { path = "../embuild" }
-#edge-frame = { path = "../edge-frame/edge-frame" }
+edge-frame = { path = "../edge-frame/edge-frame" }
 
 [profile.release]
 opt-level = "s"
