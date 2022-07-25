@@ -41,7 +41,7 @@ pub struct SlowMem {
     wm_stats: WaterMeterStatsState,
 }
 
-pub struct System<R, S, const N: usize>
+pub struct System<const N: usize, R, S, T>
 where
     R: RawMutex + 'static,
     S: Storage + Send + 'static,
@@ -66,14 +66,15 @@ where
     screen: Screen<R>,
 
     wifi: Wifi<R>,
-    web: Web,
+    web: Web<N, R, T>,
     mqtt: Mqtt,
 }
 
-impl<R, S, const N: usize> System<R, S, N>
+impl<const N: usize, R, S, T> System<N, R, S, T>
 where
     R: RawMutex + 'static,
     S: Storage + Send + 'static,
+    T: ws::asynch::Sender + ws::asynch::Receiver,
 {
     pub fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, S>) -> Self {
         Self {
@@ -101,7 +102,7 @@ where
             .process(
                 merge(self.keepalive.event_sink(), event_logger::sink("VALVE"))
                     .and(self.screen.valve_state_sink())
-                    //.and(self.web.valve_state_sink())
+                    .and(self.web.valve_state_sink())
                     .and(self.mqtt.valve_state_sink()),
             )
             .await
@@ -124,7 +125,7 @@ where
                 pulse_counter,
                 merge(self.keepalive.event_sink(), event_logger::sink("WM"))
                     .and(self.screen.wm_state_sink())
-                    //.and(self.web.wm_state_sink())
+                    .and(self.web.wm_state_sink())
                     .and(self.mqtt.wm_state_sink()),
             )
             .await
@@ -136,7 +137,8 @@ where
                 timer,
                 sys_time,
                 merge(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
-                    .and(self.screen.wm_stats_state_sink()), //.and(self.web.wm_stats_state_sink())
+                    .and(self.screen.wm_stats_state_sink())
+                    .and(self.web.wm_stats_state_sink()),
             )
             .await
     }
@@ -158,7 +160,7 @@ where
                 power_pin,
                 merge(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
                     .and(self.screen.battery_state_sink())
-                    //.and(self.web.battery_state_sink())
+                    .and(self.web.battery_state_sink())
                     .and(self.mqtt.battery_state_sink()),
             )
             .await
@@ -314,13 +316,13 @@ where
             .await
     }
 
-    pub async fn web<const F: usize>(
-        &'static self,
-        connection: impl ws::asynch::Sender + ws::asynch::Receiver,
-    ) {
+    pub async fn web_handle(&'static self, connection: T) {
+        self.web.handle(connection).await;
+    }
+
+    pub async fn web<const F: usize>(&'static self) {
         self.web
-            .process::<R, F>(
-                connection,
+            .process::<F>(
                 self.valve.command_sink(),
                 self.wm.command_sink(),
                 self.valve.state(),
