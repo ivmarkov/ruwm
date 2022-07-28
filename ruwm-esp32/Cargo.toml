@@ -26,7 +26,7 @@ smol = "1.2"
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.22", features = ["experimental"] }
 esp-idf-sys = { version = "0.31.6", features = ["binstart"] }
-esp-idf-svc = { version = "0.42", features = ["experimental", "isr-async-executor"] }
+esp-idf-svc = { version = "0.42", features = ["experimental", "embedded-async-executor"] }
 esp-idf-hal = { version = "0.38", features = ["experimental"] }
 embedded-graphics = "0.7"
 display-interface = "0.4"
