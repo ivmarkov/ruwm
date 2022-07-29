@@ -18,7 +18,7 @@ use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asynch::EventBus;
 use embedded_svc::executor::asynch::{Executor, WaitableExecutor};
-use embedded_svc::http::server::{FnRequestHandler, Method};
+use embedded_svc::http::server::Method;
 use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asynch::executor::embedded::{EmbeddedExecutor, Local, Sendable};
 use embedded_svc::utils::asynch::executor::spawn::TasksSpawner;
@@ -36,9 +36,7 @@ use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::errors::EspIOError;
 use esp_idf_svc::executor::asynch::embedded::*;
-use esp_idf_svc::http::server::ws::asynch::{
-    EspHttpWsAsyncAcceptor, EspHttpWsAsyncConnection, EspHttpWsProcessor,
-};
+use esp_idf_svc::http::server::ws::asynch::{EspHttpWsAsyncConnection, EspHttpWsProcessor};
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
@@ -138,7 +136,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
     let (mut executor1, tasks1) = TasksSpawner::<16, _, ()>::new(
-        EmbeddedExecutor::<64, _, _, Local>::new(TaskHandle::new(), CurrentTaskWait::new()),
+        EmbeddedExecutor::<16, _, _, Local>::new(TaskHandle::new(), CurrentTaskWait::new()),
     )
     .spawn_local(system.valve())?
     .spawn_local(system.valve_spin(
@@ -223,12 +221,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
     for asset in &ASSETS {
-        let metadata = assets::serve::AssetMetadata::derive(asset.0);
-        httpd.handler(
-            metadata.uri,
-            Method::Get,
-            FnRequestHandler::new(|req| assets::serve::serve_asset_data(req, metadata, asset.1)),
-        )?;
+        httpd.fn_handler(asset.0, Method::Get, move |req| {
+            assets::serve::serve(req, &asset)
+        })?;
     }
 
     httpd.ws_handler("/ws", move |connection| {
@@ -259,27 +254,30 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         )?
         .spawn(system.wifi(wifi, wifi_state_changed_source))?
         .spawn(system.mqtt_receive(mqtt_conn))?
-        .spawn(system.web::<WS_MAX_FRAME_SIZE>())?
-        .release();
-
-    let (mut executor3, tasks3) =
-        TasksSpawner::<4, _, ()>::new(EmbeddedExecutor::<4, _, _, Sendable>::new(
-            TaskHandle::new(),
-            CurrentTaskWait::new(),
-        ))
-        .spawn(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
-        // TODO .spawn(system.web_send::<WS_MAX_FRAME_SIZE>())?
         .release();
 
     log::info!("Starting execution");
 
-    let executor2 = std::thread::spawn(move || {
+    let execution2 = std::thread::spawn(move || {
         executor2.with_context(|exec, ctx| {
             exec.run(ctx, || system.should_quit(), Some(tasks2));
         });
     });
 
-    let executor3 = std::thread::spawn(move || {
+    let execution3 = std::thread::spawn(move || {
+        let (mut executor3, tasks3) = (move || {
+            let spawner = TasksSpawner::<4, _, ()>::new(EmbeddedExecutor::<4, _, _, Local>::new(
+                TaskHandle::new(),
+                CurrentTaskWait::new(),
+            ))
+            .spawn_local(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
+            .spawn_local(system.web_accept(ws_acceptor))?
+            .spawn_local(system.web_process::<WS_MAX_FRAME_SIZE>())?;
+
+            Result::<_, SpawnError>::Ok(spawner.release())
+        })()
+        .unwrap();
+
         executor3.with_context(|exec, ctx| {
             exec.run(ctx, || system.should_quit(), Some(tasks3));
         });
@@ -293,8 +291,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     std::thread::sleep(Duration::from_millis(2000));
 
-    executor2.join().unwrap();
-    executor3.join().unwrap();
+    execution2.join().unwrap();
+    execution3.join().unwrap();
 
     log::info!("Finished execution");
 
