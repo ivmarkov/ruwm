@@ -18,6 +18,7 @@ use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
 use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws;
+use embedded_svc::ws::asynch::server::Acceptor;
 
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
@@ -316,11 +317,22 @@ where
             .await
     }
 
-    pub async fn web_handle(&'static self, connection: T) {
+    pub async fn web_accept<A>(&'static self, acceptor: A)
+    where
+        A: Acceptor<Connection = T>,
+    {
+        loop {
+            let connection = acceptor.accept().await.unwrap();
+
+            self.web.handle(connection).await;
+        }
+    }
+
+    pub async fn web_accept_handle(&'static self, connection: T) {
         self.web.handle(connection).await;
     }
 
-    pub async fn web<const F: usize>(&'static self) {
+    pub async fn web_process<const F: usize>(&'static self) {
         self.web
             .process::<F>(
                 self.valve.command_sink(),
