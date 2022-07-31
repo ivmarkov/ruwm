@@ -1,45 +1,141 @@
+use core::future::Future;
+
+use log::info;
+
+use embassy_util::blocking_mutex::raw::RawMutex;
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::signal::asynch::Signal;
-use embedded_svc::utils::asynch::channel::adapt;
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
-// Workaround, as we are possibly hit by this: https://github.com/rust-lang/rust/issues/64552
-#[derive(Clone)]
-pub struct StaticRef<C>(pub &'static C)
-where
-    C: 'static;
+use crate::{notification::Notification, signal::Signal, state::StateCellRead};
 
-// TODO: Something seems wrong here as this signature should
-// be equivalent to as_channel which is being called
-// Late-binding lifetimes?
-pub fn as_static_sender<S, T>(signal: &'static S) -> impl Sender<Data = T> + 'static
-where
-    S: Signal<Data = T> + Send + Sync + 'static,
-    T: Send + 'static,
-{
-    as_channel(signal)
+pub struct NotifReceiver<'a, S>(&'a Notification, &'a S);
+
+impl<'a, S> NotifReceiver<'a, S> {
+    pub const fn new(notif: &'a Notification, state: &'a S) -> Self {
+        Self(notif, state)
+    }
 }
 
-// TODO: Something seems wrong here as this signature should
-// be equivalent to as_channel which is being called
-// Late-binding lifetimes?
-pub fn as_static_receiver<S, T>(signal: &'static S) -> impl Receiver<Data = T> + 'static
+impl<'a, S> Receiver for NotifReceiver<'a, S>
 where
-    S: Signal<Data = T> + Send + Sync + 'static,
-    T: Send + 'static,
+    S: StateCellRead + Send + Sync,
+    S::Data: Send,
 {
-    as_channel(signal)
+    type Data = S::Data;
+
+    type RecvFuture<'b> = impl Future<Output = Self::Data> where Self: 'b;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            self.0.wait();
+
+            self.1.get()
+        }
+    }
 }
 
-// TODO: Something seems wrong here as this signature should
-// be equivalent to adapt which is being called
-// Late-binding lifetimes?
-pub fn adapt_static_receiver<R, T, F>(receiver: R, adapter: F) -> impl Receiver<Data = T> + 'static
+pub struct SignalReceiver<'a, R, T>(&'a Signal<R, T>)
 where
-    R: Receiver + Send + 'static,
-    R::Data: 'static,
-    T: Send + 'static,
-    F: Fn(R::Data) -> Option<T> + Send + Sync + 'static,
+    R: RawMutex;
+
+impl<'a, R, T> SignalReceiver<'a, R, T>
+where
+    R: RawMutex,
 {
-    adapt::adapt(receiver, adapter)
+    pub const fn new(signal: &'a Signal<R, T>) -> Self {
+        Self(signal)
+    }
+}
+
+impl<'a, R, T> Receiver for SignalReceiver<'a, R, T>
+where
+    R: RawMutex + Send + Sync,
+    T: Send + 'static,
+{
+    type Data = T;
+
+    type RecvFuture<'b> = impl Future<Output = Self::Data> where Self: 'b;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move { self.0.wait().await }
+    }
+}
+
+pub struct NotifSender<'a, const N: usize>([&'a Notification; N], &'static str);
+
+impl<'a, const N: usize> NotifSender<'a, N> {
+    pub const fn new(source: &'static str, notif: [&'a Notification; N]) -> Self {
+        Self(notif, source)
+    }
+}
+
+impl<'a, const N: usize> Sender for NotifSender<'a, N> {
+    type Data = ();
+
+    type SendFuture<'b> = impl Future<Output = Self::Data>
+    where Self: 'b;
+
+    fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
+        async move {
+            info!("{}", self.1);
+
+            for notif in self.0 {
+                notif.notify();
+            }
+        }
+    }
+}
+
+pub struct SignalSender<'a, const N: usize, R, T>([&'a Signal<R, T>; N], &'static str)
+where
+    R: RawMutex;
+
+impl<'a, const N: usize, R, T> SignalSender<'a, N, R, T>
+where
+    R: RawMutex,
+{
+    pub const fn new(source: &'static str, signal: [&'a Signal<R, T>; N]) -> Self {
+        Self(signal, source)
+    }
+}
+
+impl<'a, const N: usize, R, T> Sender for SignalSender<'a, N, R, T>
+where
+    R: RawMutex + Send + Sync,
+    T: Send + Clone + 'static,
+{
+    type Data = T;
+
+    type SendFuture<'b> = impl Future<Output = ()>
+    where Self: 'b;
+
+    fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
+        async move {
+            for signal in self.0 {
+                signal.signal(value.clone());
+            }
+
+            info!("{}", self.1);
+        }
+    }
+}
+
+pub fn as_arr<T, const N: usize, const M: usize, const R: usize>(
+    arr1: [T; N],
+    arr2: [T; M],
+) -> [T; R]
+where
+    T: Default,
+{
+    let result = [Default::default(); R];
+
+    for index in 0..N {
+        result[index] = arr1[index];
+    }
+
+    for index in 0..M {
+        result[N + index] = arr2[index];
+    }
+
+    result
 }

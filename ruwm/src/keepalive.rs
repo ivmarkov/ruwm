@@ -1,17 +1,17 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
+
+use embassy_util::{select, Either};
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::channel::adapt::adapt;
-use embedded_svc::utils::asynch::select::{select, Either};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
-use crate::utils::as_static_receiver;
+use crate::notification::Notification;
+use crate::state::NoopStateCell;
+use crate::utils::NotifReceiver;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
@@ -23,21 +23,18 @@ pub enum RemainingTime {
 }
 
 pub struct Keepalive {
-    event_signal: AtomicSignal<()>,
+    event_notif: Notification,
 }
 
 impl Keepalive {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            event_signal: AtomicSignal::new(),
+            event_notif: Notification::new(),
         }
     }
 
-    pub fn event_sink<D>(&'static self) -> impl Sender<Data = D> + 'static
-    where
-        D: Send + 'static,
-    {
-        adapt(as_channel(&self.event_signal), |_| Some(()))
+    pub fn event_sink(&self) -> &Notification {
+        &self.event_notif
     }
 
     pub async fn process(
@@ -50,7 +47,7 @@ impl Keepalive {
         process(
             timer,
             system_time,
-            as_static_receiver(&self.event_signal),
+            NotifReceiver::new(&self.event_notif, &NoopStateCell),
             remaining_time_sink,
             quit_sink,
         )

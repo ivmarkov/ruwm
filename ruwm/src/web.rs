@@ -1,28 +1,25 @@
+use core::cell::Cell;
 use core::fmt::Debug;
-use core::future::Future;
 
-use embedded_svc::signal::asynch::Signal;
 use log::info;
 use postcard::{from_bytes, to_slice};
 
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::blocking_mutex::Mutex;
+use embassy_util::channel::mpmc::Channel;
+use embassy_util::mutex::Mutex as AsyncMutex;
+use embassy_util::waitqueue::MultiWakerRegistration;
+use embassy_util::{select4, select_all};
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::errors::wrap::{EitherError, WrapError};
-use embedded_svc::mutex::RawMutex;
-use embedded_svc::utils::asynch::channel::adapt;
-use embedded_svc::utils::asynch::mpmc::Channel;
-use embedded_svc::utils::asynch::mutex::AsyncMutex;
-use embedded_svc::utils::asynch::select::{select4, select_all_hvec};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
-use embedded_svc::utils::asynch::waker::MultiWakerRegistration;
-use embedded_svc::utils::mutex::Mutex;
+use embedded_svc::errors::wrap::EitherError;
 use embedded_svc::utils::role::Role;
-use embedded_svc::ws;
-use embedded_svc::ws::FrameType;
+use embedded_svc::ws::{self, FrameType};
 
 use crate::battery::BatteryState;
+use crate::notification::Notification;
 use crate::state::StateCellRead;
-use crate::utils::StaticRef;
+use crate::utils::NotifReceiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
@@ -37,42 +34,15 @@ enum WebFrame {
     Unknown,
 }
 
-struct MultiSignal<'a, T>(&'a [AtomicSignal<T>]);
-
-impl<'b, T> MultiSignal<'b, T> {
-    pub const fn new(signals: &'b [AtomicSignal<T>]) -> Self {
-        Self(signals)
-    }
-}
-
-impl<'b, T> Sender for MultiSignal<'b, T>
-where
-    T: Send + Sync + Copy,
-{
-    type SendFuture<'a>
-    = impl Future<Output = ()>
-    where Self: 'a;
-
-    type Data = T;
-
-    fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
-        async move {
-            for signal in self.0 {
-                signal.signal(value);
-            }
-        }
-    }
-}
-
 pub struct Web<const N: usize, R, T>
 where
     R: RawMutex,
 {
     channel: Channel<R, T, 1>,
-    valve_state_signals: heapless::Vec<AtomicSignal<()>, N>,
-    wm_state_signals: heapless::Vec<AtomicSignal<()>, N>,
-    wm_stats_state_signals: heapless::Vec<AtomicSignal<()>, N>,
-    battery_state_signals: heapless::Vec<AtomicSignal<()>, N>,
+    valve_state_signals: [Notification; N],
+    wm_state_signals: [Notification; N],
+    wm_stats_state_signals: [Notification; N],
+    battery_state_signals: [Notification; N],
 }
 
 impl<const N: usize, R, T> Web<N, R, T>
@@ -83,35 +53,27 @@ where
     pub fn new() -> Self {
         Self {
             channel: Channel::new(),
-            valve_state_signals: (0..N)
-                .map(|_| AtomicSignal::new())
-                .collect::<heapless::Vec<_, N>>(),
-            wm_state_signals: (0..N)
-                .map(|_| AtomicSignal::new())
-                .collect::<heapless::Vec<_, N>>(),
-            wm_stats_state_signals: (0..N)
-                .map(|_| AtomicSignal::new())
-                .collect::<heapless::Vec<_, N>>(),
-            battery_state_signals: (0..N)
-                .map(|_| AtomicSignal::new())
-                .collect::<heapless::Vec<_, N>>(),
+            valve_state_signals: [Default::default(); N],
+            wm_state_signals: [Default::default(); N],
+            wm_stats_state_signals: [Default::default(); N],
+            battery_state_signals: [Default::default(); N],
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        MultiSignal::new(&self.valve_state_signals)
+    pub fn valve_state_sinks(&self) -> &[Notification] {
+        &self.valve_state_signals
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        MultiSignal::new(&self.wm_state_signals)
+    pub fn wm_state_sinks(&'static self) -> &[Notification] {
+        &self.wm_state_signals
     }
 
-    pub fn wm_stats_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        MultiSignal::new(&self.wm_stats_state_signals)
+    pub fn wm_stats_state_sinks(&'static self) -> &[Notification] {
+        &self.wm_stats_state_signals
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        MultiSignal(&self.battery_state_signals)
+    pub fn battery_state_sinks(&'static self) -> &[Notification] {
+        &self.battery_state_signals
     }
 
     pub async fn handle(&self, connection: T) {
@@ -126,8 +88,8 @@ where
         wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
     ) {
-        let valve_command = AsyncMutex::<R, MultiWakerRegistration<N>, _>::new(valve_command);
-        let wm_command = AsyncMutex::<R, MultiWakerRegistration<N>, _>::new(wm_command);
+        let valve_command = AsyncMutex::<R, _>::new(valve_command);
+        let wm_command = AsyncMutex::<R, _>::new(wm_command);
 
         let mut workers = heapless::Vec::<_, N>::new();
 
@@ -139,25 +101,15 @@ where
 
                     async move {
                         loop {
-                            let valve_state_wrapper = StaticRef(valve_state);
-                            let wm_state_wrapper = StaticRef(wm_state);
-                            let battery_state_wrapper = StaticRef(battery_state);
-
                             let connection = self.channel.recv().await;
 
                             handle_connection::<R, F>(
                                 connection,
-                                adapt::adapt(
-                                    as_channel(&self.valve_state_signals[index]),
-                                    move |_| Some(valve_state_wrapper.0.get()),
-                                ),
-                                adapt::adapt(
-                                    as_channel(&self.wm_state_signals[index]),
-                                    move |_| Some(wm_state_wrapper.0.get()),
-                                ),
-                                adapt::adapt(
-                                    as_channel(&self.battery_state_signals[index]),
-                                    move |_| Some(battery_state_wrapper.0.get()),
+                                NotifReceiver::new(&self.valve_state_signals[index], valve_state),
+                                NotifReceiver::new(&self.wm_state_signals[index], wm_state),
+                                NotifReceiver::new(
+                                    &self.battery_state_signals[index],
+                                    battery_state,
                                 ),
                                 &mut *valve_command.lock().await,
                                 &mut *wm_command.lock().await,
@@ -174,7 +126,7 @@ where
                 .unwrap();
         }
 
-        select_all_hvec(workers).await;
+        select_all(workers.into_array::<N>().unwrap_or_else(|_| unreachable!())).await;
     }
 }
 
@@ -190,9 +142,9 @@ pub async fn handle_connection<R: RawMutex, const F: usize>(
     battery: &impl StateCellRead<Data = BatteryState>,
 ) -> Result<(), ()> //WrapError<impl Debug>>
 {
-    let connection = AsyncMutex::<R, WR, _>::new(connection);
+    let connection = AsyncMutex::<R, _>::new(connection);
 
-    let role = Mutex::<R, _>::new(Role::None);
+    let role = Mutex::<R, _>::new(Cell::new(Role::None));
 
     select4(
         receive::<F, _>(
@@ -220,8 +172,8 @@ pub async fn handle_connection<R: RawMutex, const F: usize>(
 }
 
 async fn receive<const F: usize, R: RawMutex>(
-    connection: &AsyncMutex<R, WR, impl ws::asynch::Sender + ws::asynch::Receiver>,
-    role: &Mutex<R, Role>,
+    connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    role: &Mutex<R, Cell<Role>>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
     valve: &impl StateCellRead<Data = Option<ValveState>>,
@@ -240,7 +192,7 @@ async fn receive<const F: usize, R: RawMutex>(
             WebFrame::Unknown => return Err(()),
         };
 
-        let response = request.response(*role.lock());
+        let response = request.response(role.lock(|role| role.get()));
 
         let web_event = if response.is_accepted() {
             match request.payload() {
@@ -256,17 +208,17 @@ async fn receive<const F: usize, R: RawMutex>(
                     if let Some(new_role) = authenticate(username, password) {
                         info!("[WS] Authenticated; role: {}", new_role);
 
-                        *role.lock() = new_role;
+                        role.lock(|role| role.set(new_role));
                         WebEvent::RoleState(new_role)
                     } else {
                         info!("[WS] Authentication failed");
 
-                        *role.lock() = Role::None;
+                        role.lock(|role| role.set(Role::None));
                         WebEvent::AuthenticationFailed
                     }
                 }
                 WebRequestPayload::Logout => {
-                    *role.lock() = Role::None;
+                    role.lock(|role| role.set(Role::None));
                     WebEvent::RoleState(Role::None)
                 }
                 WebRequestPayload::ValveStateRequest => WebEvent::ValveState(valve.get()),
@@ -287,8 +239,8 @@ async fn receive<const F: usize, R: RawMutex>(
 }
 
 async fn send_state<const F: usize, R: RawMutex, T>(
-    connection: &AsyncMutex<R, WR, impl ws::asynch::Sender + ws::asynch::Receiver>,
-    role: &Mutex<R, Role>,
+    connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    role: &Mutex<R, Cell<Role>>,
     mut state: impl Receiver<Data = T>,
     to_web_event: impl Fn(T) -> WebEvent,
 ) -> Result<(), ()> //WrapError<impl Debug>>
@@ -299,7 +251,7 @@ async fn send_state<const F: usize, R: RawMutex, T>(
         web_send_auth::<F, _>(
             &mut *connection.lock().await,
             &to_web_event(state),
-            *role.lock(),
+            role.lock(|role| role.get()),
         )
         .await
         .unwrap();

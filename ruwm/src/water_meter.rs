@@ -1,22 +1,23 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
-use embedded_svc::mutex::{NoopRawMutex, RawMutex};
-use embedded_svc::storage::Storage;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
-use embedded_svc::utils::mutex::Mutex;
 use serde::{Deserialize, Serialize};
 
+use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
+use embassy_util::blocking_mutex::Mutex;
+use embassy_util::{select, Either};
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
+use embedded_svc::storage::Storage;
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::select::{select, Either};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::pulse_counter::PulseCounter;
+use crate::signal::Signal;
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
     StorageStateCell,
 };
+use crate::utils::SignalReceiver;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
@@ -45,15 +46,18 @@ where
             StorageStateCell<'static, R, S, WaterMeterState>,
         >,
     >,
-    command_signal: AtomicSignal<WaterMeterCommand>,
+    command_signal: Signal<R, WaterMeterCommand>,
 }
 
 impl<R, S> WaterMeter<R, S>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
     S: Storage + Send + 'static,
 {
-    pub fn new(state: &'static mut Option<WaterMeterState>, storage: &'static Mutex<R, S>) -> Self {
+    pub const fn new(
+        state: &'static mut Option<WaterMeterState>,
+        storage: &'static Mutex<R, S>,
+    ) -> Self {
         Self {
             state: CachingStateCell::new(
                 MemoryStateCell::new(None),
@@ -62,7 +66,7 @@ where
                     StorageStateCell::new(storage, "wm"),
                 ),
             ),
-            command_signal: AtomicSignal::new(),
+            command_signal: Signal::new(),
         }
     }
 
@@ -70,8 +74,8 @@ where
         &self.state
     }
 
-    pub fn command_sink(&'static self) -> impl Sender<Data = WaterMeterCommand> + 'static {
-        as_channel(&self.command_signal)
+    pub fn command_sink(&self) -> &Signal<R, WaterMeterCommand> {
+        &self.command_signal
     }
 
     pub async fn process(
@@ -84,7 +88,7 @@ where
             timer,
             pulse_counter,
             &self.state,
-            as_channel(&self.command_signal),
+            SignalReceiver::new(&self.command_signal),
             state_sink,
         )
         .await

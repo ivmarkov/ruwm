@@ -1,20 +1,18 @@
 use core::mem;
 use core::time::Duration;
 
-use embedded_svc::channel::asynch::Sender;
-use embedded_svc::mutex::NoopRawMutex;
-use embedded_svc::mutex::RawMutex;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::channel::asynch::Receiver;
+use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
+use embassy_util::{select, Either};
+
+use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::select::select;
-use embedded_svc::utils::asynch::select::Either;
 
+use crate::signal::Signal;
 use crate::state::*;
-use crate::utils::as_static_receiver;
+use crate::utils::SignalReceiver;
 use crate::water_meter::WaterMeterState;
 
 const FLOW_STATS_INSTANCES: usize = 8;
@@ -152,17 +150,17 @@ where
         MemoryStateCell<NoopRawMutex, Option<WaterMeterStatsState>>,
         MutRefStateCell<NoopRawMutex, WaterMeterStatsState>,
     >,
-    wm_state_signal: AtomicSignal<WaterMeterState>,
+    wm_state_signal: Signal<R, WaterMeterState>,
 }
 
 impl<R> WaterMeterStats<R>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
 {
-    pub fn new(state: &'static mut WaterMeterStatsState) -> Self {
+    pub const fn new(state: &'static mut WaterMeterStatsState) -> Self {
         Self {
             state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
-            wm_state_signal: AtomicSignal::new(),
+            wm_state_signal: Signal::new(),
         }
     }
 
@@ -180,7 +178,7 @@ where
             timer,
             sys_time,
             &self.state,
-            as_static_receiver(&self.wm_state_signal),
+            SignalReceiver::new(&self.wm_state_signal),
             state_sink,
         )
         .await

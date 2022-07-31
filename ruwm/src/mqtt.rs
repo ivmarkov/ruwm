@@ -1,26 +1,27 @@
 use core::str::{self, FromStr};
 use core::time::Duration;
 
-use embedded_svc::utils::asynch::signal::AtomicSignal;
+use embassy_util::blocking_mutex::raw::RawMutex;
 use log::{error, info};
 
 use serde::{Deserialize, Serialize};
 
 use heapless::String;
 
+use embassy_util::{select4, Either4};
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
-use embedded_svc::utils::asynch::channel::adapt::merge;
-use embedded_svc::utils::asynch::select::{select4, Either4};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
 use crate::error;
+use crate::notification::Notification;
+use crate::signal::Signal;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
+use crate::utils::{NotifReceiver, SignalReceiver, SignalSender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -43,33 +44,39 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub struct Mqtt {
-    conn_signal: AtomicSignal<bool>,
-    valve_state_signal: AtomicSignal<()>,
-    wm_state_signal: AtomicSignal<()>,
-    battery_state_signal: AtomicSignal<()>,
+pub struct Mqtt<R>
+where
+    R: RawMutex,
+{
+    conn_signal: Signal<R, bool>,
+    valve_state_notif: Notification,
+    wm_state_notif: Notification,
+    battery_state_notif: Notification,
 }
 
-impl Mqtt {
-    pub fn new() -> Self {
+impl<R> Mqtt<R>
+where
+    R: RawMutex + Send + Sync + 'static,
+{
+    pub const fn new() -> Self {
         Self {
-            conn_signal: AtomicSignal::new(),
-            valve_state_signal: AtomicSignal::new(),
-            wm_state_signal: AtomicSignal::new(),
-            battery_state_signal: AtomicSignal::new(),
+            conn_signal: Signal::new(),
+            valve_state_notif: Notification::new(),
+            wm_state_notif: Notification::new(),
+            battery_state_notif: Notification::new(),
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.valve_state_signal)
+    pub fn valve_state_sink(&self) -> &Notification {
+        &self.valve_state_notif
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.wm_state_signal)
+    pub fn wm_state_sink(&'static self) -> &Notification {
+        &self.wm_state_notif
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.battery_state_signal)
+    pub fn battery_state_sink(&'static self) -> &Notification {
+        &self.battery_state_notif
     }
 
     pub async fn send<const L: usize>(
@@ -81,23 +88,13 @@ impl Mqtt {
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
         pub_sink: impl Sender<Data = MessageId> + Send + 'static,
     ) {
-        let battery_state_wrapper = StaticRef(battery_state);
-        let valve_state_wrapper = StaticRef(valve_state);
-        let wm_state_wrapper = StaticRef(wm_state);
-
         send::<_, L>(
             topic_prefix,
             mqtt,
-            as_static_receiver(&self.conn_signal),
-            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state_wrapper.0.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state_wrapper.0.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state_wrapper.0.get())
-            }),
+            SignalReceiver::new(&self.conn_signal),
+            NotifReceiver::new(&self.valve_state_notif, valve_state),
+            NotifReceiver::new(&self.wm_state_notif, wm_state),
+            NotifReceiver::new(&self.battery_state_notif, battery_state),
             pub_sink,
         )
         .await
@@ -107,14 +104,13 @@ impl Mqtt {
     pub async fn receive(
         &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
-        conn_sink: impl Sender<Data = bool> + Send + 'static,
         notif_sink: impl Sender<Data = MqttClientNotification>,
         valve_command_sink: impl Sender<Data = ValveCommand>,
         wm_command_sink: impl Sender<Data = WaterMeterCommand>,
     ) {
         receive(
             connection,
-            merge(as_static_sender(&self.conn_signal), conn_sink),
+            SignalSender::new("MQTT/CONNECTION", [&self.conn_signal]),
             notif_sink,
             valve_command_sink,
             wm_command_sink,

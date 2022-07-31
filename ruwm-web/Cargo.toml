@@ -37,7 +37,7 @@ gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
-embedded-svc = { version = "0.22", features = ["experimental"] }
+embedded-svc = "0.22"
 edge-frame = "0.2"
 ruwm = { version = "0.1", path = "../ruwm" }
 
