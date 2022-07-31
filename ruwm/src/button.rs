@@ -4,11 +4,12 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use embassy_util::{select, Either};
+
 use embedded_hal::digital::v2::InputPin;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::select::{select, Either};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
