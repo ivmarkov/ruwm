@@ -1,58 +1,52 @@
+use embassy_util::{select3, Either3};
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::utils::asynch::select::{select3, Either3};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
 
 use crate::battery::BatteryState;
+use crate::notification::Notification;
 use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver};
+use crate::utils::NotifReceiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
 pub struct Emergency {
-    valve_state_signal: AtomicSignal<()>,
-    wm_state_signal: AtomicSignal<()>,
-    battery_state_signal: AtomicSignal<()>,
+    valve_state_notif: Notification,
+    wm_state_notif: Notification,
+    battery_state_notif: Notification,
 }
 
 impl Emergency {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            valve_state_signal: AtomicSignal::new(),
-            wm_state_signal: AtomicSignal::new(),
-            battery_state_signal: AtomicSignal::new(),
+            valve_state_notif: Notification::new(),
+            wm_state_notif: Notification::new(),
+            battery_state_notif: Notification::new(),
         }
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.valve_state_signal)
+    pub fn valve_state_sink(&self) -> &Notification {
+        &self.valve_state_notif
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.wm_state_signal)
+    pub fn wm_state_sink(&self) -> &Notification {
+        &self.wm_state_notif
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.battery_state_signal)
+    pub fn battery_state_sink(&self) -> &Notification {
+        &self.battery_state_notif
     }
 
     pub async fn process(
         &'static self,
         valve_command: impl Sender<Data = ValveCommand>,
-        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Sync),
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Sync),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Sync),
+        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync),
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync),
+        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync),
     ) {
         process(
-            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state.get())
-            }),
+            NotifReceiver::new(&self.valve_state_notif, valve_state),
+            NotifReceiver::new(&self.wm_state_notif, wm_state),
+            NotifReceiver::new(&self.battery_state_notif, battery_state),
             valve_command,
         )
         .await

@@ -1,11 +1,12 @@
+use core::cell::RefCell;
 use core::marker::PhantomData;
 
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::blocking_mutex::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
 
 use embedded_svc::channel::asynch::Sender;
-use embedded_svc::mutex::RawMutex;
 use embedded_svc::storage::{SerDe, Storage};
-use embedded_svc::utils::mutex::Mutex;
 
 pub trait StateCellRead {
     type Data;
@@ -52,7 +53,15 @@ where
     update_with(state, move |_| data, notif).await
 }
 
-pub struct MemoryStateCell<R, T>(Mutex<R, T>)
+pub struct NoopStateCell;
+
+impl StateCellRead for NoopStateCell {
+    type Data = ();
+
+    fn get(&self) {}
+}
+
+pub struct MemoryStateCell<R, T>(Mutex<R, RefCell<T>>)
 where
     R: RawMutex;
 
@@ -60,8 +69,8 @@ impl<R, T> MemoryStateCell<R, T>
 where
     R: RawMutex,
 {
-    pub fn new(data: T) -> Self {
-        Self(Mutex::new(data))
+    pub const fn new(data: T) -> Self {
+        Self(Mutex::new(RefCell::new(data)))
     }
 }
 
@@ -73,7 +82,7 @@ where
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.0.lock().clone()
+        self.0.lock(|state| *state.borrow())
     }
 }
 
@@ -83,13 +92,7 @@ where
     T: Clone,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
-        let mut guard = self.0.lock();
-
-        let old_data = (&*guard).clone();
-
-        *guard = data;
-
-        old_data
+        self.0.lock(|state| state.replace(data))
     }
 }
 
@@ -100,7 +103,7 @@ where
     R: RawMutex,
     T: 'static,
 {
-    pub fn new(data: &'static mut T) -> Self {
+    pub const fn new(data: &'static mut T) -> Self {
         Self(Mutex::new(data))
     }
 }
@@ -113,7 +116,7 @@ where
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.0.lock().clone()
+        self.0.lock(|state| **state)
     }
 }
 
@@ -123,13 +126,12 @@ where
     T: Clone,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
-        let mut guard = self.0.lock();
+        self.0.lock(|state| {
+            let old = **state.clone();
+            **state = data;
 
-        let old_data = (&**guard).clone();
-
-        **guard = data;
-
-        old_data
+            old
+        })
     }
 }
 
@@ -139,7 +141,7 @@ impl<R, C, S> CachingStateCell<R, C, S>
 where
     R: RawMutex,
 {
-    pub fn new(cache: C, state: S) -> Self {
+    pub const fn new(cache: C, state: S) -> Self {
         Self(Mutex::new((cache, state)))
     }
 }
@@ -154,17 +156,17 @@ where
     type Data = S::Data;
 
     fn get(&self) -> Self::Data {
-        let guard = self.0.lock();
+        self.0.lock(|state| {
+            if let Some(data) = state.0.get() {
+                data
+            } else {
+                let data = state.1.get();
 
-        if let Some(data) = guard.0.get() {
-            data
-        } else {
-            let data = guard.1.get();
+                state.0.set(Some(data));
 
-            guard.0.set(Some(data.clone()));
-
-            data
-        }
+                data
+            }
+        })
     }
 }
 
@@ -176,22 +178,22 @@ where
     S::Data: Clone + PartialEq,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
-        let guard = self.0.lock();
+        self.0.lock(|state| {
+            let old_data = state.0.get();
 
-        let old_data = guard.0.get();
+            if let Some(old_data) = old_data {
+                if old_data != data {
+                    state.0.set(Some(data.clone()));
+                    state.1.set(data);
+                }
 
-        if let Some(old_data) = old_data {
-            if old_data != data {
-                guard.0.set(Some(data.clone()));
-                guard.1.set(data);
+                old_data
+            } else {
+                state.0.set(Some(data.clone()));
+
+                state.1.set(data)
             }
-
-            old_data
-        } else {
-            guard.0.set(Some(data.clone()));
-
-            guard.1.set(data)
-        }
+        })
     }
 }
 
@@ -201,7 +203,7 @@ impl<const N: usize, R, C> WearLevelingStateCell<N, R, C>
 where
     R: RawMutex,
 {
-    pub fn new(state: C) -> Self {
+    pub const fn new(state: C) -> Self {
         Self(Mutex::new((state, 0)))
     }
 }
@@ -214,7 +216,7 @@ where
     type Data = C::Data;
 
     fn get(&self) -> Self::Data {
-        self.0.lock().0.get()
+        self.0.lock(|state| state.0.get())
     }
 }
 
@@ -225,20 +227,20 @@ where
     C::Data: PartialEq,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
-        let mut guard = self.0.lock();
+        self.0.lock(|state| {
+            let old_data = state.0.get();
+            if old_data != data {
+                if state.1 >= N {
+                    state.1 = 0;
 
-        let old_data = guard.0.get();
-        if old_data != data {
-            if guard.1 >= N {
-                guard.1 = 0;
-
-                guard.0.set(data);
-            } else {
-                guard.1 += 1;
+                    state.0.set(data);
+                } else {
+                    state.1 += 1;
+                }
             }
-        }
 
-        old_data
+            old_data
+        })
     }
 }
 
@@ -253,7 +255,7 @@ where
 }
 
 impl<'a, R, S, T> StorageStateCell<'a, R, S, T> {
-    pub fn new(storage: &'a Mutex<R, S>, name: &'a str) -> Self {
+    pub const fn new(storage: &'a Mutex<R, S>, name: &'a str) -> Self {
         Self {
             storage,
             name,
@@ -271,7 +273,8 @@ where
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.storage.lock().get(self.name).unwrap().unwrap()
+        self.storage
+            .lock(|state| state.get(self.name).unwrap().unwrap())
     }
 }
 
@@ -282,13 +285,13 @@ where
     T: Serialize + DeserializeOwned + 'static,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
-        let mut guard = self.storage.lock();
+        self.storage.lock(|state| {
+            let old_data = state.get(self.name).unwrap().unwrap();
 
-        let old_data = guard.get(self.name).unwrap().unwrap();
+            state.set(self.name, &data).unwrap();
 
-        guard.set(self.name, &data).unwrap();
-
-        old_data
+            old_data
+        })
     }
 }
 

@@ -3,11 +3,13 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use embassy_util::blocking_mutex::raw::RawMutex;
+
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
+use embedded_svc::channel::asynch::Sender;
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::{channel::asynch::Sender, mutex::RawMutex};
 
 use crate::state::{update_with, MemoryStateCell, StateCell, StateCellRead};
 
@@ -33,7 +35,7 @@ where
 
 impl<R> Battery<R>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
 {
     pub fn new() -> Self {
         Self {

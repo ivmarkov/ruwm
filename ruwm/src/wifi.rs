@@ -1,16 +1,16 @@
 use core::fmt::Debug;
 
-use embedded_svc::mutex::RawMutex;
-use embedded_svc::utils::asynch::signal::MutexSignal;
 use serde::{Deserialize, Serialize};
 
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::{select, Either};
+
 use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::utils::asynch::select::{select, Either};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
+use crate::signal::Signal;
 use crate::state::{update, MemoryStateCell, StateCell, StateCellRead};
-use crate::utils::as_static_receiver;
+use crate::utils::SignalReceiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum WifiCommand {
@@ -22,17 +22,17 @@ where
     R: RawMutex,
 {
     state: MemoryStateCell<R, Option<Status>>,
-    command: MutexSignal<R, WifiCommand>,
+    command: Signal<R, WifiCommand>,
 }
 
 impl<R> Wifi<R>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
 {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             state: MemoryStateCell::new(None),
-            command: MutexSignal::new(),
+            command: Signal::new(),
         }
     }
 
@@ -40,8 +40,8 @@ where
         &self.state
     }
 
-    pub fn command_sink(&'static self) -> impl Sender<Data = WifiCommand> + '_ {
-        as_channel(&self.command)
+    pub fn command_sink(&self) -> &Signal<R, WifiCommand> {
+        &self.command
     }
 
     pub async fn process(
@@ -54,7 +54,7 @@ where
             wifi,
             &self.state,
             state_changed_source,
-            as_static_receiver(&self.command),
+            SignalReceiver::new(&self.command),
             state_sink,
         )
         .await

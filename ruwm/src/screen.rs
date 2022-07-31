@@ -1,22 +1,22 @@
+use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embedded_svc::mutex::RawMutex;
-use embedded_svc::utils::asynch::signal::AtomicSignal;
-use embedded_svc::utils::mutex::Mutex;
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::blocking_mutex::Mutex;
 use enumset::{EnumSet, EnumSetType};
 use serde::{Deserialize, Serialize};
+
+use embassy_util::{select3, select4, Either3, Either4};
 
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::executor::asynch::Unblocker;
-use embedded_svc::utils::asynch::channel::adapt::merge;
-use embedded_svc::utils::asynch::select::{select3, select4, Either3, Either4};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
 use crate::battery::BatteryState;
-use crate::state::StateCellRead;
-use crate::utils::{adapt_static_receiver, as_static_receiver, as_static_sender, StaticRef};
+use crate::notification::Notification;
+use crate::state::{NoopStateCell, StateCellRead};
+use crate::utils::NotifReceiver;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -97,15 +97,15 @@ pub struct Screen<R>
 where
     R: RawMutex,
 {
-    state: Mutex<R, ScreenState>,
-    button1_pressed_signal: AtomicSignal<()>,
-    button2_pressed_signal: AtomicSignal<()>,
-    button3_pressed_signal: AtomicSignal<()>,
-    valve_state_signal: AtomicSignal<()>,
-    wm_state_signal: AtomicSignal<()>,
-    wm_stats_state_signal: AtomicSignal<()>,
-    battery_state_signal: AtomicSignal<()>,
-    draw_request_signal: AtomicSignal<()>,
+    state: Mutex<R, RefCell<ScreenState>>,
+    button1_pressed_notif: Notification,
+    button2_pressed_notif: Notification,
+    button3_pressed_notif: Notification,
+    valve_state_notif: Notification,
+    wm_state_notif: Notification,
+    wm_stats_state_notif: Notification,
+    battery_state_notif: Notification,
+    draw_request_notif: Notification,
 }
 
 pub struct Q<R>(pub R);
@@ -114,49 +114,49 @@ impl<R> Screen<R>
 where
     R: RawMutex,
 {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            state: Mutex::new(ScreenState {
+            state: Mutex::new(RefCell::new(ScreenState {
                 changeset: EnumSet::all(),
                 ..Default::default()
-            }),
-            button1_pressed_signal: AtomicSignal::new(),
-            button2_pressed_signal: AtomicSignal::new(),
-            button3_pressed_signal: AtomicSignal::new(),
-            valve_state_signal: AtomicSignal::new(),
-            wm_state_signal: AtomicSignal::new(),
-            wm_stats_state_signal: AtomicSignal::new(),
-            battery_state_signal: AtomicSignal::new(),
-            draw_request_signal: AtomicSignal::new(),
+            })),
+            button1_pressed_notif: Notification::new(),
+            button2_pressed_notif: Notification::new(),
+            button3_pressed_notif: Notification::new(),
+            valve_state_notif: Notification::new(),
+            wm_state_notif: Notification::new(),
+            wm_stats_state_notif: Notification::new(),
+            battery_state_notif: Notification::new(),
+            draw_request_notif: Notification::new(),
         }
     }
 
-    pub fn button1_pressed_sink<'a>(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.button1_pressed_signal)
+    pub fn button1_pressed_sink(&self) -> &Notification {
+        &self.button1_pressed_notif
     }
 
-    pub fn button2_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.button2_pressed_signal)
+    pub fn button2_pressed_sink(&self) -> &Notification {
+        &self.button2_pressed_notif
     }
 
-    pub fn button3_pressed_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.button3_pressed_signal)
+    pub fn button3_pressed_sink(&self) -> &Notification {
+        &self.button3_pressed_notif
     }
 
-    pub fn valve_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.valve_state_signal)
+    pub fn valve_state_sink(&self) -> &Notification {
+        &self.valve_state_notif
     }
 
-    pub fn wm_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.wm_state_signal)
+    pub fn wm_state_sink(&self) -> &Notification {
+        &self.wm_state_notif
     }
 
-    pub fn wm_stats_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.wm_stats_state_signal)
+    pub fn wm_stats_state_sink(&self) -> &Notification {
+        &self.wm_stats_state_notif
     }
 
-    pub fn battery_state_sink(&'static self) -> impl Sender<Data = ()> + 'static {
-        as_channel(&self.battery_state_signal)
+    pub fn battery_state_sink(&self) -> &Notification {
+        &self.battery_state_notif
     }
 
     pub async fn draw<D>(&'static self, display: D)
@@ -166,7 +166,7 @@ where
         D::Error: Debug,
     {
         run_draw(
-            as_static_receiver(&self.draw_request_signal),
+            NotifReceiver::new(&self.draw_request_notif, &NoopStateCell),
             display,
             &self.state,
         )
@@ -185,26 +185,16 @@ where
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
         draw_request_sink: impl Sender<Data = ()> + Send + 'static,
     ) {
-        let battery_state_wrapper = StaticRef(battery_state);
-        let valve_state_wrapper = StaticRef(valve_state);
-        let wm_state_wrapper = StaticRef(wm_state);
-
         process(
             &self.state,
-            as_static_receiver(&self.button1_pressed_signal),
-            as_static_receiver(&self.button2_pressed_signal),
-            as_static_receiver(&self.button3_pressed_signal),
-            adapt_static_receiver(as_static_receiver(&self.valve_state_signal), move |_| {
-                Some(valve_state_wrapper.0.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.wm_state_signal), move |_| {
-                Some(wm_state_wrapper.0.get())
-            }),
-            adapt_static_receiver(as_static_receiver(&self.battery_state_signal), move |_| {
-                Some(battery_state_wrapper.0.get())
-            }),
+            NotifReceiver::new(&self.button1_pressed_notif, &NoopStateCell),
+            NotifReceiver::new(&self.button2_pressed_notif, &NoopStateCell),
+            NotifReceiver::new(&self.button3_pressed_notif, &NoopStateCell),
+            NotifReceiver::new(&self.valve_state_notif, valve_state),
+            NotifReceiver::new(&self.wm_state_notif, wm_state),
+            NotifReceiver::new(&self.battery_state_notif, battery_state),
             merge(
-                as_static_sender(&self.draw_request_signal),
+                as_static_sender(&self.draw_request_notif),
                 draw_request_sink,
             ),
         )
@@ -214,7 +204,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub async fn process(
-    screen_state: &Mutex<impl RawMutex, ScreenState>,
+    screen_state: &Mutex<impl RawMutex, RefCell<ScreenState>>,
     mut button1_pressed_source: impl Receiver<Data = ()>,
     mut button2_pressed_source: impl Receiver<Data = ()>,
     mut button3_pressed_source: impl Receiver<Data = ()>,
@@ -242,31 +232,33 @@ pub async fn process(
         .await;
 
         {
-            let mut screen_state = screen_state.lock();
+            screen_state.lock(|screen_state| {
+                let mut screen_state = screen_state.borrow_mut();
 
-            match sr {
-                Either4::First(Either3::First(_)) => {
-                    screen_state.active_page = screen_state.active_page.prev();
-                    screen_state.changeset.insert(DataSource::Page);
+                match sr {
+                    Either4::First(Either3::First(_)) => {
+                        screen_state.active_page = screen_state.active_page.prev();
+                        screen_state.changeset.insert(DataSource::Page);
+                    }
+                    Either4::First(Either3::Second(_)) => {
+                        screen_state.active_page = screen_state.active_page.next();
+                        screen_state.changeset.insert(DataSource::Page);
+                    }
+                    Either4::First(Either3::Third(_)) => {}
+                    Either4::Second(valve) => {
+                        screen_state.valve = valve;
+                        screen_state.changeset.insert(DataSource::Valve);
+                    }
+                    Either4::Third(wm) => {
+                        screen_state.wm = wm;
+                        screen_state.changeset.insert(DataSource::WM);
+                    }
+                    Either4::Fourth(battery) => {
+                        screen_state.battery = battery;
+                        screen_state.changeset.insert(DataSource::Battery);
+                    }
                 }
-                Either4::First(Either3::Second(_)) => {
-                    screen_state.active_page = screen_state.active_page.next();
-                    screen_state.changeset.insert(DataSource::Page);
-                }
-                Either4::First(Either3::Third(_)) => {}
-                Either4::Second(valve) => {
-                    screen_state.valve = valve;
-                    screen_state.changeset.insert(DataSource::Valve);
-                }
-                Either4::Third(wm) => {
-                    screen_state.wm = wm;
-                    screen_state.changeset.insert(DataSource::WM);
-                }
-                Either4::Fourth(battery) => {
-                    screen_state.battery = battery;
-                    screen_state.changeset.insert(DataSource::Battery);
-                }
-            }
+            });
         }
 
         draw_request_sink.send(()).await;
@@ -277,7 +269,7 @@ pub async fn unblock_run_draw<U, D>(
     unblocker: U,
     mut draw_request: impl Receiver<Data = ()>,
     mut display: D,
-    screen_state: &Mutex<impl RawMutex, ScreenState>,
+    screen_state: &Mutex<impl RawMutex, RefCell<ScreenState>>,
 ) -> Result<(), D::Error>
 where
     U: Unblocker,
@@ -288,15 +280,13 @@ where
     loop {
         draw_request.recv().await;
 
-        let screen_state = {
-            let mut guard = screen_state.lock();
+        let screen_state = screen_state.lock(|screen_state| {
+            let screen_state_prev = screen_state.borrow().clone();
 
-            let screen_state = guard.clone();
+            screen_state.borrow_mut().changeset = EnumSet::empty();
 
-            guard.changeset = EnumSet::empty();
-
-            screen_state
-        };
+            screen_state_prev
+        });
 
         display = unblocker
             .unblock(move || draw(display, screen_state))
@@ -307,7 +297,7 @@ where
 pub async fn run_draw<D>(
     mut draw_request: impl Receiver<Data = ()>,
     mut display: D,
-    screen_state: &Mutex<impl RawMutex, ScreenState>,
+    screen_state: &Mutex<impl RawMutex, RefCell<ScreenState>>,
 ) -> Result<(), D::Error>
 where
     D: FlushableDrawTarget + Send + 'static,
@@ -317,15 +307,13 @@ where
     loop {
         draw_request.recv().await;
 
-        let screen_state = {
-            let mut guard = screen_state.lock();
+        let screen_state = screen_state.lock(|screen_state| {
+            let screen_state_prev = screen_state.borrow().clone();
 
-            let screen_state = guard.clone();
+            screen_state.borrow_mut().changeset = EnumSet::empty();
 
-            guard.changeset = EnumSet::empty();
-
-            screen_state
-        };
+            screen_state_prev
+        });
 
         display = draw(display, screen_state)?;
     }

@@ -2,20 +2,24 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use embedded_svc::mutex::{NoopRawMutex, RawMutex};
-use embedded_svc::utils::asynch::signal::AtomicSignal;
 use serde::{Deserialize, Serialize};
+
+use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
+use embassy_util::{select, Either};
 
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::select::{select, Either};
-use embedded_svc::utils::asynch::signal::adapt::as_channel;
 
+use crate::notification::Notification;
+use crate::signal::Signal;
 use crate::state::{
-    update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
+    update, CachingStateCell, MemoryStateCell, MutRefStateCell, NoopStateCell, StateCell,
+    StateCellRead,
 };
+use crate::utils::{NotifReceiver, NotifSender, SignalReceiver, SignalSender};
+
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,21 +45,21 @@ where
         MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
         MutRefStateCell<NoopRawMutex, Option<ValveState>>,
     >,
-    command_signal: AtomicSignal<ValveCommand>,
-    spin_command_signal: AtomicSignal<ValveCommand>,
-    spin_finished_signal: AtomicSignal<()>,
+    command_signal: Signal<R, ValveCommand>,
+    spin_command_signal: Signal<R, ValveCommand>,
+    spin_finished_notif: Notification,
 }
 
 impl<R> Valve<R>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
 {
-    pub fn new(state: &'static mut Option<ValveState>) -> Self {
+    pub const fn new(state: &'static mut Option<ValveState>) -> Self {
         Self {
             state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
-            command_signal: AtomicSignal::new(),
-            spin_command_signal: AtomicSignal::new(),
-            spin_finished_signal: AtomicSignal::new(),
+            command_signal: Signal::new(),
+            spin_command_signal: Signal::new(),
+            spin_finished_notif: Notification::new(),
         }
     }
 
@@ -63,8 +67,8 @@ where
         &self.state
     }
 
-    pub fn command_sink(&'static self) -> impl Sender<Data = ValveCommand> + 'static {
-        as_channel(&self.command_signal)
+    pub fn command_sink(&self) -> &Signal<R, ValveCommand> {
+        &self.command_signal
     }
 
     pub async fn spin(
@@ -79,8 +83,8 @@ where
             power_pin,
             open_pin,
             close_pin,
-            as_channel(&self.spin_command_signal),
-            as_channel(&self.spin_finished_signal),
+            SignalReceiver::new(&self.spin_command_signal),
+            NotifSender::new("VALVE/SPIN FINISHED", [&self.spin_finished_notif]),
         )
         .await
     }
@@ -88,9 +92,9 @@ where
     pub async fn process(&'static self, notif: impl Sender<Data = ()>) {
         process(
             &self.state,
-            as_channel(&self.command_signal),
-            as_channel(&self.spin_finished_signal),
-            as_channel(&self.spin_command_signal),
+            SignalReceiver::new(&self.command_signal),
+            NotifReceiver::new(&self.spin_finished_notif, &NoopStateCell),
+            SignalSender::new("VALVE/SPIN COMMAND", [&self.spin_command_signal]),
             notif,
         )
         .await

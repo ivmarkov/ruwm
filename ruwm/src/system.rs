@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use core::time::Duration;
 
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::blocking_mutex::Mutex;
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_hal::adc;
@@ -8,14 +10,9 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
-use embedded_svc::mutex::RawMutex;
-use embedded_svc::signal::asynch::Signal;
 use embedded_svc::storage::Storage;
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
-use embedded_svc::utils::asynch::channel::adapt::{dummy, merge};
-use embedded_svc::utils::asynch::signal::{AtomicSignal, MutexSignal};
-use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws;
 use embedded_svc::ws::asynch::server::Acceptor;
@@ -26,9 +23,12 @@ use crate::emergency::Emergency;
 use crate::event_logger;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
+use crate::notification::Notification;
 use crate::pulse_counter::PulseCounter;
 use crate::screen::{FlushableDrawTarget, Screen, Q};
-use crate::utils::{as_static_receiver, as_static_sender};
+use crate::signal::Signal;
+use crate::state::NoopStateCell;
+use crate::utils::{concat_arr, NotifReceiver, NotifSender, SignalSender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
 use crate::water_meter_stats::{WaterMeterStats, WaterMeterStatsState};
@@ -53,44 +53,44 @@ where
     wm_stats: WaterMeterStats<R>,
     battery: Battery<R>,
 
-    button1: AtomicSignal<()>,
-    button2: AtomicSignal<()>,
-    button3: AtomicSignal<()>,
+    button1: Notification,
+    button2: Notification,
+    button3: Notification,
 
     emergency: Emergency,
     keepalive: Keepalive,
 
-    remaining_time: MutexSignal<R, RemainingTime>,
+    remaining_time: Signal<R, RemainingTime>,
 
-    quit: AtomicSignal<()>,
+    quit: Notification,
 
     screen: Screen<R>,
 
     wifi: Wifi<R>,
     web: Web<N, R, T>,
-    mqtt: Mqtt,
+    mqtt: Mqtt<R>,
 }
 
 impl<const N: usize, R, S, T> System<N, R, S, T>
 where
-    R: RawMutex + 'static,
+    R: RawMutex + Send + Sync + 'static,
     S: Storage + Send + 'static,
     T: ws::asynch::Sender + ws::asynch::Receiver,
 {
-    pub fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, S>) -> Self {
+    pub const fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, S>) -> Self {
         Self {
             storage,
             valve: Valve::new(&mut slow_mem.valve),
             wm: WaterMeter::new(&mut slow_mem.wm, storage),
             wm_stats: WaterMeterStats::new(&mut slow_mem.wm_stats),
             battery: Battery::new(),
-            button1: AtomicSignal::new(),
-            button2: AtomicSignal::new(),
-            button3: AtomicSignal::new(),
+            button1: Notification::new(),
+            button2: Notification::new(),
+            button3: Notification::new(),
             emergency: Emergency::new(),
             keepalive: Keepalive::new(),
-            remaining_time: MutexSignal::new(),
-            quit: AtomicSignal::new(),
+            remaining_time: Signal::new(),
+            quit: Notification::new(),
             screen: Screen::new(),
             wifi: Wifi::new(),
             web: Web::new(),
@@ -100,12 +100,15 @@ where
 
     pub async fn valve(&'static self) {
         self.valve
-            .process(
-                merge(self.keepalive.event_sink(), event_logger::sink("VALVE"))
-                    .and(self.screen.valve_state_sink())
-                    .and(self.web.valve_state_sink())
-                    .and(self.mqtt.valve_state_sink()),
-            )
+            .process(NotifSender::new(
+                "VALVE",
+                [
+                    self.keepalive.event_sink(),
+                    self.screen.valve_state_sink(),
+                    self.web.valve_state_sink(),
+                    self.mqtt.valve_state_sink(),
+                ],
+            ))
             .await
     }
 
@@ -124,10 +127,15 @@ where
             .process(
                 timer,
                 pulse_counter,
-                merge(self.keepalive.event_sink(), event_logger::sink("WM"))
-                    .and(self.screen.wm_state_sink())
-                    .and(self.web.wm_state_sink())
-                    .and(self.mqtt.wm_state_sink()),
+                NotifSender::new(
+                    "WM",
+                    [
+                        self.keepalive.event_sink(),
+                        self.screen.wm_state_sink(),
+                        self.web.wm_state_sink(),
+                        self.mqtt.wm_state_sink(),
+                    ],
+                ),
             )
             .await
     }
@@ -137,9 +145,14 @@ where
             .process(
                 timer,
                 sys_time,
-                merge(self.keepalive.event_sink(), event_logger::sink("WM_STATS"))
-                    .and(self.screen.wm_stats_state_sink())
-                    .and(self.web.wm_stats_state_sink()),
+                NotifSender::new(
+                    "WM_STATS",
+                    [
+                        self.keepalive.event_sink(),
+                        self.screen.wm_stats_state_sink(),
+                        self.web.wm_stats_state_sink(),
+                    ],
+                ),
             )
             .await
     }
@@ -159,24 +172,31 @@ where
                 one_shot,
                 battery_pin,
                 power_pin,
-                merge(self.keepalive.event_sink(), event_logger::sink("BATTERY"))
-                    .and(self.screen.battery_state_sink())
-                    .and(self.web.battery_state_sink())
-                    .and(self.mqtt.battery_state_sink()),
+                NotifSender::new(
+                    "BATTERY",
+                    concat_arr(
+                        [
+                            self.keepalive.event_sink(),
+                            self.screen.battery_state_sink(),
+                            self.mqtt.battery_state_sink(),
+                        ],
+                        self.web.battery_state_sinks(),
+                    ),
+                ),
             )
             .await
     }
 
     pub fn button1_signal(&self) {
-        self.button1.signal(())
+        self.button1.notify();
     }
 
     pub fn button2_signal(&self) {
-        self.button2.signal(())
+        self.button2.notify();
     }
 
     pub fn button3_signal(&self) {
-        self.button3.signal(())
+        self.button3.notify();
     }
 
     pub async fn button1(
@@ -187,12 +207,17 @@ where
     ) {
         button::process(
             timer,
-            as_static_receiver(&self.button1),
+            NotifReceiver::new(&self.button1, &NoopStateCell),
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON1"))
-                .and(self.screen.button1_pressed_sink()),
+            NotifSender::new(
+                "BUTTON1",
+                [
+                    self.keepalive.event_sink(),
+                    self.screen.button1_pressed_sink(),
+                ],
+            ),
         )
         .await
     }
@@ -205,12 +230,17 @@ where
     ) {
         button::process(
             timer,
-            as_static_receiver(&self.button2),
+            NotifReceiver::new(&self.button2, &NoopStateCell),
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON2"))
-                .and(self.screen.button2_pressed_sink()),
+            NotifSender::new(
+                "BUTTON2",
+                [
+                    self.keepalive.event_sink(),
+                    self.screen.button2_pressed_sink(),
+                ],
+            ),
         )
         .await
     }
@@ -223,12 +253,17 @@ where
     ) {
         button::process(
             timer,
-            as_static_receiver(&self.button3),
+            NotifReceiver::new(&self.button3, &NoopStateCell),
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            merge(self.keepalive.event_sink(), event_logger::sink("BUTTON3"))
-                .and(self.screen.button3_pressed_sink()),
+            NotifSender::new(
+                "BUTTON3",
+                [
+                    self.keepalive.event_sink(),
+                    self.screen.button3_pressed_sink(),
+                ],
+            ),
         )
         .await
     }
@@ -236,7 +271,7 @@ where
     pub async fn emergency(&'static self) {
         self.emergency
             .process(
-                self.valve.command_sink(),
+                SignalSender::new("EMERGENCY/VALVE", [self.valve.command_sink()]),
                 self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
@@ -249,14 +284,8 @@ where
             .process(
                 timer,
                 system_time,
-                merge(
-                    as_static_sender(&self.remaining_time),
-                    event_logger::sink("KEEPALIVE/REMAINING TIME"),
-                ), // TODO: Screen
-                merge(
-                    as_static_sender(&self.quit),
-                    event_logger::sink("KEEPALIVE/QUIT"),
-                ), // TODO: Screen
+                SignalSender::new("KEEPALIVE/REMAINING TIME", [&self.remaining_time]), // TODO: Screen
+                NotifSender::new("KEEPALIVE/QUIT", [&self.quit]), // TODO: Screen
             )
             .await
     }
@@ -294,7 +323,7 @@ where
                 self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
-                merge(self.keepalive.event_sink(), event_logger::sink("MQTT/SEND")),
+                NotifSender::new("MQTT/SEND", [self.keepalive.event_sink()]),
             )
             .await
     }
@@ -306,13 +335,9 @@ where
         self.mqtt
             .receive(
                 connection,
-                dummy(),
-                merge(
-                    self.keepalive.event_sink(),
-                    event_logger::sink("MQTT/RECEIVE"),
-                ),
-                self.valve.command_sink(),
-                self.wm.command_sink(),
+                NotifSender::new("MQTT/RECEIVE", [self.keepalive.event_sink()]),
+                SignalSender::new("MQTT/VALVE_COMMAND", [self.valve.command_sink()]),
+                SignalSender::new("MQTT/WM COMMAND", [self.wm.command_sink()]),
             )
             .await
     }
@@ -353,12 +378,12 @@ where
             .process(
                 wifi,
                 state_changed_source,
-                merge(self.keepalive.event_sink(), event_logger::sink("WIFI")),
+                NotifSender::new("WIFI", [self.keepalive.event_sink()]),
             )
             .await
     }
 
     pub fn should_quit(&self) -> bool {
-        self.quit.is_set()
+        self.quit.is_triggered()
     }
 }

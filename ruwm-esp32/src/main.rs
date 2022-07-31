@@ -235,8 +235,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             TaskHandle::new(),
             CurrentTaskWait::new(),
         ))
-        .spawn(system.wm_stats(timers.timer().unwrap(), EspSystemTime))
-        .unwrap()
+        .spawn(system.wm_stats(timers.timer().unwrap(), EspSystemTime))?
         .spawn(system.screen())?
         .spawn(
             system.screen_draw(
