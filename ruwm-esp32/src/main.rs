@@ -5,9 +5,14 @@
 
 use core::fmt::Debug;
 use core::time::Duration;
+use std::cell::RefCell;
 
 extern crate alloc;
 use alloc::sync::Arc;
+
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_util::blocking_mutex::Mutex;
+use embassy_util::Forever;
 
 use embedded_graphics::prelude::{Point, RgbColor, Size};
 use embedded_graphics::primitives::Rectangle;
@@ -17,26 +22,19 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_hal::digital::v2::OutputPin;
 
 use embedded_svc::event_bus::asynch::EventBus;
-use embedded_svc::executor::asynch::{Executor, WaitableExecutor};
 use embedded_svc::http::server::Method;
 use embedded_svc::timer::asynch::TimerService;
-use embedded_svc::utils::asynch::executor::embedded::{EmbeddedExecutor, Local, Sendable};
-use embedded_svc::utils::asynch::executor::spawn::TasksSpawner;
-use embedded_svc::utils::asynch::executor::SpawnError;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::utils::forever::Forever;
-use embedded_svc::utils::mutex::Mutex;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 
+use esp_idf_hal::executor::{EspExecutor, Local, Sendable, SpawnError, Task};
 use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
-use esp_idf_hal::mutex::RawMutex;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::SPI2;
 use esp_idf_hal::{adc, delay, spi};
 
 use esp_idf_svc::errors::EspIOError;
-use esp_idf_svc::executor::asynch::embedded::*;
-use esp_idf_svc::http::server::ws::asynch::{EspHttpWsAsyncConnection, EspHttpWsProcessor};
+use esp_idf_svc::http::server::ws::{EspHttpWsAsyncConnection, EspHttpWsProcessor};
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::netif::EspNetifStack;
@@ -117,75 +115,98 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let nvs_stack = Arc::new(EspDefaultNvs::new()?);
 
-    static STORAGE: Forever<Mutex<RawMutex, PostcardStorage<500, EspNvsStorage>>> = Forever::new();
-    let storage = &*STORAGE.put(Mutex::new(PostcardStorage::<500, _>::new(
+    static STORAGE: Forever<Mutex<EspRawMutex, RefCell<PostcardStorage<500, EspNvsStorage>>>> =
+        Forever::new();
+    let storage = &*STORAGE.put(Mutex::new(RefCell::new(PostcardStorage::<500, _>::new(
         EspNvsStorage::new_default(nvs_stack.clone(), "WM", true)?,
         PostcardSerDe,
-    )));
+    ))));
 
     static SYSTEM: Forever<
         System<
             WS_MAX_CONNECTIONS,
-            RawMutex,
+            EspRawMutex,
             PostcardStorage<500, EspNvsStorage>,
             EspHttpWsAsyncConnection<()>,
         >,
     > = Forever::new();
-    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }, &storage));
+    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }, storage));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
-    let (mut executor1, tasks1) = TasksSpawner::<16, _, ()>::new(
-        EmbeddedExecutor::<16, _, _, Local>::new(TaskHandle::new(), CurrentTaskWait::new()),
-    )
-    .spawn_local(system.valve())?
-    .spawn_local(system.valve_spin(
-        timers.timer()?,
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-    ))?
-    .spawn_local(system.wm(
-        timers.timer()?,
-        PulseCounter::new(peripherals.ulp).initialize()?,
-    ))?
-    .spawn_local(system.battery(
-        timers.timer()?,
-        adc::PoweredAdc::new(
-            peripherals.adc1,
-            adc::config::Config::new().calibration(true),
-        )?,
-        peripherals.pins.gpio33.into_analog_atten_11db()?,
-        peripherals.pins.gpio14.into_input()?,
-    ))?
-    .spawn_local(system.button1(
-        timers.timer()?,
-        unsafe {
-            button1_pin.into_subscribed(move || system.button1_signal(), InterruptType::NegEdge)?
-        },
-        PressedLevel::Low,
-    ))?
-    .spawn_local(system.button2(
-        timers.timer()?,
-        unsafe {
-            button2_pin
-                .into_subscribed(move || system.button2_signal(), InterruptType::NegEdge)?
-                .into_pull_up()?
-        },
-        PressedLevel::Low,
-    ))?
-    .spawn_local(system.button3(
-        timers.timer()?,
-        unsafe {
-            button3_pin
-                .into_subscribed(move || system.button3_signal(), InterruptType::NegEdge)?
-                .into_pull_up()?
-        },
-        PressedLevel::Low,
-    ))?
-    .spawn_local(system.emergency())?
-    .spawn_local(system.keepalive(timers.timer()?, EspSystemTime))?
-    .release();
+    let mut tasks1 = heapless::Vec::<Task<()>, 16>::new();
+    let mut executor1 = EspExecutor::<16, Local>::new();
+
+    executor1
+        .spawn_local_collect(system.valve(), &mut tasks1)?
+        .spawn_local_collect(
+            system.valve_spin(
+                timers.timer()?,
+                valve_power_pin,
+                valve_open_pin,
+                valve_close_pin,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(
+            system.wm(
+                timers.timer()?,
+                PulseCounter::new(peripherals.ulp).initialize()?,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(
+            system.battery(
+                timers.timer()?,
+                adc::PoweredAdc::new(
+                    peripherals.adc1,
+                    adc::config::Config::new().calibration(true),
+                )?,
+                peripherals.pins.gpio33.into_analog_atten_11db()?,
+                peripherals.pins.gpio14.into_input()?,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(
+            system.button1(
+                timers.timer()?,
+                unsafe {
+                    button1_pin
+                        .into_subscribed(move || system.button1_signal(), InterruptType::NegEdge)?
+                },
+                PressedLevel::Low,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(
+            system.button2(
+                timers.timer()?,
+                unsafe {
+                    button2_pin
+                        .into_subscribed(move || system.button2_signal(), InterruptType::NegEdge)?
+                        .into_pull_up()?
+                },
+                PressedLevel::Low,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(
+            system.button3(
+                timers.timer()?,
+                unsafe {
+                    button3_pin
+                        .into_subscribed(move || system.button3_signal(), InterruptType::NegEdge)?
+                        .into_pull_up()?
+                },
+                PressedLevel::Low,
+            ),
+            &mut tasks1,
+        )?
+        .spawn_local_collect(system.emergency(), &mut tasks1)?
+        .spawn_local_collect(
+            system.keepalive(timers.timer()?, EspSystemTime),
+            &mut tasks1,
+        )?;
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
@@ -230,14 +251,16 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         ws_processor.lock().process(connection)
     })?;
 
-    let (mut executor2, tasks2) =
-        TasksSpawner::<8, _, ()>::new(EmbeddedExecutor::<8, _, _, Sendable>::new(
-            TaskHandle::new(),
-            CurrentTaskWait::new(),
-        ))
-        .spawn(system.wm_stats(timers.timer().unwrap(), EspSystemTime))?
-        .spawn(system.screen())?
-        .spawn(
+    let mut tasks2 = heapless::Vec::<Task<()>, 8>::new();
+    let mut executor2 = EspExecutor::<8, Sendable>::new();
+
+    executor2
+        .spawn_collect(
+            system.wm_stats(timers.timer().unwrap(), EspSystemTime),
+            &mut tasks2,
+        )?
+        .spawn_collect(system.screen(), &mut tasks2)?
+        .spawn_collect(
             system.screen_draw(
                 display(
                     peripherals.pins.gpio4.into_output()?.degrade(),
@@ -250,10 +273,10 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                 )
                 .unwrap(),
             ),
+            &mut tasks2,
         )?
-        .spawn(system.wifi(wifi, wifi_state_changed_source))?
-        .spawn(system.mqtt_receive(mqtt_conn))?
-        .release();
+        .spawn_collect(system.wifi(wifi, wifi_state_changed_source), &mut tasks2)?
+        .spawn_collect(system.mqtt_receive(mqtt_conn), &mut tasks2)?;
 
     log::info!("Starting execution");
 
@@ -265,15 +288,18 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let execution3 = std::thread::spawn(move || {
         let (mut executor3, tasks3) = (move || {
-            let spawner = TasksSpawner::<4, _, ()>::new(EmbeddedExecutor::<4, _, _, Local>::new(
-                TaskHandle::new(),
-                CurrentTaskWait::new(),
-            ))
-            .spawn_local(system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client))?
-            .spawn_local(system.web_accept(ws_acceptor))?
-            .spawn_local(system.web_process::<WS_MAX_FRAME_SIZE>())?;
+            let mut tasks3 = heapless::Vec::<Task<()>, 4>::new();
+            let mut executor3 = EspExecutor::<4, Local>::new();
 
-            Result::<_, SpawnError>::Ok(spawner.release())
+            executor3
+                .spawn_local_collect(
+                    system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client),
+                    &mut tasks3,
+                )?
+                .spawn_local_collect(system.web_accept(ws_acceptor), &mut tasks3)?
+                .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), &mut tasks3)?;
+
+            Result::<_, SpawnError>::Ok((executor3, tasks3))
         })()
         .unwrap();
 
@@ -452,3 +478,23 @@ impl From<SpawnError> for InitError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for InitError {}
+
+pub struct EspRawMutex(esp_idf_hal::mutex::RawMutex);
+
+unsafe impl RawMutex for EspRawMutex {
+    const INIT: Self = EspRawMutex(esp_idf_hal::mutex::RawMutex::new());
+
+    fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
+        unsafe {
+            self.0.lock();
+        }
+
+        let result = f();
+
+        unsafe {
+            self.0.unlock();
+        }
+
+        result
+    }
+}

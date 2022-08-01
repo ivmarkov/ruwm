@@ -30,23 +30,20 @@ impl ErrorType for SmolTimer {
 }
 
 impl OnceTimer for SmolTimer {
-    type AfterFuture<'a>
-    = impl Future<Output = ()> + Send
-    where
-    Self: 'a;
+    type AfterFuture<'a> = impl Future<Output = ()> + Send
+    where Self: 'a;
 
     fn after(&mut self, duration: Duration) -> Result<Self::AfterFuture<'_>, Self::Error> {
-        Ok(async move {
+        let fut = async move {
             smol::Timer::after(duration).await;
-        })
+        };
+
+        Ok(fut)
     }
 }
 
 impl PeriodicTimer for SmolTimer {
-    type Clock<'a>
-    = SmolInterval
-    where
-    Self: 'a;
+    type Clock<'a> = SmolInterval where Self: 'a;
 
     fn every(&mut self, duration: Duration) -> Result<Self::Clock<'_>, Self::Error> {
         Ok(SmolInterval(duration))
@@ -62,8 +59,7 @@ impl Receiver for SmolInterval {
 
     type RecvFuture<'b>
     = impl Future<Output = Self::Data> + Send
-    where
-        Self: 'b;
+    where Self: 'b;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {

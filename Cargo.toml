@@ -19,6 +19,7 @@ esp-idf-hal = { path = "../esp-idf-hal" }
 esp-idf-svc = { path = "../esp-idf-svc" }
 #embuild = { path = "../embuild" }
 edge-frame = { path = "../edge-frame/edge-frame" }
+edge-executor = { path = "../edge-executor" }
 
 [profile.release]
 opt-level = "s"
