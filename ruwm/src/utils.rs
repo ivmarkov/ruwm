@@ -1,4 +1,4 @@
-use core::future::Future;
+use core::{future::Future, marker::PhantomData};
 
 use log::info;
 
@@ -61,25 +61,74 @@ where
     }
 }
 
-pub struct NotifSender<'a, const N: usize>([&'a Notification; N], &'static str);
+pub struct NotifSender<'a, const N: usize, P = ()>(
+    [&'a Notification; N],
+    &'static str,
+    PhantomData<fn() -> P>,
+);
 
-impl<'a, const N: usize> NotifSender<'a, N> {
+impl<'a, const N: usize, P> NotifSender<'a, N, P> {
     pub const fn new(source: &'static str, notif: [&'a Notification; N]) -> Self {
-        Self(notif, source)
+        Self(notif, source, PhantomData)
     }
 }
 
-impl<'a, const N: usize> Sender for NotifSender<'a, N> {
-    type Data = ();
+impl<'a, const N: usize, P> Sender for NotifSender<'a, N, P>
+where
+    P: core::fmt::Debug + Send,
+{
+    type Data = P;
 
-    type SendFuture<'b> = impl Future<Output = Self::Data>
+    type SendFuture<'b> = impl Future<Output = ()>
     where Self: 'b;
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
         async move {
-            info!("{}", self.1);
+            info!("[{}] = {:?}", self.1, value);
 
             for notif in self.0 {
+                notif.notify();
+            }
+        }
+    }
+}
+
+// TODO: Fix this mess
+pub struct NotifSender2<'a, const N: usize, const M: usize, P = ()>(
+    [&'a Notification; N],
+    [&'a Notification; M],
+    &'static str,
+    PhantomData<fn() -> P>,
+);
+
+impl<'a, const N: usize, const M: usize, P> NotifSender2<'a, N, M, P> {
+    pub const fn new(
+        source: &'static str,
+        notif1: [&'a Notification; N],
+        notif2: [&'a Notification; M],
+    ) -> Self {
+        Self(notif1, notif2, source, PhantomData)
+    }
+}
+
+impl<'a, const N: usize, const M: usize, P> Sender for NotifSender2<'a, N, M, P>
+where
+    P: core::fmt::Debug + Send,
+{
+    type Data = P;
+
+    type SendFuture<'b> = impl Future<Output = ()>
+    where Self: 'b;
+
+    fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
+        async move {
+            info!("[{}] = {:?}", self.2, value);
+
+            for notif in self.0 {
+                notif.notify();
+            }
+
+            for notif in self.1 {
                 notif.notify();
             }
         }
@@ -120,22 +169,13 @@ where
     }
 }
 
-pub fn as_arr<T, const N: usize, const M: usize, const R: usize>(
-    arr1: [T; N],
-    arr2: [T; M],
-) -> [T; R]
-where
-    T: Default,
-{
-    let result = [Default::default(); R];
-
-    for index in 0..N {
-        result[index] = arr1[index];
-    }
-
-    for index in 0..M {
-        result[N + index] = arr2[index];
-    }
-
-    result
+pub fn concat_arr<const N: usize, const L1: usize, const L2: usize, T>(
+    arr1: [T; L1],
+    arr2: [T; L2],
+) -> [T; N] {
+    IntoIterator::into_iter(arr1)
+        .chain(IntoIterator::into_iter(arr2))
+        .collect::<heapless::Vec<_, N>>()
+        .into_array()
+        .unwrap_or_else(|_| unreachable!())
 }

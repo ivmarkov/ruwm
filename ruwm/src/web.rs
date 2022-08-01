@@ -53,27 +53,27 @@ where
     pub fn new() -> Self {
         Self {
             channel: Channel::new(),
-            valve_state_signals: [Default::default(); N],
-            wm_state_signals: [Default::default(); N],
-            wm_stats_state_signals: [Default::default(); N],
-            battery_state_signals: [Default::default(); N],
+            valve_state_signals: Self::notif_arr(),
+            wm_state_signals: Self::notif_arr(),
+            wm_stats_state_signals: Self::notif_arr(),
+            battery_state_signals: Self::notif_arr(),
         }
     }
 
-    pub fn valve_state_sinks(&self) -> &[Notification] {
-        &self.valve_state_signals
+    pub fn valve_state_sinks(&self) -> [&Notification; N] {
+        Self::as_refs_notif_arr(&self.valve_state_signals)
     }
 
-    pub fn wm_state_sinks(&'static self) -> &[Notification] {
-        &self.wm_state_signals
+    pub fn wm_state_sinks(&self) -> [&Notification; N] {
+        Self::as_refs_notif_arr(&self.wm_state_signals)
     }
 
-    pub fn wm_stats_state_sinks(&'static self) -> &[Notification] {
-        &self.wm_stats_state_signals
+    pub fn wm_stats_state_sinks(&self) -> [&Notification; N] {
+        Self::as_refs_notif_arr(&self.wm_stats_state_signals)
     }
 
-    pub fn battery_state_sinks(&'static self) -> &[Notification] {
-        &self.battery_state_signals
+    pub fn battery_state_sinks(&self) -> [&Notification; N] {
+        Self::as_refs_notif_arr(&self.battery_state_signals)
     }
 
     pub async fn handle(&self, connection: T) {
@@ -127,6 +127,22 @@ where
         }
 
         select_all(workers.into_array::<N>().unwrap_or_else(|_| unreachable!())).await;
+    }
+
+    fn as_refs_notif_arr(arr: &[Notification; N]) -> [&Notification; N] {
+        arr.iter()
+            .collect::<heapless::Vec<_, N>>()
+            .into_array::<N>()
+            .unwrap_or_else(|_| unreachable!())
+    }
+
+    fn notif_arr() -> [Notification; N] {
+        (0..N)
+            .into_iter()
+            .map(|_| Notification::new())
+            .collect::<heapless::Vec<_, N>>()
+            .into_array()
+            .unwrap_or_else(|_| unreachable!())
     }
 }
 

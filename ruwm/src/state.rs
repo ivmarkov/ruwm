@@ -1,4 +1,4 @@
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::marker::PhantomData;
 
 use embassy_util::blocking_mutex::raw::RawMutex;
@@ -82,7 +82,7 @@ where
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.0.lock(|state| *state.borrow())
+        self.0.lock(|state| state.borrow().clone())
     }
 }
 
@@ -96,15 +96,15 @@ where
     }
 }
 
-pub struct MutRefStateCell<R, T: 'static>(Mutex<R, &'static mut T>);
+pub struct MutRefStateCell<R, T: 'static>(Mutex<R, RefCell<&'static mut T>>);
 
 impl<R, T> MutRefStateCell<R, T>
 where
     R: RawMutex,
     T: 'static,
 {
-    pub const fn new(data: &'static mut T) -> Self {
-        Self(Mutex::new(data))
+    pub fn new(data: &'static mut T) -> Self {
+        Self(Mutex::new(RefCell::new(data)))
     }
 }
 
@@ -116,7 +116,7 @@ where
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.0.lock(|state| **state)
+        self.0.lock(|state| (**state.borrow()).clone())
     }
 }
 
@@ -127,8 +127,8 @@ where
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         self.0.lock(|state| {
-            let old = **state.clone();
-            **state = data;
+            let old = (**state.borrow()).clone();
+            **state.borrow_mut() = data;
 
             old
         })
@@ -162,7 +162,7 @@ where
             } else {
                 let data = state.1.get();
 
-                state.0.set(Some(data));
+                state.0.set(Some(data.clone()));
 
                 data
             }
@@ -197,14 +197,14 @@ where
     }
 }
 
-pub struct WearLevelingStateCell<const N: usize, R, C>(Mutex<R, (C, usize)>);
+pub struct WearLevelingStateCell<const N: usize, R, C>(Mutex<R, (C, Cell<usize>)>);
 
 impl<const N: usize, R, C> WearLevelingStateCell<N, R, C>
 where
     R: RawMutex,
 {
-    pub const fn new(state: C) -> Self {
-        Self(Mutex::new((state, 0)))
+    pub fn new(state: C) -> Self {
+        Self(Mutex::new((state, Cell::new(0))))
     }
 }
 
@@ -230,12 +230,11 @@ where
         self.0.lock(|state| {
             let old_data = state.0.get();
             if old_data != data {
-                if state.1 >= N {
-                    state.1 = 0;
-
+                if state.1.get() >= N {
+                    state.1.set(0);
                     state.0.set(data);
                 } else {
-                    state.1 += 1;
+                    state.1.set(state.1.get() + 1);
                 }
             }
 
@@ -249,13 +248,13 @@ where
     R: 'a,
     S: 'a,
 {
-    storage: &'a Mutex<R, S>,
+    storage: &'a Mutex<R, RefCell<S>>,
     name: &'a str,
     _data: PhantomData<fn() -> T>,
 }
 
 impl<'a, R, S, T> StorageStateCell<'a, R, S, T> {
-    pub const fn new(storage: &'a Mutex<R, S>, name: &'a str) -> Self {
+    pub const fn new(storage: &'a Mutex<R, RefCell<S>>, name: &'a str) -> Self {
         Self {
             storage,
             name,
@@ -274,7 +273,7 @@ where
 
     fn get(&self) -> Self::Data {
         self.storage
-            .lock(|state| state.get(self.name).unwrap().unwrap())
+            .lock(|state| state.borrow().get(self.name).unwrap().unwrap())
     }
 }
 
@@ -286,9 +285,9 @@ where
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         self.storage.lock(|state| {
-            let old_data = state.get(self.name).unwrap().unwrap();
+            let old_data = state.borrow().get(self.name).unwrap().unwrap();
 
-            state.set(self.name, &data).unwrap();
+            state.borrow_mut().set(self.name, &data).unwrap();
 
             old_data
         })
