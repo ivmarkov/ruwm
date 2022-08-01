@@ -120,6 +120,10 @@ pub struct WaterMeterStatsState {
 }
 
 impl WaterMeterStatsState {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     fn update(&mut self, edges_count: u64, now: Duration) -> bool {
         let most_recent = FlowSnapshot::new(now, self.most_recent.edges_count + edges_count);
 
@@ -157,7 +161,7 @@ impl<R> WaterMeterStats<R>
 where
     R: RawMutex + Send + Sync + 'static,
 {
-    pub const fn new(state: &'static mut WaterMeterStatsState) -> Self {
+    pub fn new(state: &'static mut WaterMeterStatsState) -> Self {
         Self {
             state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
             wm_state_signal: Signal::new(),

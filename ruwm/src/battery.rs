@@ -24,6 +24,13 @@ pub struct BatteryState {
 impl BatteryState {
     pub const LOW_VOLTAGE: u16 = 2700;
     pub const MAX_VOLTAGE: u16 = 3100;
+
+    pub const fn new() -> Self {
+        Self {
+            voltage: None,
+            powered: None,
+        }
+    }
 }
 
 pub struct Battery<R>
@@ -37,9 +44,9 @@ impl<R> Battery<R>
 where
     R: RawMutex + Send + Sync + 'static,
 {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            state: MemoryStateCell::new(Default::default()),
+            state: MemoryStateCell::new(BatteryState::new()),
         }
     }
 

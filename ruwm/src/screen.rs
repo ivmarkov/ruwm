@@ -16,7 +16,7 @@ use embedded_svc::executor::asynch::Unblocker;
 use crate::battery::BatteryState;
 use crate::notification::Notification;
 use crate::state::{NoopStateCell, StateCellRead};
-use crate::utils::NotifReceiver;
+use crate::utils::{NotifReceiver, NotifSender};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -76,6 +76,10 @@ pub struct ScreenState {
 }
 
 impl ScreenState {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     pub fn valve(&self) -> Option<&Option<ValveState>> {
         self.changeset
             .contains(DataSource::Valve)
@@ -114,12 +118,9 @@ impl<R> Screen<R>
 where
     R: RawMutex,
 {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            state: Mutex::new(RefCell::new(ScreenState {
-                changeset: EnumSet::all(),
-                ..Default::default()
-            })),
+            state: Mutex::new(RefCell::new(ScreenState::new())),
             button1_pressed_notif: Notification::new(),
             button2_pressed_notif: Notification::new(),
             button3_pressed_notif: Notification::new(),
@@ -183,7 +184,6 @@ where
                       + Sync
                       + 'static),
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
-        draw_request_sink: impl Sender<Data = ()> + Send + 'static,
     ) {
         process(
             &self.state,
@@ -193,10 +193,7 @@ where
             NotifReceiver::new(&self.valve_state_notif, valve_state),
             NotifReceiver::new(&self.wm_state_notif, wm_state),
             NotifReceiver::new(&self.battery_state_notif, battery_state),
-            merge(
-                as_static_sender(&self.draw_request_notif),
-                draw_request_sink,
-            ),
+            NotifSender::new("DRAW", [&self.draw_request_notif]),
         )
         .await;
     }

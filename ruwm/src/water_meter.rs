@@ -1,3 +1,4 @@
+use core::cell::RefCell;
 use core::fmt::Debug;
 use core::time::Duration;
 
@@ -24,6 +25,16 @@ pub struct WaterMeterState {
     pub edges_count: u64,
     pub armed: bool,
     pub leaking: bool,
+}
+
+impl WaterMeterState {
+    pub const fn new() -> Self {
+        Self {
+            edges_count: 0,
+            armed: false,
+            leaking: false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -54,9 +65,9 @@ where
     R: RawMutex + Send + Sync + 'static,
     S: Storage + Send + 'static,
 {
-    pub const fn new(
+    pub fn new(
         state: &'static mut Option<WaterMeterState>,
-        storage: &'static Mutex<R, S>,
+        storage: &'static Mutex<R, RefCell<S>>,
     ) -> Self {
         Self {
             state: CachingStateCell::new(

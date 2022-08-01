@@ -54,7 +54,7 @@ impl<R> Valve<R>
 where
     R: RawMutex + Send + Sync + 'static,
 {
-    pub const fn new(state: &'static mut Option<ValveState>) -> Self {
+    pub fn new(state: &'static mut Option<ValveState>) -> Self {
         Self {
             state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
             command_signal: Signal::new(),

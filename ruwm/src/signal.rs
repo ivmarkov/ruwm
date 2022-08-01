@@ -1,5 +1,5 @@
 //! A synchronization primitive for passing the latest value to a task.
-use core::cell::{Cell, RefCell};
+use core::cell::RefCell;
 use core::future::Future;
 use core::mem;
 use core::task::{Context, Poll, Waker};
@@ -35,7 +35,7 @@ pub struct Signal<R, T>
 where
     R: RawMutex,
 {
-    state: Mutex<R, Cell<State<T>>>,
+    state: Mutex<R, RefCell<State<T>>>,
 }
 
 enum State<T> {
@@ -51,7 +51,7 @@ where
     /// Create a new `Signal`.
     pub const fn new() -> Self {
         Self {
-            state: Mutex::new(Cell::new(State::None)),
+            state: Mutex::new(RefCell::new(State::None)),
         }
     }
 }
@@ -73,21 +73,21 @@ where
     /// Remove the queued value in this `Signal`, if any.
     pub fn reset(&self) {
         self.state.lock(|state| {
-            state.set(State::None);
+            *state.borrow_mut() = State::None;
         })
     }
 
     fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<T> {
         self.state.lock(|state| {
-            let state = &mut *self.state.get();
-            match state {
+            let mut state = state.borrow_mut();
+            match &mut *state {
                 State::None => {
                     *state = State::Waiting(cx.waker().clone());
                     Poll::Pending
                 }
                 State::Waiting(w) if w.will_wake(cx.waker()) => Poll::Pending,
                 State::Waiting(_) => panic!("waker overflow"),
-                State::Signaled(_) => match mem::replace(state, State::None) {
+                State::Signaled(_) => match mem::replace(&mut *state, State::None) {
                     State::Signaled(res) => Poll::Ready(res),
                     _ => unreachable!(),
                 },
@@ -103,6 +103,6 @@ where
     /// non-blocking method to check whether this signal has been signaled.
     pub fn signaled(&self) -> bool {
         self.state
-            .lock(|state| matches!(&*self.state.get(), State::Signaled(_)))
+            .lock(|state| matches!(*state.borrow(), State::Signaled(_)))
     }
 }

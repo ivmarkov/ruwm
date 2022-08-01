@@ -8,7 +8,6 @@ pub mod battery;
 pub mod button;
 pub mod emergency;
 pub mod error;
-pub mod event_logger;
 pub mod keepalive;
 pub mod mqtt;
 pub mod notification;
