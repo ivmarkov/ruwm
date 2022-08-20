@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_util::{select, Either};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 
+use crate::channel::{Receiver, Sender};
 use crate::signal::Signal;
 use crate::state::*;
 use crate::utils::SignalReceiver;

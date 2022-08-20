@@ -1,11 +1,10 @@
 #![no_std]
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
-#![feature(explicit_generic_args_with_impl_trait)]
-#![feature(nll)]
 
 pub mod battery;
 pub mod button;
+pub mod channel;
 pub mod emergency;
 pub mod error;
 pub mod keepalive;

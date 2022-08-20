@@ -11,12 +11,13 @@ use embassy_util::mutex::Mutex as AsyncMutex;
 use embassy_util::waitqueue::MultiWakerRegistration;
 use embassy_util::{select4, select_all};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
-use embedded_svc::errors::wrap::EitherError;
-use embedded_svc::utils::role::Role;
 use embedded_svc::ws::{self, FrameType};
 
+use edge_frame::dto::Role;
+
 use crate::battery::BatteryState;
+use crate::channel::{Receiver, Sender};
+use crate::error::EitherError;
 use crate::notification::Notification;
 use crate::state::StateCellRead;
 use crate::utils::NotifReceiver;

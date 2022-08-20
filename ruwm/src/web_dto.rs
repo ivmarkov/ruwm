@@ -1,7 +1,7 @@
 use heapless::String;
 use serde::{Deserialize, Serialize};
 
-use embedded_svc::utils::role::Role;
+use edge_frame::dto::Role;
 
 use crate::battery::BatteryState;
 use crate::valve::{ValveCommand, ValveState};

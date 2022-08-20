@@ -17,6 +17,7 @@ log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2.7", features = [ "unproven" ] }
 embedded-svc = { version = "0.22", features = ["nightly", "experimental"] }
+edge-frame = { version = "0.2", default-features = false, features = ["dto"], git = "https://github.com/ivmarkov/edge-frame", branch = "next" }
 embassy-util = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
 embedded-graphics = "0.7"
 profont = "0.5"

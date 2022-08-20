@@ -5,8 +5,9 @@ use embassy_util::blocking_mutex::raw::RawMutex;
 use embassy_util::blocking_mutex::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
 
-use embedded_svc::channel::asynch::Sender;
 use embedded_svc::storage::{SerDe, Storage};
+
+use crate::channel::Sender;
 
 pub trait StateCellRead {
     type Data;

@@ -4,9 +4,10 @@ use log::info;
 
 use embassy_util::blocking_mutex::raw::RawMutex;
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
-
-use crate::{notification::Notification, signal::Signal, state::StateCellRead};
+use crate::channel::{Receiver, Sender};
+use crate::notification::Notification;
+use crate::signal::Signal;
+use crate::state::StateCellRead;
 
 pub struct NotifReceiver<'a, S>(&'a Notification, &'a S);
 
@@ -18,7 +19,7 @@ impl<'a, S> NotifReceiver<'a, S> {
 
 impl<'a, S> Receiver for NotifReceiver<'a, S>
 where
-    S: StateCellRead + Send + Sync,
+    S: StateCellRead + Send + Sync + 'a,
     S::Data: Send,
 {
     type Data = S::Data;
@@ -49,7 +50,7 @@ where
 
 impl<'a, R, T> Receiver for SignalReceiver<'a, R, T>
 where
-    R: RawMutex + Send + Sync,
+    R: RawMutex + Send + Sync + 'a,
     T: Send + 'static,
 {
     type Data = T;
@@ -150,7 +151,7 @@ where
 
 impl<'a, const N: usize, R, T> Sender for SignalSender<'a, N, R, T>
 where
-    R: RawMutex + Send + Sync,
+    R: RawMutex + Send + Sync + 'a,
     T: Send + Clone + 'static,
 {
     type Data = T;

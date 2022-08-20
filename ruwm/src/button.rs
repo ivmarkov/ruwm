@@ -8,8 +8,9 @@ use embassy_util::{select, Either};
 
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::timer::asynch::OnceTimer;
+
+use crate::channel::{Receiver, Sender};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {

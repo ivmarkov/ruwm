@@ -9,9 +9,9 @@ use embassy_util::{select, Either};
 
 use embedded_hal::digital::v2::OutputPin;
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::timer::asynch::OnceTimer;
 
+use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
 use crate::signal::Signal;
 use crate::state::{
