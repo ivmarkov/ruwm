@@ -2,7 +2,6 @@ use core::convert::Infallible;
 use core::future::Future;
 use core::time::Duration;
 
-use embedded_svc::channel::asynch::Receiver;
 use embedded_svc::timer::asynch::*;
 
 pub fn timers() -> impl TimerService {
@@ -54,14 +53,12 @@ impl ErrorType for SmolInterval {
     type Error = Infallible;
 }
 
-impl Receiver for SmolInterval {
-    type Data = ();
-
-    type RecvFuture<'b>
-    = impl Future<Output = Self::Data> + Send
+impl Clock for SmolInterval {
+    type TickFuture<'b>
+    = impl Future<Output = ()> + Send
     where Self: 'b;
 
-    fn recv(&mut self) -> Self::RecvFuture<'_> {
+    fn tick(&mut self) -> Self::TickFuture<'_> {
         async move {
             smol::Timer::after(self.0);
         }

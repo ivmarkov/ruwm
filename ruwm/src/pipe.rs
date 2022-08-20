@@ -1,4 +1,4 @@
-use embedded_svc::channel::asynch::{Receiver, Sender};
+use crate::channel::{Receiver, Sender};
 
 pub async fn process<D>(receiver: impl Receiver<Data = D>, sender: impl Sender<Data = D>) {
     process_transform(receiver, sender, |d| Some(d)).await

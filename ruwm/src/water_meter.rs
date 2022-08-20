@@ -8,10 +8,10 @@ use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_util::blocking_mutex::Mutex;
 use embassy_util::{select, Either};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::storage::Storage;
 use embedded_svc::timer::asynch::OnceTimer;
 
+use crate::channel::{Receiver, Sender};
 use crate::pulse_counter::PulseCounter;
 use crate::signal::Signal;
 use crate::state::{

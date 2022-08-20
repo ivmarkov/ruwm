@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use embassy_util::blocking_mutex::raw::RawMutex;
 use embassy_util::{select, Either};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
 
+use crate::channel::{Receiver, Sender};
 use crate::signal::Signal;
 use crate::state::{update, MemoryStateCell, StateCell, StateCellRead};
 use crate::utils::SignalReceiver;

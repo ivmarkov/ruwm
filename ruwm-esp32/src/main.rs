@@ -418,7 +418,7 @@ fn display(
     backlight.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
-        spi::Master::<SPI2, _, _, _, _>::new(
+        spi::SpiMasterDriver::<SPI2, _, _, _, _>::new(
             spi,
             spi::Pins {
                 sclk,

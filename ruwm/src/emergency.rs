@@ -1,8 +1,7 @@
 use embassy_util::{select3, Either3};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
-
 use crate::battery::BatteryState;
+use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::StateCellRead;
 use crate::utils::NotifReceiver;

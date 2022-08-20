@@ -10,13 +10,13 @@ use heapless::String;
 
 use embassy_util::{select4, Either4};
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
 };
 use embedded_svc::mqtt::client::Details;
 
 use crate::battery::BatteryState;
+use crate::channel::{Receiver, Sender};
 use crate::error;
 use crate::notification::Notification;
 use crate::signal::Signal;
@@ -104,9 +104,9 @@ where
     pub async fn receive(
         &'static self,
         connection: impl Connection<Message = Option<MqttCommand>>,
-        notif_sink: impl Sender<Data = MqttClientNotification>,
-        valve_command_sink: impl Sender<Data = ValveCommand>,
-        wm_command_sink: impl Sender<Data = WaterMeterCommand>,
+        notif_sink: impl Sender<Data = MqttClientNotification> + 'static,
+        valve_command_sink: impl Sender<Data = ValveCommand> + 'static,
+        wm_command_sink: impl Sender<Data = WaterMeterCommand> + 'static,
     ) {
         receive(
             connection,

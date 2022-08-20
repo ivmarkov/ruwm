@@ -10,10 +10,10 @@ use embassy_util::{select3, select4, Either3, Either4};
 
 use embedded_graphics::prelude::RgbColor;
 
-use embedded_svc::channel::asynch::{Receiver, Sender};
 use embedded_svc::executor::asynch::Unblocker;
 
 use crate::battery::BatteryState;
+use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::{NoopStateCell, StateCellRead};
 use crate::utils::{NotifReceiver, NotifSender};

@@ -8,9 +8,9 @@ use embassy_util::blocking_mutex::raw::RawMutex;
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
-use embedded_svc::channel::asynch::Sender;
 use embedded_svc::timer::asynch::OnceTimer;
 
+use crate::channel::Sender;
 use crate::state::{update_with, MemoryStateCell, StateCell, StateCellRead};
 
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
