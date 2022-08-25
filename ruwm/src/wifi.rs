@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use embassy_util::blocking_mutex::raw::RawMutex;
 use embassy_util::{select, Either};
 
-use embedded_svc::wifi::{Configuration, Status, Wifi as WifiTrait};
+use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
 use crate::channel::{Receiver, Sender};
 use crate::signal::Signal;
@@ -21,7 +21,7 @@ pub struct Wifi<R>
 where
     R: RawMutex,
 {
-    state: MemoryStateCell<R, Option<Status>>,
+    state: MemoryStateCell<R, Option<bool>>,
     command: Signal<R, WifiCommand>,
 }
 
@@ -36,7 +36,7 @@ where
         }
     }
 
-    pub fn state(&self) -> &impl StateCellRead<Data = Option<Status>> {
+    pub fn state(&self) -> &impl StateCellRead<Data = Option<bool>> {
         &self.state
     }
 
@@ -63,7 +63,7 @@ where
 
 pub async fn run(
     mut wifi: impl WifiTrait,
-    state: &impl StateCell<Data = Option<Status>>,
+    state: &impl StateCell<Data = Option<bool>>,
     mut state_changed_source: impl Receiver<Data = ()>,
     mut command_source: impl Receiver<Data = WifiCommand>,
     mut state_sink: impl Sender<Data = ()>,
@@ -76,7 +76,7 @@ pub async fn run(
 
         match select(receiver, command).await {
             Either::First(_) => {
-                update(state, Some(wifi.get_status()), &mut state_sink).await;
+                update(state, Some(wifi.is_up().unwrap()), &mut state_sink).await;
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),

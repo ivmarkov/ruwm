@@ -43,7 +43,7 @@ use esp_idf_svc::nvs_storage::EspNvsStorage;
 use esp_idf_svc::sysloop::EspSysLoopStack;
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
-use esp_idf_svc::wifi::EspWifi;
+use esp_idf_svc::wifi::WifiDriver;
 
 use esp_idf_sys::{esp, EspError};
 
@@ -210,7 +210,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let netif_stack = Arc::new(EspNetifStack::new()?);
     let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
-    let mut wifi = EspWifi::new(netif_stack, sysloop_stack, nvs_stack)?;
+    let mut wifi = WifiDriver::new(netif_stack, sysloop_stack, nvs_stack)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: SSID.into(),
