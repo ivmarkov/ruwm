@@ -1,12 +1,13 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
-use enumset::{EnumSet, EnumSetType};
 use serde::{Deserialize, Serialize};
 
-use embassy_util::{select3, select4, Either3, Either4};
+use enumset::{EnumSet, EnumSetType};
+
+use embassy_futures::{select3, select4, Either3, Either4};
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 
 use embedded_graphics::prelude::RgbColor;
 

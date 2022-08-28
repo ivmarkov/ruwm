@@ -3,7 +3,7 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;

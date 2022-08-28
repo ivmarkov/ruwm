@@ -2,8 +2,8 @@ use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::{select, Either};
+use embassy_futures::{select, Either};
+use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 

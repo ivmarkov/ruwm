@@ -4,12 +4,12 @@ use core::fmt::Debug;
 use log::info;
 use postcard::{from_bytes, to_slice};
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
-use embassy_util::channel::mpmc::Channel;
-use embassy_util::mutex::Mutex as AsyncMutex;
-use embassy_util::waitqueue::MultiWakerRegistration;
-use embassy_util::{select4, select_all};
+use embassy_futures::{select4, select_all};
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex as AsyncMutex;
+use embassy_sync::waitqueue::MultiWakerRegistration;
 
 use embedded_svc::ws::{self, FrameType};
 

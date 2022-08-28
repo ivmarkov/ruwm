@@ -3,7 +3,7 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_util::{select, Either};
+use embassy_futures::{select, Either};
 
 use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
