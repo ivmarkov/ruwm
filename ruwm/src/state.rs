@@ -1,9 +1,10 @@
 use core::cell::{Cell, RefCell};
 use core::marker::PhantomData;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
 use serde::{de::DeserializeOwned, Serialize};
+
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 
 use embedded_svc::storage::{SerDe, Storage};
 

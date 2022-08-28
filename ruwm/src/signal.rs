@@ -4,8 +4,8 @@ use core::future::Future;
 use core::mem;
 use core::task::{Context, Poll, Waker};
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 
 /// Single-slot signaling primitive.
 ///

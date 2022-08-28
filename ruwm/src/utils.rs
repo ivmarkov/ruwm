@@ -2,7 +2,7 @@ use core::{future::Future, marker::PhantomData};
 
 use log::info;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;

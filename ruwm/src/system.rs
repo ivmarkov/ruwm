@@ -2,8 +2,8 @@ use core::cell::RefCell;
 use core::fmt::Debug;
 use core::time::Duration;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 
 use embedded_graphics::prelude::RgbColor;
 

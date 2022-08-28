@@ -7,25 +7,25 @@ mod ulp_code_vars {
     include!(env!("ULP_FSM_RS"));
 }
 
-pub struct PulseCounter(ulp::ULP);
+pub struct PulseCounter<'d>(ulp::UlpDriver<'d>);
 
-impl PulseCounter {
+impl<'d> PulseCounter<'d> {
     const ULP_CODE: &'static [u8] = include_bytes!(env!("ULP_FSM_BIN"));
 
-    pub fn new(ulp: ulp::ULP) -> Self {
+    pub const fn new(ulp: ulp::UlpDriver<'d>) -> Self {
         Self(ulp)
     }
 
-    pub fn ulp(&self) -> &ulp::ULP {
+    pub fn ulp(&self) -> &ulp::UlpDriver<'d> {
         &self.0
     }
 
-    pub fn ulp_mut(&mut self) -> &mut ulp::ULP {
+    pub fn ulp_mut(&mut self) -> &mut ulp::UlpDriver<'d> {
         &mut self.0
     }
 }
 
-impl pulse_counter::PulseCounter for PulseCounter {
+impl<'d> pulse_counter::PulseCounter for PulseCounter<'d> {
     type Error = EspError;
 
     fn initialize(mut self) -> Result<Self, Self::Error> {

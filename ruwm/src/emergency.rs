@@ -1,4 +1,4 @@
-use embassy_util::{select3, Either3};
+use embassy_futures::{select3, Either3};
 
 use crate::battery::BatteryState;
 use crate::channel::{Receiver, Sender};

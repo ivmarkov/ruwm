@@ -4,8 +4,8 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_util::blocking_mutex::raw::{NoopRawMutex, RawMutex};
-use embassy_util::{select, Either};
+use embassy_futures::{select, Either};
+use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 
 use embedded_hal::digital::v2::OutputPin;
 

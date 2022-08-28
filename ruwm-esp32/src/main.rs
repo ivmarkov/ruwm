@@ -27,20 +27,20 @@ use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 
-use esp_idf_hal::executor::{EspExecutor, Local, Sendable, SpawnError, Task};
-use esp_idf_hal::gpio::{self, InterruptType, Output, Pull, RTCPin};
+use esp_idf_hal::adc::*;
+use esp_idf_hal::delay::*;
+use esp_idf_hal::gpio::*;
+use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
-use esp_idf_hal::spi::SPI2;
-use esp_idf_hal::{adc, delay, spi};
+use esp_idf_hal::spi::*;
+use esp_idf_hal::ulp::*;
 
 use esp_idf_svc::errors::EspIOError;
+use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::ws::{EspHttpWsAsyncConnection, EspHttpWsProcessor};
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
-use esp_idf_svc::netif::EspNetifStack;
-use esp_idf_svc::nvs::EspDefaultNvs;
-use esp_idf_svc::nvs_storage::EspNvsStorage;
-use esp_idf_svc::sysloop::EspSysLoopStack;
+use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
 use esp_idf_svc::wifi::WifiDriver;
@@ -53,8 +53,10 @@ use pulse_counter::PulseCounter;
 
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
+use ruwm::notification::Notification;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
+use ruwm::signal::Signal;
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
 use ruwm::valve::{self, ValveCommand};
@@ -91,9 +93,9 @@ fn main() -> Result<(), InitError> {
 fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let peripherals = Peripherals::take().unwrap();
 
-    let mut valve_power_pin = peripherals.pins.gpio10.into_output()?;
-    let mut valve_open_pin = peripherals.pins.gpio12.into_output()?;
-    let mut valve_close_pin = peripherals.pins.gpio13.into_output()?;
+    let mut valve_power_pin = PinDriver::new(peripherals.pins.gpio10)?.into_output()?;
+    let mut valve_open_pin = PinDriver::new(peripherals.pins.gpio12)?.into_output()?;
+    let mut valve_close_pin = PinDriver::new(peripherals.pins.gpio13)?.into_output()?;
 
     if wakeup_reason == SleepWakeupReason::ULP {
         emergency_valve_close(
@@ -113,12 +115,12 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     unsafe { slow_mem = Some(Default::default()) };
 
-    let nvs_stack = Arc::new(EspDefaultNvs::new()?);
+    let nvs_partition = EspDefaultNvsPartition::take()?;
 
-    static STORAGE: Forever<Mutex<EspRawMutex, RefCell<PostcardStorage<500, EspNvsStorage>>>> =
+    static STORAGE: Forever<Mutex<EspRawMutex, RefCell<PostcardStorage<500, EspNvs<NvsDefault>>>>> =
         Forever::new();
     let storage = &*STORAGE.put(Mutex::new(RefCell::new(PostcardStorage::<500, _>::new(
-        EspNvsStorage::new_default(nvs_stack.clone(), "WM", true)?,
+        EspNvs::new(nvs_partition.clone(), "WM", true)?,
         PostcardSerDe,
     ))));
 
@@ -126,7 +128,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         System<
             WS_MAX_CONNECTIONS,
             EspRawMutex,
-            PostcardStorage<500, EspNvsStorage>,
+            PostcardStorage<500, EspNvs<NvsDefault>>,
             EspHttpWsAsyncConnection<()>,
         >,
     > = Forever::new();
@@ -151,29 +153,23 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.wm(
                 timers.timer()?,
-                PulseCounter::new(peripherals.ulp).initialize()?,
+                PulseCounter::new(UlpDriver::new(peripherals.ulp)?).initialize()?,
             ),
             &mut tasks1,
         )?
         .spawn_local_collect(
             system.battery(
                 timers.timer()?,
-                adc::PoweredAdc::new(
-                    peripherals.adc1,
-                    adc::config::Config::new().calibration(true),
-                )?,
-                peripherals.pins.gpio33.into_analog_atten_11db()?,
-                peripherals.pins.gpio14.into_input()?,
+                AdcDriver::new(peripherals.adc1, &config::Config::new().calibration(true))?,
+                AdcChannelDriver::new(peripherals.pins.gpio33)?,
+                PinDriver::new(peripherals.pins.gpio14)?.into_input()?,
             ),
             &mut tasks1,
         )?
         .spawn_local_collect(
             system.button1(
                 timers.timer()?,
-                unsafe {
-                    button1_pin
-                        .into_subscribed(move || system.button1_signal(), InterruptType::NegEdge)?
-                },
+                subscribe_pin(button1_pin, || system.button1_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -181,11 +177,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.button2(
                 timers.timer()?,
-                unsafe {
-                    button2_pin
-                        .into_subscribed(move || system.button2_signal(), InterruptType::NegEdge)?
-                        .into_pull_up()?
-                },
+                subscribe_pin(button2_pin, || system.button2_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -193,11 +185,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.button3(
                 timers.timer()?,
-                unsafe {
-                    button3_pin
-                        .into_subscribed(move || system.button3_signal(), InterruptType::NegEdge)?
-                        .into_pull_up()?
-                },
+                subscribe_pin(button3_pin, || system.button3_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -208,14 +196,14 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             &mut tasks1,
         )?;
 
-    let netif_stack = Arc::new(EspNetifStack::new()?);
-    let sysloop_stack = Arc::new(EspSysLoopStack::new()?);
-    let mut wifi = WifiDriver::new(netif_stack, sysloop_stack, nvs_stack)?;
+    let sysloop = EspSystemEventLoop::take()?;
+
+    let mut wifi = WifiDriver::new(peripherals.modem, sysloop, nvs_stack)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: SSID.into(),
         password: PASS.into(),
-        ..Default::default()
+        ..NvsDefault::default()
     }))?;
 
     let wifi_state_changed_source = wifi.as_async().subscribe()?;
@@ -324,6 +312,20 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     Ok(())
 }
 
+fn subscribe_pin<'d, P: InputPin>(
+    pin: impl Peripheral<P = P> + 'd,
+    notify: impl Fn() + Send + 'static,
+) -> Result<PinDriver<'d, P, Input>, EspError> {
+    let pin = PinDriver::new(pin)?.into_input()?;
+
+    pin.set_interrupt_type(InterruptType::NegEdge)?;
+    unsafe {
+        pin.subscribe(notify)?;
+    }
+
+    Ok(pin)
+}
+
 fn init() -> Result<(), InitError> {
     esp_idf_sys::link_patches();
 
@@ -407,7 +409,7 @@ fn sleep() -> Result<(), InitError> {
 }
 
 fn display(
-    mut backlight: gpio::GpioPin<Output>,
+    mut backlight: impl OutputPin,
     dc: gpio::GpioPin<Output>,
     rst: gpio::GpioPin<Output>,
     spi: SPI2,
@@ -426,7 +428,7 @@ fn display(
                 sdi: Option::<gpio::Gpio21<gpio::Unknown>>::None,
                 cs,
             },
-            <spi::config::Config as Default>::default().baudrate(26.MHz().into()),
+            <spi::config::Config as NvsDefault>::default().baudrate(26.MHz().into()),
         )?,
         dc,
     );

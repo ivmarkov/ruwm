@@ -1,14 +1,14 @@
 use core::str::{self, FromStr};
 use core::time::Duration;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
 use log::{error, info};
 
 use serde::{Deserialize, Serialize};
 
 use heapless::String;
 
-use embassy_util::{select4, Either4};
+use embassy_futures::{select4, Either4};
+use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
