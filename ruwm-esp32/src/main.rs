@@ -4,6 +4,7 @@
 use core::fmt::Debug;
 use core::time::Duration;
 use std::cell::RefCell;
+use std::thread::JoinHandle;
 
 extern crate alloc;
 
@@ -254,17 +255,14 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let display_sdo = peripherals.pins.gpio19;
     let display_cs = peripherals.pins.gpio5;
 
-    let execution2 = std::thread::spawn(move || {
-        let (mut executor2, tasks2) = (move || {
-            let mut tasks2 = heapless::Vec::<Task<()>, 8>::new();
-            let mut executor2 = EspExecutor::<8, Local>::new();
-
-            executor2
+    let execution2 = run_executor::<8>(
+        move |executor, tasks| {
+            executor
                 .spawn_local_collect(
                     system.wm_stats(timers.timer().unwrap(), EspSystemTime),
-                    &mut tasks2,
+                    tasks,
                 )?
-                .spawn_local_collect(system.screen(), &mut tasks2)?
+                .spawn_local_collect(system.screen(), tasks)?
                 .spawn_local_collect(
                     system.screen_draw(
                         display(
@@ -278,47 +276,36 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                         )
                         .unwrap(),
                     ),
-                    &mut tasks2,
+                    tasks,
                 )?
                 .spawn_local_collect(
                     system.wifi(
                         wifi,
                         EventBusReceiver::<_, WifiEvent>::new(wifi_state_changed_source),
                     ),
-                    &mut tasks2,
+                    tasks,
                 )?
-                .spawn_local_collect(system.mqtt_receive(mqtt_conn), &mut tasks2)?;
+                .spawn_local_collect(system.mqtt_receive(mqtt_conn), tasks)?;
 
-            Result::<_, SpawnError>::Ok((executor2, tasks2))
-        })()
-        .unwrap();
+            Ok(())
+        },
+        move || system.should_quit(),
+    );
 
-        executor2.with_context(|exec, ctx| {
-            exec.run(ctx, || system.should_quit(), Some(tasks2));
-        });
-    });
-
-    let execution3 = std::thread::spawn(move || {
-        let (mut executor3, tasks3) = (move || {
-            let mut tasks3 = heapless::Vec::<Task<()>, 4>::new();
-            let mut executor3 = EspExecutor::<4, Local>::new();
-
-            executor3
+    let execution3 = run_executor::<4>(
+        move |executor, tasks| {
+            executor
                 .spawn_local_collect(
                     system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client),
-                    &mut tasks3,
+                    tasks,
                 )?
-                .spawn_local_collect(system.web_accept(ws_acceptor), &mut tasks3)?
-                .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), &mut tasks3)?;
+                .spawn_local_collect(system.web_accept(ws_acceptor), tasks)?
+                .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), tasks)?;
 
-            Result::<_, SpawnError>::Ok((executor3, tasks3))
-        })()
-        .unwrap();
-
-        executor3.with_context(|exec, ctx| {
-            exec.run(ctx, || system.should_quit(), Some(tasks3));
-        });
-    });
+            Ok(())
+        },
+        move || system.should_quit(),
+    );
 
     executor1.with_context(|exec, ctx| {
         exec.run(ctx, || system.should_quit(), Some(tasks1));
@@ -334,6 +321,32 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     log::info!("Finished execution");
 
     Ok(())
+}
+
+fn run_executor<'a, const C: usize>(
+    spawner: impl FnOnce(
+            &mut EspExecutor<'a, C, Local>,
+            &mut heapless::Vec<Task<()>, C>,
+        ) -> Result<(), InitError>
+        + Send
+        + 'static,
+    until: impl Fn() -> bool + Send + 'static,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let (mut executor, tasks) = (move || {
+            let mut tasks = heapless::Vec::<Task<()>, C>::new();
+            let mut executor = EspExecutor::<C, Local>::new();
+
+            spawner(&mut executor, &mut tasks)?;
+
+            Result::<_, InitError>::Ok((executor, tasks))
+        })()
+        .unwrap();
+
+        executor.with_context(|exec, ctx| {
+            exec.run(ctx, until, Some(tasks));
+        });
+    })
 }
 
 fn subscribe_pin<'d, P: InputPin>(
