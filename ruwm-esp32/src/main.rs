@@ -1,25 +1,23 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
-#![feature(explicit_generic_args_with_impl_trait)]
-#![feature(nll)]
 
 use core::fmt::Debug;
 use core::time::Duration;
 use std::cell::RefCell;
 
 extern crate alloc;
-use alloc::sync::Arc;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::blocking_mutex::Mutex;
-use embassy_util::Forever;
+use edge_executor::{Local, SpawnError, Task};
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
+use static_cell::StaticCell;
 
 use embedded_graphics::prelude::{Point, RgbColor, Size};
 use embedded_graphics::primitives::Rectangle;
 
 use display_interface_spi::SPIInterfaceNoCS;
 
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 
 use embedded_svc::event_bus::asynch::EventBus;
 use embedded_svc::http::server::Method;
@@ -27,13 +25,14 @@ use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
 
-use esp_idf_hal::adc::*;
 use esp_idf_hal::delay::*;
+use esp_idf_hal::executor::EspExecutor;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::*;
 use esp_idf_hal::ulp::*;
+use esp_idf_hal::{adc::*, delay};
 
 use esp_idf_svc::errors::EspIOError;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
@@ -115,24 +114,25 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     unsafe { slow_mem = Some(Default::default()) };
 
-    let nvs_partition = EspDefaultNvsPartition::take()?;
+    let nvs_default_partition = EspDefaultNvsPartition::take()?;
 
-    static STORAGE: Forever<Mutex<EspRawMutex, RefCell<PostcardStorage<500, EspNvs<NvsDefault>>>>> =
-        Forever::new();
-    let storage = &*STORAGE.put(Mutex::new(RefCell::new(PostcardStorage::<500, _>::new(
-        EspNvs::new(nvs_partition.clone(), "WM", true)?,
+    static STORAGE: StaticCell<
+        Mutex<StdRawMutex, RefCell<PostcardStorage<500, EspNvs<NvsDefault>>>>,
+    > = StaticCell::new();
+    let storage = &*STORAGE.init(Mutex::new(RefCell::new(PostcardStorage::<500, _>::new(
+        EspNvs::new(nvs_default_partition.clone(), "WM", true)?,
         PostcardSerDe,
     ))));
 
-    static SYSTEM: Forever<
+    static SYSTEM: StaticCell<
         System<
             WS_MAX_CONNECTIONS,
-            EspRawMutex,
+            StdRawMutex,
             PostcardStorage<500, EspNvs<NvsDefault>>,
             EspHttpWsAsyncConnection<()>,
         >,
-    > = Forever::new();
-    let system = &*SYSTEM.put(System::new(unsafe { slow_mem.as_mut().unwrap() }, storage));
+    > = StaticCell::new();
+    let system = &*SYSTEM.init(System::new(unsafe { slow_mem.as_mut().unwrap() }, storage));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
@@ -198,15 +198,19 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let sysloop = EspSystemEventLoop::take()?;
 
-    let mut wifi = WifiDriver::new(peripherals.modem, sysloop, nvs_stack)?;
+    let mut wifi = WifiDriver::new(
+        peripherals.modem,
+        sysloop.clone(),
+        Some(nvs_default_partition),
+    )?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: SSID.into(),
         password: PASS.into(),
-        ..NvsDefault::default()
+        ..Default::default()
     }))?;
 
-    let wifi_state_changed_source = wifi.as_async().subscribe()?;
+    let wifi_state_changed_source = sysloop.as_async().subscribe()?;
 
     let client_id = "water-meter-demo";
     let mut mqtt_parser = MessageParser::new();
@@ -225,7 +229,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<WS_MAX_CONNECTIONS, WS_MAX_FRAME_SIZE>::new(());
 
-    let ws_processor = esp_idf_hal::mutex::Mutex::new(ws_processor);
+    let ws_processor = Mutex::new(ws_processor);
 
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
@@ -236,39 +240,44 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     }
 
     httpd.ws_handler("/ws", move |connection| {
-        ws_processor.lock().process(connection)
+        ws_processor.lock(|ws_processor| ws_processor.process(connection))
     })?;
-
-    let mut tasks2 = heapless::Vec::<Task<()>, 8>::new();
-    let mut executor2 = EspExecutor::<8, Sendable>::new();
-
-    executor2
-        .spawn_collect(
-            system.wm_stats(timers.timer().unwrap(), EspSystemTime),
-            &mut tasks2,
-        )?
-        .spawn_collect(system.screen(), &mut tasks2)?
-        .spawn_collect(
-            system.screen_draw(
-                display(
-                    peripherals.pins.gpio4.into_output()?.degrade(),
-                    peripherals.pins.gpio16.into_output()?.degrade(),
-                    peripherals.pins.gpio23.into_output()?.degrade(),
-                    peripherals.spi2,
-                    peripherals.pins.gpio18.into_output()?.degrade(),
-                    peripherals.pins.gpio19.into_output()?.degrade(),
-                    Some(peripherals.pins.gpio5.into_output()?.degrade()),
-                )
-                .unwrap(),
-            ),
-            &mut tasks2,
-        )?
-        .spawn_collect(system.wifi(wifi, wifi_state_changed_source), &mut tasks2)?
-        .spawn_collect(system.mqtt_receive(mqtt_conn), &mut tasks2)?;
 
     log::info!("Starting execution");
 
     let execution2 = std::thread::spawn(move || {
+        let (mut executor2, tasks2) = (move || {
+            let mut tasks2 = heapless::Vec::<Task<()>, 8>::new();
+            let mut executor2 = EspExecutor::<8, Local>::new();
+
+            executor2
+                .spawn_local_collect(
+                    system.wm_stats(timers.timer().unwrap(), EspSystemTime),
+                    &mut tasks2,
+                )?
+                .spawn_local_collect(system.screen(), &mut tasks2)?
+                .spawn_local_collect(
+                    system.screen_draw(
+                        display(
+                            peripherals.pins.gpio4,
+                            peripherals.pins.gpio16,
+                            peripherals.pins.gpio23,
+                            peripherals.spi2,
+                            peripherals.pins.gpio18,
+                            peripherals.pins.gpio19,
+                            Some(peripherals.pins.gpio5),
+                        )
+                        .unwrap(),
+                    ),
+                    &mut tasks2,
+                )?
+                .spawn_local_collect(system.wifi(wifi, wifi_state_changed_source), &mut tasks2)?
+                .spawn_local_collect(system.mqtt_receive(mqtt_conn), &mut tasks2)?;
+
+            Result::<_, SpawnError>::Ok((executor2, tasks2))
+        })()
+        .unwrap();
+
         executor2.with_context(|exec, ctx| {
             exec.run(ctx, || system.should_quit(), Some(tasks2));
         });
@@ -344,9 +353,9 @@ fn init() -> Result<(), InitError> {
 }
 
 fn emergency_valve_close(
-    power_pin: &mut impl OutputPin<Error = impl Debug>,
-    open_pin: &mut impl OutputPin<Error = impl Debug>,
-    close_pin: &mut impl OutputPin<Error = impl Debug>,
+    power_pin: &mut impl EHOutputPin<Error = impl Debug>,
+    open_pin: &mut impl EHOutputPin<Error = impl Debug>,
+    close_pin: &mut impl EHOutputPin<Error = impl Debug>,
 ) {
     log::error!("Start: emergency closing valve due to ULP wakeup...");
 
@@ -408,35 +417,35 @@ fn sleep() -> Result<(), InitError> {
     Ok(())
 }
 
-fn display(
-    mut backlight: impl OutputPin,
-    dc: gpio::GpioPin<Output>,
-    rst: gpio::GpioPin<Output>,
-    spi: SPI2,
-    sclk: gpio::GpioPin<Output>,
-    sdo: gpio::GpioPin<Output>,
-    cs: Option<gpio::GpioPin<Output>>,
+fn display<'d>(
+    backlight: impl Peripheral<P = impl OutputPin> + 'd,
+    dc: impl Peripheral<P = impl OutputPin> + 'd,
+    rst: impl Peripheral<P = impl OutputPin> + 'd,
+    spi: impl Peripheral<P = SPI2> + 'd,
+    sclk: impl Peripheral<P = impl OutputPin> + 'd,
+    sdo: impl Peripheral<P = impl OutputPin> + 'd,
+    cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
 ) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug>, InitError> {
-    backlight.set_high()?;
+    let backlight = PinDriver::new(backlight)?.into_output()?.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
-        spi::SpiMasterDriver::<SPI2, _, _, _, _>::new(
+        SpiMasterDriver::<SPI2>::new(
             spi,
-            spi::Pins {
-                sclk,
-                sdo,
-                sdi: Option::<gpio::Gpio21<gpio::Unknown>>::None,
-                cs,
-            },
-            <spi::config::Config as NvsDefault>::default().baudrate(26.MHz().into()),
+            sclk,
+            sdo,
+            Option::<Gpio21>::None,
+            cs,
+            &config::Config::new().baudrate(26.MHz().into()),
         )?,
-        dc,
+        PinDriver::new(dc)?.into_output()?,
     );
 
     let mut display = st7789::ST7789::new(
-        di, rst,
+        di,
+        PinDriver::new(rst)?.into_output()?,
         // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
-        240, 320,
+        240,
+        320,
     );
 
     display.init(&mut delay::Ets).unwrap();
@@ -478,24 +487,17 @@ impl From<SpawnError> for InitError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InitError {}
+//impl std::error::Error for InitError {}
 
-pub struct EspRawMutex(esp_idf_hal::mutex::RawMutex);
+pub struct StdRawMutex(std::sync::Mutex<()>);
 
-unsafe impl RawMutex for EspRawMutex {
-    const INIT: Self = EspRawMutex(esp_idf_hal::mutex::RawMutex::new());
+unsafe impl RawMutex for StdRawMutex {
+    const INIT: Self = StdRawMutex(std::sync::Mutex::new(()));
 
     fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
-        unsafe {
-            self.0.lock();
-        }
+        let guard = self.0.lock().unwrap();
 
         let result = f();
-
-        unsafe {
-            self.0.unlock();
-        }
 
         result
     }

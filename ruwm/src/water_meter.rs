@@ -4,7 +4,7 @@ use core::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_futures::{select, Either};
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 

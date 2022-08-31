@@ -4,7 +4,7 @@ use core::fmt::Debug;
 use log::info;
 use postcard::{from_bytes, to_slice};
 
-use embassy_futures::{select4, select_all};
+use embassy_futures::select::{select4, select_array};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
@@ -24,8 +24,6 @@ use crate::utils::NotifReceiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
-
-type WR = MultiWakerRegistration<4>;
 
 #[derive(Debug)]
 enum WebFrame {
@@ -127,7 +125,7 @@ where
                 .unwrap();
         }
 
-        select_all(workers.into_array::<N>().unwrap_or_else(|_| unreachable!())).await;
+        select_array(workers.into_array::<N>().unwrap_or_else(|_| unreachable!())).await;
     }
 
     fn as_refs_notif_arr(arr: &[Notification; N]) -> [&Notification; N] {

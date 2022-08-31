@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use enumset::{EnumSet, EnumSetType};
 
-use embassy_futures::{select3, select4, Either3, Either4};
+use embassy_futures::select::{select3, select4, Either3, Either4};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
