@@ -30,7 +30,8 @@ esp-idf-sys = { version = "0.31.6", features = ["binstart"] }
 esp-idf-svc = { version = "0.42", features = ["nightly", "experimental"] }
 esp-idf-hal = { version = "0.38", features = ["edge-executor"] }
 embassy-futures = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
-embassy-sync = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
+embassy-sync = { version = "0.1", git = "https://github.com/embassy-rs/embassy", features = ["std"] }
+static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
 edge-frame = { version = "0.2", default-features = false, features = ["assets-serve"] }
 edge-executor = { version = "0.1" }
 embedded-graphics = "0.7"

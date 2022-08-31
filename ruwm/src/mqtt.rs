@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use heapless::String;
 
-use embassy_futures::{select4, Either4};
+use embassy_futures::select::{select4, Either4};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_svc::mqtt::client::asynch::{
