@@ -10,6 +10,7 @@ extern crate alloc;
 use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use ruwm::utils::EventBusReceiver;
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::{Point, RgbColor, Size};
@@ -42,7 +43,7 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
-use esp_idf_svc::wifi::WifiDriver;
+use esp_idf_svc::wifi::{WifiDriver, WifiEvent};
 
 use esp_idf_sys::{esp, EspError};
 
@@ -160,8 +161,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.battery(
                 timers.timer()?,
-                AdcDriver::new(peripherals.adc1, &config::Config::new().calibration(true))?,
-                AdcChannelDriver::new(peripherals.pins.gpio33)?,
+                AdcDriver::new(peripherals.adc1, &AdcConfig::new().calibration(true))?,
+                AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio33)?,
                 PinDriver::new(peripherals.pins.gpio14)?.into_input()?,
             ),
             &mut tasks1,
@@ -169,7 +170,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.button1(
                 timers.timer()?,
-                subscribe_pin(button1_pin, || system.button1_signal())?,
+                subscribe_pin(button1_pin, move || system.button1_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -177,7 +178,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.button2(
                 timers.timer()?,
-                subscribe_pin(button2_pin, || system.button2_signal())?,
+                subscribe_pin(button2_pin, move || system.button2_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -185,7 +186,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         .spawn_local_collect(
             system.button3(
                 timers.timer()?,
-                subscribe_pin(button3_pin, || system.button3_signal())?,
+                subscribe_pin(button3_pin, move || system.button3_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
@@ -196,7 +197,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             &mut tasks1,
         )?;
 
-    let sysloop = EspSystemEventLoop::take()?;
+    let mut sysloop = EspSystemEventLoop::take()?;
 
     let mut wifi = WifiDriver::new(
         peripherals.modem,
@@ -229,7 +230,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<WS_MAX_CONNECTIONS, WS_MAX_FRAME_SIZE>::new(());
 
-    let ws_processor = Mutex::new(ws_processor);
+    let ws_processor = Mutex::<StdRawMutex, _>::new(RefCell::new(ws_processor));
 
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
@@ -240,10 +241,18 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     }
 
     httpd.ws_handler("/ws", move |connection| {
-        ws_processor.lock(|ws_processor| ws_processor.process(connection))
+        ws_processor.lock(|ws_processor| ws_processor.borrow_mut().process(connection))
     })?;
 
     log::info!("Starting execution");
+
+    let display_backlight = peripherals.pins.gpio4;
+    let display_dc = peripherals.pins.gpio16;
+    let display_rst = peripherals.pins.gpio23;
+    let display_spi = peripherals.spi2;
+    let display_sclk = peripherals.pins.gpio18;
+    let display_sdo = peripherals.pins.gpio19;
+    let display_cs = peripherals.pins.gpio5;
 
     let execution2 = std::thread::spawn(move || {
         let (mut executor2, tasks2) = (move || {
@@ -259,19 +268,25 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                 .spawn_local_collect(
                     system.screen_draw(
                         display(
-                            peripherals.pins.gpio4,
-                            peripherals.pins.gpio16,
-                            peripherals.pins.gpio23,
-                            peripherals.spi2,
-                            peripherals.pins.gpio18,
-                            peripherals.pins.gpio19,
-                            Some(peripherals.pins.gpio5),
+                            display_backlight,
+                            display_dc,
+                            display_rst,
+                            display_spi,
+                            display_sclk,
+                            display_sdo,
+                            Some(display_cs),
                         )
                         .unwrap(),
                     ),
                     &mut tasks2,
                 )?
-                .spawn_local_collect(system.wifi(wifi, wifi_state_changed_source), &mut tasks2)?
+                .spawn_local_collect(
+                    system.wifi(
+                        wifi,
+                        EventBusReceiver::<_, WifiEvent>::new(wifi_state_changed_source),
+                    ),
+                    &mut tasks2,
+                )?
                 .spawn_local_collect(system.mqtt_receive(mqtt_conn), &mut tasks2)?;
 
             Result::<_, SpawnError>::Ok((executor2, tasks2))
@@ -325,7 +340,7 @@ fn subscribe_pin<'d, P: InputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notify: impl Fn() + Send + 'static,
 ) -> Result<PinDriver<'d, P, Input>, EspError> {
-    let pin = PinDriver::new(pin)?.into_input()?;
+    let mut pin = PinDriver::new(pin)?.into_input()?;
 
     pin.set_interrupt_type(InterruptType::NegEdge)?;
     unsafe {
@@ -425,7 +440,7 @@ fn display<'d>(
     sclk: impl Peripheral<P = impl OutputPin> + 'd,
     sdo: impl Peripheral<P = impl OutputPin> + 'd,
     cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
-) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug>, InitError> {
+) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
     let backlight = PinDriver::new(backlight)?.into_output()?.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
@@ -435,7 +450,7 @@ fn display<'d>(
             sdo,
             Option::<Gpio21>::None,
             cs,
-            &config::Config::new().baudrate(26.MHz().into()),
+            &SpiMasterConfig::new().baudrate(26.MHz().into()),
         )?,
         PinDriver::new(dc)?.into_output()?,
     );
@@ -495,7 +510,7 @@ unsafe impl RawMutex for StdRawMutex {
     const INIT: Self = StdRawMutex(std::sync::Mutex::new(()));
 
     fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
-        let guard = self.0.lock().unwrap();
+        let _guard = self.0.lock().unwrap();
 
         let result = f();
 

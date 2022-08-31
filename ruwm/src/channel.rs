@@ -3,7 +3,7 @@ use core::future::Future;
 pub trait Sender {
     type Data: Send;
 
-    type SendFuture<'a>: Future + Send
+    type SendFuture<'a>: Future
     where
         Self: 'a;
 
@@ -27,7 +27,7 @@ where
 pub trait Receiver {
     type Data: Send;
 
-    type RecvFuture<'a>: Future<Output = Self::Data> + Send
+    type RecvFuture<'a>: Future<Output = Self::Data>
     where
         Self: 'a;
 
