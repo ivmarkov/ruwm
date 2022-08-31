@@ -367,10 +367,10 @@ where
             .await
     }
 
-    pub async fn wifi(
+    pub async fn wifi<E>(
         &'static self,
         wifi: impl WifiTrait,
-        state_changed_source: impl Receiver<Data = ()> + 'static,
+        state_changed_source: impl Receiver<Data = E> + 'static,
     ) {
         self.wifi
             .process(

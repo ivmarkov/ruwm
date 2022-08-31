@@ -44,13 +44,13 @@ where
         &self.command
     }
 
-    pub async fn process(
+    pub async fn process<E>(
         &'static self,
         wifi: impl WifiTrait,
-        state_changed_source: impl Receiver<Data = ()>,
+        state_changed_source: impl Receiver<Data = E>,
         state_sink: impl Sender<Data = ()>,
     ) {
-        run(
+        run::<E>(
             wifi,
             &self.state,
             state_changed_source,
@@ -61,10 +61,10 @@ where
     }
 }
 
-pub async fn run(
+pub async fn run<E>(
     mut wifi: impl WifiTrait,
     state: &impl StateCell<Data = Option<bool>>,
-    mut state_changed_source: impl Receiver<Data = ()>,
+    mut state_changed_source: impl Receiver<Data = E>,
     mut command_source: impl Receiver<Data = WifiCommand>,
     mut state_sink: impl Sender<Data = ()>,
 ) {

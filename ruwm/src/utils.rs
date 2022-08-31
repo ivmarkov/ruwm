@@ -28,7 +28,7 @@ where
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
-            self.0.wait();
+            self.0.wait().await;
 
             self.1.get()
         }
@@ -167,6 +167,33 @@ where
 
             info!("{}", self.1);
         }
+    }
+}
+
+pub struct EventBusReceiver<R, T>(R)
+where
+    R: embedded_svc::event_bus::asynch::Receiver<Data = T>;
+
+impl<R, T> EventBusReceiver<R, T>
+where
+    R: embedded_svc::event_bus::asynch::Receiver<Data = T>,
+{
+    pub const fn new(receiver: R) -> Self {
+        Self(receiver)
+    }
+}
+
+impl<R, T> Receiver for EventBusReceiver<R, T>
+where
+    R: embedded_svc::event_bus::asynch::Receiver<Data = T> + Send,
+    T: Send + 'static,
+{
+    type Data = T;
+
+    type RecvFuture<'b> = impl Future<Output = Self::Data> where Self: 'b;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move { self.0.recv().await }
     }
 }
 
