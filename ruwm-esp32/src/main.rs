@@ -11,7 +11,7 @@ extern crate alloc;
 use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use esp_idf_hal::task::thread_spawn::ThreadSpawnConfiguration;
+use esp_idf_hal::task::thread_spawn::Configuration;
 use ruwm::utils::EventBusReceiver;
 use static_cell::StaticCell;
 
@@ -333,7 +333,7 @@ fn spawn_executor<'a, const C: usize>(
         + 'static,
     run_while: impl Fn() -> bool + Send + 'static,
 ) -> JoinHandle<()> {
-    esp_idf_hal::task::thread_spawn::set_conf(&ThreadSpawnConfiguration {
+    esp_idf_hal::task::thread_spawn::set_conf(&Configuration {
         name: thread_name,
         stack_size,
         ..Default::default()
