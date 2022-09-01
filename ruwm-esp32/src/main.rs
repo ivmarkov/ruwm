@@ -11,6 +11,7 @@ extern crate alloc;
 use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use esp_idf_hal::task::thread_spawn::ThreadSpawnConfiguration;
 use ruwm::utils::EventBusReceiver;
 use static_cell::StaticCell;
 
@@ -21,13 +22,10 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 
-use embedded_svc::event_bus::asynch::EventBus;
 use embedded_svc::http::server::Method;
-use embedded_svc::timer::asynch::TimerService;
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi as WifiTrait};
+use embedded_svc::wifi::{ClientConfiguration, Configuration};
 
-use esp_idf_hal::delay::*;
 use esp_idf_hal::executor::EspExecutor;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripheral::Peripheral;
@@ -54,14 +52,11 @@ use pulse_counter::PulseCounter;
 
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
-use ruwm::notification::Notification;
 use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
-use ruwm::signal::Signal;
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
 use ruwm::valve::{self, ValveCommand};
-use ruwm::water_meter::WaterMeterState;
 
 #[cfg(any(esp32, esp32s2))]
 mod pulse_counter;
@@ -255,7 +250,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let display_sdo = peripherals.pins.gpio19;
     let display_cs = peripherals.pins.gpio5;
 
-    let execution2 = run_executor::<8>(
+    let execution2 = spawn_executor::<8>(
+        b"async-exec-mid\0",
+        5000,
         move |executor, tasks| {
             executor
                 .spawn_local_collect(
@@ -292,7 +289,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         move || system.should_quit(),
     );
 
-    let execution3 = run_executor::<4>(
+    let execution3 = spawn_executor::<4>(
+        b"async-exec-slow\0",
+        10000,
         move |executor, tasks| {
             executor
                 .spawn_local_collect(
@@ -308,7 +307,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     );
 
     executor1.with_context(|exec, ctx| {
-        exec.run(ctx, || system.should_quit(), Some(tasks1));
+        exec.run_tasks(ctx, || system.should_quit(), tasks1);
     });
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
@@ -323,15 +322,24 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     Ok(())
 }
 
-fn run_executor<'a, const C: usize>(
+fn spawn_executor<'a, const C: usize>(
+    thread_name: &'static [u8],
+    stack_size: usize,
     spawner: impl FnOnce(
             &mut EspExecutor<'a, C, Local>,
             &mut heapless::Vec<Task<()>, C>,
         ) -> Result<(), InitError>
         + Send
         + 'static,
-    until: impl Fn() -> bool + Send + 'static,
+    run_while: impl Fn() -> bool + Send + 'static,
 ) -> JoinHandle<()> {
+    esp_idf_hal::task::thread_spawn::set_conf(&ThreadSpawnConfiguration {
+        name: thread_name,
+        stack_size,
+        ..Default::default()
+    })
+    .unwrap();
+
     std::thread::spawn(move || {
         let (mut executor, tasks) = (move || {
             let mut tasks = heapless::Vec::<Task<()>, C>::new();
@@ -344,7 +352,7 @@ fn run_executor<'a, const C: usize>(
         .unwrap();
 
         executor.with_context(|exec, ctx| {
-            exec.run(ctx, until, Some(tasks));
+            exec.run_tasks(ctx, run_while, tasks);
         });
     })
 }
@@ -454,7 +462,9 @@ fn display<'d>(
     sdo: impl Peripheral<P = impl OutputPin> + 'd,
     cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
 ) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
-    let backlight = PinDriver::new(backlight)?.into_output()?.set_high()?;
+    let mut backlight = PinDriver::new(backlight)?.into_output()?;
+
+    backlight.set_high()?;
 
     let di = SPIInterfaceNoCS::new(
         SpiMasterDriver::<SPI2>::new(
