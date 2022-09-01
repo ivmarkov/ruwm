@@ -11,7 +11,7 @@ extern crate alloc;
 use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use esp_idf_hal::task::thread_spawn::Configuration;
+use esp_idf_hal::task::thread_spawn::ThreadSpawnConfiguration;
 use ruwm::utils::EventBusReceiver;
 use static_cell::StaticCell;
 
@@ -201,7 +201,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         Some(nvs_default_partition),
     )?;
 
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+    wifi.set_configuration(&ThreadSpawnConfiguration::Client(ClientConfiguration {
         ssid: SSID.into(),
         password: PASS.into(),
         ..Default::default()
@@ -333,11 +333,12 @@ fn spawn_executor<'a, const C: usize>(
         + 'static,
     run_while: impl Fn() -> bool + Send + 'static,
 ) -> JoinHandle<()> {
-    esp_idf_hal::task::thread_spawn::set_conf(&Configuration {
+    ThreadSpawnConfiguration {
         name: thread_name,
         stack_size,
         ..Default::default()
-    })
+    }
+    .set()
     .unwrap();
 
     std::thread::spawn(move || {
