@@ -203,7 +203,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         Some(nvs_default_partition),
     )?;
 
-    wifi.set_configuration(&ThreadSpawnConfiguration::Client(ClientConfiguration {
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: SSID.into(),
         password: PASS.into(),
         ..Default::default()
