@@ -9,10 +9,10 @@ use std::thread::JoinHandle;
 extern crate alloc;
 
 use edge_executor::{Local, SpawnError, Task};
+
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use esp_idf_hal::task::thread_spawn::ThreadSpawnConfiguration;
-use ruwm::utils::EventBusReceiver;
+
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::{Point, RgbColor, Size};
@@ -31,6 +31,7 @@ use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::*;
+use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_hal::ulp::*;
 use esp_idf_hal::{adc::*, delay};
 
@@ -56,6 +57,7 @@ use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
+use ruwm::utils::EventBusReceiver;
 use ruwm::valve::{self, ValveCommand};
 
 #[cfg(any(esp32, esp32s2))]
