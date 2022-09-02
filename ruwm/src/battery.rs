@@ -99,6 +99,7 @@ pub async fn process<ADC, BP>(
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
         update_with(
+            "BATTERY",
             state,
             |_state| BatteryState { voltage, powered },
             &mut state_sink,

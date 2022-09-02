@@ -1,7 +1,10 @@
 use core::cell::{Cell, RefCell};
+use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use serde::{de::DeserializeOwned, Serialize};
+
+use log::info;
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
@@ -27,18 +30,21 @@ pub trait StateCell: StateCellRead {
     }
 }
 
-pub async fn update_with<S, D>(
-    state: &S,
-    updater: impl FnOnce(D) -> D,
-    notif: &mut impl Sender<Data = ()>,
+pub async fn update_with<'a, S, D>(
+    state_name: &'static str,
+    state: &'a S,
+    updater: impl FnOnce(D) -> D + 'a,
+    notif: &'a mut impl Sender<Data = ()>,
 ) -> bool
 where
     S: StateCell<Data = D>,
-    D: PartialEq,
+    D: PartialEq + Debug,
 {
     let (old, new) = state.update(updater);
 
     if old != new {
+        info!("{} STATE: {:?}", state_name, new);
+
         notif.send(());
 
         true
@@ -47,12 +53,17 @@ where
     }
 }
 
-pub async fn update<S, D>(state: &S, data: D, notif: &mut impl Sender<Data = ()>) -> bool
+pub async fn update<S, D>(
+    state_name: &'static str,
+    state: &S,
+    data: D,
+    notif: &mut impl Sender<Data = ()>,
+) -> bool
 where
     S: StateCell<Data = D>,
-    D: PartialEq,
+    D: PartialEq + Debug,
 {
-    update_with(state, move |_| data, notif).await
+    update_with(state_name, state, move |_| data, notif).await
 }
 
 pub struct NoopStateCell;

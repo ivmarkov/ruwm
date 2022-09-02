@@ -146,6 +146,7 @@ pub async fn process(
         };
 
         update_with(
+            "WM",
             state,
             |state| WaterMeterState {
                 edges_count: state.edges_count + data.edges_count as u64,
