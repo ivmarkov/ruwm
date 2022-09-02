@@ -210,6 +210,7 @@ pub async fn process(
         };
 
         update_with(
+            "WM STATS",
             state,
             |mut state| {
                 state.update(edges_count, sys_time.now());

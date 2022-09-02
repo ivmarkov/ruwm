@@ -76,7 +76,7 @@ pub async fn run<E>(
 
         match select(receiver, command).await {
             Either::First(_) => {
-                update(state, Some(wifi.is_up().unwrap()), &mut state_sink).await;
+                update("WIFI", state, Some(wifi.is_up().unwrap()), &mut state_sink).await;
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),

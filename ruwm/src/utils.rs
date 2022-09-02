@@ -1,4 +1,6 @@
-use core::{future::Future, marker::PhantomData};
+use core::fmt::Debug;
+use core::future::Future;
+use core::marker::PhantomData;
 
 use log::info;
 
@@ -152,7 +154,7 @@ where
 impl<'a, const N: usize, R, T> Sender for SignalSender<'a, N, R, T>
 where
     R: RawMutex + Send + Sync + 'a,
-    T: Send + Clone + 'static,
+    T: Send + Clone + Debug + 'static,
 {
     type Data = T;
 
@@ -165,7 +167,7 @@ where
                 signal.signal(value.clone());
             }
 
-            info!("{}", self.1);
+            info!("{}: {:?}", self.1, value);
         }
     }
 }
