@@ -13,6 +13,7 @@ use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
+use log::info;
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::{Point, RgbColor, Size};
@@ -43,7 +44,7 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
-use esp_idf_svc::wifi::{WifiDriver, WifiEvent};
+use esp_idf_svc::wifi::{EspWifi, WifiDriver, WifiEvent};
 
 use esp_idf_sys::{esp, EspError};
 
@@ -149,13 +150,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             ),
             &mut tasks1,
         )?
-        .spawn_local_collect(
-            system.wm(
-                timers.timer()?,
-                PulseCounter::new(UlpDriver::new(peripherals.ulp)?).initialize()?,
-            ),
-            &mut tasks1,
-        )?
+        // .spawn_local_collect(
+        //     system.wm(
+        //         timers.timer()?,
+        //         PulseCounter::new(UlpDriver::new(peripherals.ulp)?).initialize()?,
+        //     ),
+        //     &mut tasks1,
+        // )?
         .spawn_local_collect(
             system.battery(
                 timers.timer()?,
@@ -197,7 +198,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let mut sysloop = EspSystemEventLoop::take()?;
 
-    let mut wifi = WifiDriver::new(
+    let mut wifi = EspWifi::new(
         peripherals.modem,
         sysloop.clone(),
         Some(nvs_default_partition),
@@ -209,7 +210,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         ..Default::default()
     }))?;
 
+    info!("Before Wifi subscribe");
+
     let wifi_state_changed_source = sysloop.as_async().subscribe()?;
+
+    info!("After Wifi subscribe");
 
     let client_id = "water-meter-demo";
     let mut mqtt_parser = MessageParser::new();
@@ -233,9 +238,11 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
     for asset in &ASSETS {
-        httpd.fn_handler(asset.0, Method::Get, move |req| {
-            assets::serve::serve(req, &asset)
-        })?;
+        if !asset.0.is_empty() {
+            httpd.fn_handler(asset.0, Method::Get, move |req| {
+                assets::serve::serve(req, &asset)
+            })?;
+        }
     }
 
     httpd.ws_handler("/ws", move |connection| {
@@ -288,7 +295,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
             Ok(())
         },
-        move || system.should_quit(),
+        move || !system.should_quit(),
     );
 
     let execution3 = spawn_executor::<4>(
@@ -300,16 +307,19 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                     system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client),
                     tasks,
                 )?
-                .spawn_local_collect(system.web_accept(ws_acceptor), tasks)?
-                .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), tasks)?;
+                // .spawn_local_collect(system.web_accept(ws_acceptor), tasks)?
+                // .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), tasks)?
+                ;
 
             Ok(())
         },
-        move || system.should_quit(),
+        move || !system.should_quit(),
     );
 
+    log::info!("Starting main thread execution");
+
     executor1.with_context(|exec, ctx| {
-        exec.run_tasks(ctx, || system.should_quit(), tasks1);
+        exec.run_tasks(ctx, || !system.should_quit(), tasks1);
     });
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
@@ -336,7 +346,7 @@ fn spawn_executor<'a, const C: usize>(
     run_while: impl Fn() -> bool + Send + 'static,
 ) -> JoinHandle<()> {
     ThreadSpawnConfiguration {
-        name: thread_name,
+        name: Some(thread_name),
         stack_size,
         ..Default::default()
     }
@@ -353,6 +363,11 @@ fn spawn_executor<'a, const C: usize>(
             Result::<_, InitError>::Ok((executor, tasks))
         })()
         .unwrap();
+
+        info!(
+            "Tasks on thread {:?} scheduled, about to run the executor now",
+            thread_name
+        );
 
         executor.with_context(|exec, ctx| {
             exec.run_tasks(ctx, run_while, tasks);
