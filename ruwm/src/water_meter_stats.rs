@@ -10,9 +10,9 @@ use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::{Receiver, Sender};
-use crate::signal::Signal;
+use crate::notification::Notification;
 use crate::state::*;
-use crate::utils::SignalReceiver;
+use crate::utils::NotifReceiver;
 use crate::water_meter::WaterMeterState;
 
 const FLOW_STATS_INSTANCES: usize = 8;
@@ -125,7 +125,7 @@ impl WaterMeterStatsState {
     }
 
     fn update(&mut self, edges_count: u64, now: Duration) -> bool {
-        let most_recent = FlowSnapshot::new(now, self.most_recent.edges_count + edges_count);
+        let most_recent = FlowSnapshot::new(now, edges_count);
 
         let mut updated = self.most_recent != most_recent;
         if updated {
@@ -154,7 +154,7 @@ where
         MemoryStateCell<NoopRawMutex, Option<WaterMeterStatsState>>,
         MutRefStateCell<NoopRawMutex, WaterMeterStatsState>,
     >,
-    wm_state_signal: Signal<R, WaterMeterState>,
+    wm_state_notif: Notification,
 }
 
 impl<R> WaterMeterStats<R>
@@ -164,7 +164,7 @@ where
     pub fn new(state: &'static mut WaterMeterStatsState) -> Self {
         Self {
             state: CachingStateCell::new(MemoryStateCell::new(None), MutRefStateCell::new(state)),
-            wm_state_signal: Signal::new(),
+            wm_state_notif: Notification::new(),
         }
     }
 
@@ -172,17 +172,22 @@ where
         &self.state
     }
 
+    pub fn wm_state_sink(&self) -> &Notification {
+        &self.wm_state_notif
+    }
+
     pub async fn process(
         &'static self,
         timer: impl OnceTimer,
         sys_time: impl SystemTime,
+        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
         state_sink: impl Sender<Data = ()>,
     ) {
         process(
             timer,
             sys_time,
             &self.state,
-            SignalReceiver::new(&self.wm_state_signal),
+            NotifReceiver::new(&self.wm_state_notif, wm_state),
             state_sink,
         )
         .await

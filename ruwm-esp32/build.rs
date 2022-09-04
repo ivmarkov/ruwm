@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn build_ulp() -> anyhow::Result<()> {
-    let source = path_buf![env::current_dir()?, "src", "pulse_counter.S"];
+    let source = path_buf![env::current_dir()?, "src", "ulp_pulse_counter.S"];
     cargo::track_file(&source);
 
     let build_result = espidf::ulp_fsm::Builder::try_from_embuild_env("ESP_IDF", vec![])?.build(
