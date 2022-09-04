@@ -16,8 +16,7 @@ use embassy_sync::blocking_mutex::Mutex;
 use log::info;
 use static_cell::StaticCell;
 
-use embedded_graphics::prelude::{Point, RgbColor, Size};
-use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::prelude::RgbColor;
 
 use display_interface_spi::SPIInterfaceNoCS;
 
@@ -51,7 +50,7 @@ use edge_frame::assets;
 
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
-use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
+use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
 use ruwm::utils::EventBusReceiver;
@@ -106,9 +105,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
-    static mut slow_mem: Option<SlowMem> = None;
+    static mut SLOW_MEM: Option<SlowMem> = None;
 
-    unsafe { slow_mem = Some(Default::default()) };
+    unsafe { SLOW_MEM = Some(Default::default()) };
 
     let nvs_default_partition = EspDefaultNvsPartition::take()?;
 
@@ -128,7 +127,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             EspHttpWsAsyncConnection<()>,
         >,
     > = StaticCell::new();
-    let system = &*SYSTEM.init(System::new(unsafe { slow_mem.as_mut().unwrap() }, storage));
+    let system = &*SYSTEM.init(System::new(unsafe { SLOW_MEM.as_mut().unwrap() }, storage));
 
     let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
 
@@ -531,8 +530,11 @@ fn display<'d>(
 
         // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
         #[cfg(feature = "ttgo")]
-        let display = CroppedAdaptor::new(
-            Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
+        let display = ruwm::screen::CroppedAdaptor::new(
+            embedded_graphics::primitives::Rectangle::new(
+                embedded_graphics::prelude::Point::new(52, 40),
+                embedded_graphics::prelude::Size::new(135, 240),
+            ),
             display,
         );
 
@@ -589,8 +591,6 @@ unsafe impl RawMutex for StdRawMutex {
     fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
         let _guard = self.0.lock().unwrap();
 
-        let result = f();
-
-        result
+        f()
     }
 }

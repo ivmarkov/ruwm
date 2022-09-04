@@ -78,8 +78,8 @@ where
 
 pub async fn process<ADC, BP>(
     mut timer: impl OnceTimer,
-    _one_shot: impl adc::OneShot<ADC, u16, BP>,
-    _battery_pin: BP,
+    mut one_shot: impl adc::OneShot<ADC, u16, BP>,
+    mut battery_pin: BP,
     power_pin: impl InputPin,
     state: &impl StateCell<Data = BatteryState>,
     mut state_sink: impl Sender<Data = ()>,
@@ -89,12 +89,11 @@ pub async fn process<ADC, BP>(
     loop {
         timer.after(Duration::from_secs(2)).unwrap().await;
 
-        let voltage = Some(100);
-        // let voltage = one_shot
-        //     .read(&mut battery_pin)
-        //     .ok()
-        //     .map(|voltage| voltage / ROUND_UP * ROUND_UP);
-        //.map_err(error::wrap_display)?; TODO
+        //let voltage = Some(100);
+        let voltage = one_shot
+            .read(&mut battery_pin)
+            .ok()
+            .map(|voltage| voltage / ROUND_UP * ROUND_UP);
 
         let powered = Some(power_pin.is_high().unwrap_or(false));
 

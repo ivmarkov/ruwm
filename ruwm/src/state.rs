@@ -266,15 +266,15 @@ where
 {
     storage: &'a Mutex<R, RefCell<S>>,
     name: &'a str,
-    _data: PhantomData<fn() -> T>,
+    initial: T,
 }
 
 impl<'a, R, S, T> StorageStateCell<'a, R, S, T> {
-    pub const fn new(storage: &'a Mutex<R, RefCell<S>>, name: &'a str) -> Self {
+    pub const fn new(storage: &'a Mutex<R, RefCell<S>>, name: &'a str, initial: T) -> Self {
         Self {
             storage,
             name,
-            _data: PhantomData,
+            initial,
         }
     }
 }
@@ -283,13 +283,18 @@ impl<'a, R, S, T> StateCellRead for StorageStateCell<'a, R, S, T>
 where
     R: RawMutex + 'a,
     S: Storage + 'a,
-    T: Serialize + DeserializeOwned + 'static,
+    T: Serialize + DeserializeOwned + Clone + 'static,
 {
     type Data = T;
 
     fn get(&self) -> Self::Data {
-        self.storage
-            .lock(|state| state.borrow().get(self.name).unwrap().unwrap())
+        self.storage.lock(|state| {
+            state
+                .borrow()
+                .get(self.name)
+                .unwrap()
+                .unwrap_or(self.initial.clone())
+        })
     }
 }
 
@@ -297,11 +302,15 @@ impl<'a, R, S, T> StateCell for StorageStateCell<'a, R, S, T>
 where
     R: RawMutex + 'a,
     S: Storage + 'a,
-    T: Serialize + DeserializeOwned + 'static,
+    T: Serialize + DeserializeOwned + Clone + 'static,
 {
     fn set(&self, data: Self::Data) -> Self::Data {
         self.storage.lock(|state| {
-            let old_data = state.borrow().get(self.name).unwrap().unwrap();
+            let old_data = state
+                .borrow()
+                .get(self.name)
+                .unwrap()
+                .unwrap_or(self.initial.clone());
 
             state.borrow_mut().set(self.name, &data).unwrap();
 
