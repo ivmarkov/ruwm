@@ -13,6 +13,8 @@ use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
+use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
+use esp_idf_hal::delay::Ets;
 use log::info;
 use static_cell::StaticCell;
 
@@ -87,9 +89,13 @@ fn main() -> Result<(), InitError> {
 fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let peripherals = Peripherals::take().unwrap();
 
-    let mut valve_power_pin = PinDriver::new(peripherals.pins.gpio10)?.into_output()?;
-    let mut valve_open_pin = PinDriver::new(peripherals.pins.gpio12)?.into_output()?;
-    let mut valve_close_pin = PinDriver::new(peripherals.pins.gpio13)?.into_output()?;
+    let mut valve_power_pin = PinDriver::new(peripherals.pins.gpio25)?.into_input_output()?;
+    let mut valve_open_pin = PinDriver::new(peripherals.pins.gpio26)?.into_input_output()?;
+    let mut valve_close_pin = PinDriver::new(peripherals.pins.gpio27)?.into_input_output()?;
+
+    valve_power_pin.set_pull(Pull::Floating)?;
+    valve_open_pin.set_pull(Pull::Floating)?;
+    valve_close_pin.set_pull(Pull::Floating)?;
 
     if wakeup_reason == SleepWakeupReason::ULP {
         emergency_valve_close(
@@ -99,9 +105,9 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         );
     }
 
-    let button1_pin = peripherals.pins.gpio35;
-    let button2_pin = peripherals.pins.gpio0;
-    let button3_pin = peripherals.pins.gpio27;
+    let button1_pin = peripherals.pins.gpio2;
+    let button2_pin = peripherals.pins.gpio4;
+    let button3_pin = peripherals.pins.gpio32;
 
     mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
 
@@ -138,7 +144,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let mut pulse_counter = ulp_pulse_counter::UlpPulseCounter::new(
         esp_idf_hal::ulp::UlpDriver::new(peripherals.ulp)?,
         timers.timer()?,
-        peripherals.pins.gpio15,
+        peripherals.pins.gpio33,
         wakeup_reason == SleepWakeupReason::Unknown,
     )?;
 
@@ -148,12 +154,18 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     #[cfg(not(feature = "ulp"))]
     let mut pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
         ruwm::utils::NotifReceiver::new(&PULSE_SIGNAL, &()),
-        subscribe_pin(peripherals.pins.gpio15, || PULSE_SIGNAL.notify())?,
+        subscribe_pin(peripherals.pins.gpio33, || PULSE_SIGNAL.notify())?,
         PressedLevel::Low,
         Some((timers.timer()?, Duration::from_millis(50))),
     );
 
     let (pulse_counter, pulse_wakeup) = pulse_counter.split();
+
+    info!("Waiting for 5s");
+
+    Ets.delay_us(5000_u32 * 1000);
+
+    info!("Waiting done");
 
     executor1
         .spawn_local_collect(system.valve(), &mut tasks1)?
@@ -171,8 +183,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             system.battery(
                 timers.timer()?,
                 AdcDriver::new(peripherals.adc1, &AdcConfig::new().calibration(true))?,
-                AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio33)?,
-                PinDriver::new(peripherals.pins.gpio14)?.into_input()?,
+                AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio36)?,
+                PinDriver::new(peripherals.pins.gpio35)?.into_input()?,
             ),
             &mut tasks1,
         )?
@@ -261,13 +273,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     log::info!("Starting execution");
 
-    let display_backlight = peripherals.pins.gpio4;
-    let display_dc = peripherals.pins.gpio16;
-    let display_rst = peripherals.pins.gpio23;
+    let display_backlight = peripherals.pins.gpio5;
+    let display_dc = peripherals.pins.gpio18;
+    let display_rst = peripherals.pins.gpio19;
     let display_spi = peripherals.spi2;
-    let display_sclk = peripherals.pins.gpio18;
-    let display_sdo = peripherals.pins.gpio19;
-    let display_cs = peripherals.pins.gpio5;
+    let display_sclk = peripherals.pins.gpio14;
+    let display_sdo = peripherals.pins.gpio13;
+    let display_cs = peripherals.pins.gpio15;
 
     let execution2 = spawn_executor::<8>(
         b"async-exec-mid\0",
@@ -317,8 +329,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                     system.mqtt_send::<MQTT_MAX_TOPIC_LEN>(client_id, mqtt_client),
                     tasks,
                 )?
-                // .spawn_local_collect(system.web_accept(ws_acceptor), tasks)?
-                // .spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), tasks)?
+                //.spawn_local_collect(system.web_accept(ws_acceptor), tasks)?
+                //.spawn_local_collect(system.web_process::<WS_MAX_FRAME_SIZE>(), tasks)?
                 ;
 
             Ok(())
@@ -385,13 +397,14 @@ fn spawn_executor<'a, const C: usize>(
     })
 }
 
-fn subscribe_pin<'d, P: InputPin>(
+fn subscribe_pin<'d, P: InputPin + OutputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notify: impl Fn() + Send + 'static,
 ) -> Result<PinDriver<'d, P, Input>, EspError> {
     let mut pin = PinDriver::new(pin)?.into_input()?;
 
     pin.set_interrupt_type(InterruptType::NegEdge)?;
+
     unsafe {
         pin.subscribe(notify)?;
     }
@@ -490,7 +503,7 @@ fn display<'d>(
     sdo: impl Peripheral<P = impl OutputPin> + 'd,
     cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
 ) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
-    let mut backlight = PinDriver::new(backlight)?.into_output_od()?;
+    let mut backlight = PinDriver::new(backlight)?.into_output()?;
 
     backlight.set_drive_strength(DriveStrength::I40mA)?;
     backlight.set_high()?;
@@ -499,7 +512,7 @@ fn display<'d>(
     let baudrate = 26.MHz().into();
 
     #[cfg(feature = "ili9341")]
-    let baudrate = 26.MHz().into();
+    let baudrate = 100.kHz().into();
 
     let di = SPIInterfaceNoCS::new(
         SpiMasterDriver::<SPI2>::new(
