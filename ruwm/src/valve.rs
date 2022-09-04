@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
+use log::info;
 use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
@@ -114,9 +115,9 @@ pub async fn spin(
     loop {
         start_spin(
             current_command,
-            &mut close_pin,
-            &mut open_pin,
             &mut power_pin,
+            &mut open_pin,
+            &mut close_pin,
         );
 
         let command = command_source.recv();
@@ -147,6 +148,8 @@ pub fn start_spin(
     open_pin: &mut impl OutputPin<Error = impl Debug>,
     close_pin: &mut impl OutputPin<Error = impl Debug>,
 ) {
+    info!("============ VALVE COMMAND: {:?}", command);
+
     match command {
         Some(ValveCommand::Open) => {
             close_pin.set_low().unwrap();
