@@ -1,8 +1,9 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use log::info;
 use serde::{Deserialize, Serialize};
+
+use log::info;
 
 use enumset::{EnumSet, EnumSetType};
 
@@ -236,14 +237,10 @@ pub async fn process(
 
                 match sr {
                     Either4::First(Either3::First(_)) => {
-                        info!("BUTTON 1 DRAW REQ");
-
                         screen_state.active_page = screen_state.active_page.prev();
                         screen_state.changeset.insert(DataSource::Page);
                     }
                     Either4::First(Either3::Second(_)) => {
-                        info!("BUTTON 2 DRAW REQ");
-
                         screen_state.active_page = screen_state.active_page.next();
                         screen_state.changeset.insert(DataSource::Page);
                     }
@@ -253,8 +250,6 @@ pub async fn process(
                         screen_state.changeset.insert(DataSource::Valve);
                     }
                     Either4::Third(wm) => {
-                        info!("WM STATE DRAW REQ");
-
                         screen_state.wm = wm;
                         screen_state.changeset.insert(DataSource::WM);
                     }
