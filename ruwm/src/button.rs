@@ -19,12 +19,32 @@ pub enum PressedLevel {
 }
 
 pub async fn process(
-    mut timer: impl OnceTimer,
     mut pin_edge: impl Receiver,
-    pin: impl InputPin,
+    mut pin: impl InputPin,
     pressed_level: PressedLevel,
-    debounce_time: Option<Duration>,
+    mut debounce_params: Option<(impl OnceTimer, Duration)>,
     mut pressed_sink: impl Sender<Data = ()>,
+) {
+    loop {
+        wait_press(
+            &mut pin_edge,
+            &mut pin,
+            pressed_level,
+            debounce_params
+                .as_mut()
+                .map(|(timer, duration)| (timer, *duration)),
+        )
+        .await;
+
+        pressed_sink.send(()).await;
+    }
+}
+
+pub async fn wait_press(
+    mut pin_edge: impl Receiver,
+    pin: &mut impl InputPin,
+    pressed_level: PressedLevel,
+    mut debounce_params: Option<(impl OnceTimer, Duration)>,
 ) {
     let mut debounce = false;
 
@@ -32,7 +52,11 @@ pub async fn process(
         let pin_edge = pin_edge.recv();
 
         let timer = if debounce {
-            futures::future::Either::Left(timer.after(debounce_time.unwrap()).unwrap())
+            if let Some((timer, debounce_time)) = &mut debounce_params {
+                futures::future::Either::Left(timer.after(*debounce_time).unwrap())
+            } else {
+                futures::future::Either::Right(pending())
+            }
         } else {
             futures::future::Either::Right(pending())
         };
@@ -41,7 +65,7 @@ pub async fn process(
 
         let check = match select(pin_edge, timer).await {
             Either::First(_) => {
-                if debounce_time.is_some() {
+                if debounce_params.is_some() {
                     debounce = true;
                     false
                 } else {
@@ -64,7 +88,7 @@ pub async fn process(
                 == (pressed_level == PressedLevel::High);
 
             if pressed {
-                pressed_sink.send(()).await;
+                return;
             }
         }
     }

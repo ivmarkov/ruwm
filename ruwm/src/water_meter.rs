@@ -1,18 +1,17 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
-use core::time::Duration;
 
+use log::info;
 use serde::{Deserialize, Serialize};
 
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 
 use embedded_svc::storage::Storage;
-use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::{Receiver, Sender};
-use crate::pulse_counter::PulseCounter;
+use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::signal::Signal;
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
@@ -43,39 +42,41 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<R, S>
+pub struct WaterMeter<R>
 where
     R: RawMutex + 'static,
-    S: Storage + Send + 'static,
+    //S: Storage + Send + 'static,
 {
     state: CachingStateCell<
         R,
         MemoryStateCell<NoopRawMutex, Option<WaterMeterState>>,
-        CachingStateCell<
-            NoopRawMutex,
-            MutRefStateCell<NoopRawMutex, Option<WaterMeterState>>,
-            StorageStateCell<'static, R, S, WaterMeterState>,
-        >,
+        MutRefStateCell<NoopRawMutex, WaterMeterState>,
+        // CachingStateCell<
+        //     NoopRawMutex,
+        //     MutRefStateCell<NoopRawMutex, Option<WaterMeterState>>,
+        //     StorageStateCell<'static, R, S, WaterMeterState>,
+        // >,
     >,
     command_signal: Signal<R, WaterMeterCommand>,
 }
 
-impl<R, S> WaterMeter<R, S>
+impl<R> WaterMeter<R>
 where
     R: RawMutex + Send + Sync + 'static,
-    S: Storage + Send + 'static,
+    //S: Storage + Send + 'static,
 {
     pub fn new(
-        state: &'static mut Option<WaterMeterState>,
-        storage: &'static Mutex<R, RefCell<S>>,
+        state: &'static mut WaterMeterState,
+        //storage: &'static Mutex<R, RefCell<S>>,
     ) -> Self {
         Self {
             state: CachingStateCell::new(
                 MemoryStateCell::new(None),
-                CachingStateCell::new(
-                    MutRefStateCell::new(state),
-                    StorageStateCell::new(storage, "wm"),
-                ),
+                MutRefStateCell::new(state),
+                // CachingStateCell::new(
+                //     MutRefStateCell::new(state),
+                //     StorageStateCell::new(storage, "wm"),
+                // ),
             ),
             command_signal: Signal::new(),
         }
@@ -91,69 +92,66 @@ where
 
     pub async fn process(
         &'static self,
-        timer: impl OnceTimer,
         pulse_counter: impl PulseCounter,
-        state_sink: impl Sender<Data = ()>,
+        pulse_wakeup: impl PulseWakeup,
+        state_sink1: impl Sender<Data = ()>,
+        state_sink2: impl Sender<Data = ()>,
     ) {
-        process(
-            timer,
-            pulse_counter,
-            &self.state,
-            SignalReceiver::new(&self.command_signal),
-            state_sink,
+        select(
+            process_pulses(pulse_counter, &self.state, state_sink1),
+            process_commands(
+                pulse_wakeup,
+                &self.state,
+                SignalReceiver::new(&self.command_signal),
+                state_sink2,
+            ),
         )
-        .await
+        .await;
     }
 }
 
-pub async fn process(
-    mut timer: impl OnceTimer,
+pub async fn process_pulses(
     mut pulse_counter: impl PulseCounter,
+    state: &impl StateCell<Data = WaterMeterState>,
+    mut state_sink: impl Sender<Data = ()>,
+) {
+    loop {
+        let pulses = pulse_counter.take_pulses().await.unwrap();
+
+        if pulses > 0 {
+            update_with(
+                "WM",
+                state,
+                |state| WaterMeterState {
+                    edges_count: state.edges_count + pulses,
+                    armed: state.armed,
+                    leaking: state.armed,
+                },
+                &mut state_sink,
+            )
+            .await;
+        }
+    }
+}
+
+pub async fn process_commands(
+    mut pulse_wakeup: impl PulseWakeup,
     state: &impl StateCell<Data = WaterMeterState>,
     mut command_source: impl Receiver<Data = WaterMeterCommand>,
     mut state_sink: impl Sender<Data = ()>,
 ) {
-    pulse_counter.start().unwrap();
-
     loop {
-        let command = command_source.recv();
-        let tick = timer
-            .after(Duration::from_secs(2) /*Duration::from_millis(200)*/)
-            .unwrap();
+        let armed = command_source.recv().await == WaterMeterCommand::Arm;
 
-        //pin_mut!(command, tick);
-
-        let data = match select(command, tick).await {
-            Either::First(command) => {
-                let mut data = pulse_counter.get_data().unwrap();
-
-                data.edges_count = 0;
-                data.wakeup_edges = if command == WaterMeterCommand::Arm {
-                    1
-                } else {
-                    0
-                };
-
-                pulse_counter.swap_data(&data).unwrap()
-            }
-            Either::Second(_) => {
-                let mut data = pulse_counter.get_data().unwrap();
-
-                data.edges_count = 0;
-
-                pulse_counter.swap_data(&data).unwrap()
-            }
-        };
+        pulse_wakeup.set_enabled(armed).unwrap();
 
         update_with(
             "WM",
             state,
             |state| WaterMeterState {
-                edges_count: state.edges_count + data.edges_count as u64,
-                armed: data.wakeup_edges > 0,
-                leaking: state.edges_count < state.edges_count + data.edges_count as u64
-                    && state.armed
-                    && data.wakeup_edges > 0,
+                edges_count: state.edges_count,
+                armed,
+                leaking: state.leaking,
             },
             &mut state_sink,
         )

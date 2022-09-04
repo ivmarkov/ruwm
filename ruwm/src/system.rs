@@ -25,7 +25,7 @@ use crate::emergency::Emergency;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::notification::Notification;
-use crate::pulse_counter::PulseCounter;
+use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::{FlushableDrawTarget, Screen, Q};
 use crate::signal::Signal;
 use crate::state::NoopStateCell;
@@ -39,7 +39,7 @@ use crate::wifi::Wifi;
 #[derive(Default)]
 pub struct SlowMem {
     valve: Option<ValveState>,
-    wm: Option<WaterMeterState>, // Only a cache for NVS
+    wm: WaterMeterState, // Only a cache for NVS
     wm_stats: WaterMeterStatsState,
 }
 
@@ -50,7 +50,7 @@ where
 {
     storage: &'static Mutex<R, RefCell<S>>,
     valve: Valve<R>,
-    wm: WaterMeter<R, S>,
+    wm: WaterMeter<R>, //, S>,
     wm_stats: WaterMeterStats<R>,
     battery: Battery<R>,
 
@@ -82,7 +82,7 @@ where
         Self {
             storage,
             valve: Valve::new(&mut slow_mem.valve),
-            wm: WaterMeter::new(&mut slow_mem.wm, storage),
+            wm: WaterMeter::new(&mut slow_mem.wm), //, storage),
             wm_stats: WaterMeterStats::new(&mut slow_mem.wm_stats),
             battery: Battery::new(),
             button1: Notification::new(),
@@ -123,15 +123,30 @@ where
         self.valve.spin(once, power_pin, open_pin, close_pin).await
     }
 
-    pub async fn wm(&'static self, timer: impl OnceTimer, pulse_counter: impl PulseCounter) {
+    pub async fn wm(
+        &'static self,
+        pulse_counter: impl PulseCounter,
+        pulse_wakeup: impl PulseWakeup,
+    ) {
         self.wm
             .process(
-                timer,
                 pulse_counter,
+                pulse_wakeup,
                 NotifSender2::new(
                     "WM STATE",
                     [
                         self.keepalive.event_sink(),
+                        self.wm_stats.wm_state_sink(),
+                        self.screen.wm_state_sink(),
+                        self.mqtt.wm_state_sink(),
+                    ],
+                    self.web.wm_state_sinks(),
+                ),
+                NotifSender2::new(
+                    "WM STATE",
+                    [
+                        self.keepalive.event_sink(),
+                        self.wm_stats.wm_state_sink(),
                         self.screen.wm_state_sink(),
                         self.mqtt.wm_state_sink(),
                     ],
@@ -146,6 +161,7 @@ where
             .process(
                 timer,
                 sys_time,
+                self.wm.state(),
                 NotifSender2::new(
                     "WM STATS STATE",
                     [
@@ -205,11 +221,10 @@ where
         pressed_level: PressedLevel,
     ) {
         button::process(
-            timer,
             NotifReceiver::new(&self.button1, &NoopStateCell),
             pin,
             pressed_level,
-            Some(Duration::from_millis(50)),
+            Some((timer, Duration::from_millis(50))),
             NotifSender::new(
                 "BUTTON1 STATE",
                 [
@@ -228,11 +243,10 @@ where
         pressed_level: PressedLevel,
     ) {
         button::process(
-            timer,
             NotifReceiver::new(&self.button2, &NoopStateCell),
             pin,
             pressed_level,
-            Some(Duration::from_millis(50)),
+            Some((timer, Duration::from_millis(50))),
             NotifSender::new(
                 "BUTTON2 STATE",
                 [
@@ -251,11 +265,10 @@ where
         pressed_level: PressedLevel,
     ) {
         button::process(
-            timer,
             NotifReceiver::new(&self.button3, &NoopStateCell),
             pin,
             pressed_level,
-            Some(Duration::from_millis(50)),
+            Some((timer, Duration::from_millis(50))),
             NotifSender::new(
                 "BUTTON3 STATE",
                 [

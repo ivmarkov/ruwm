@@ -33,7 +33,6 @@ use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::*;
 use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
-use esp_idf_hal::ulp::*;
 use esp_idf_hal::{adc::*, delay};
 
 use esp_idf_svc::errors::EspIOError;
@@ -44,25 +43,22 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::EspISRTimerService;
-use esp_idf_svc::wifi::{EspWifi, WifiDriver, WifiEvent};
+use esp_idf_svc::wifi::{EspWifi, WifiEvent};
 
 use esp_idf_sys::{esp, EspError};
 
 use edge_frame::assets;
 
-use pulse_counter::PulseCounter;
-
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::MessageParser;
-use ruwm::pulse_counter::PulseCounter as _;
 use ruwm::screen::{CroppedAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
 use ruwm::utils::EventBusReceiver;
 use ruwm::valve::{self, ValveCommand};
 
-#[cfg(any(esp32, esp32s2))]
-mod pulse_counter;
+#[cfg(feature = "ulp")]
+mod ulp_pulse_counter;
 
 const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
@@ -139,6 +135,27 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let mut tasks1 = heapless::Vec::<Task<()>, 16>::new();
     let mut executor1 = EspExecutor::<16, Local>::new();
 
+    #[cfg(feature = "ulp")]
+    let mut pulse_counter = ulp_pulse_counter::UlpPulseCounter::new(
+        esp_idf_hal::ulp::UlpDriver::new(peripherals.ulp)?,
+        timers.timer()?,
+        peripherals.pins.gpio15,
+        wakeup_reason == SleepWakeupReason::Unknown,
+    )?;
+
+    #[cfg(not(feature = "ulp"))]
+    static PULSE_SIGNAL: ruwm::notification::Notification = ruwm::notification::Notification::new();
+
+    #[cfg(not(feature = "ulp"))]
+    let mut pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
+        ruwm::utils::NotifReceiver::new(&PULSE_SIGNAL, &()),
+        subscribe_pin(peripherals.pins.gpio15, || PULSE_SIGNAL.notify())?,
+        PressedLevel::Low,
+        Some((timers.timer()?, Duration::from_millis(50))),
+    );
+
+    let (pulse_counter, pulse_wakeup) = pulse_counter.split();
+
     executor1
         .spawn_local_collect(system.valve(), &mut tasks1)?
         .spawn_local_collect(
@@ -150,13 +167,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             ),
             &mut tasks1,
         )?
-        // .spawn_local_collect(
-        //     system.wm(
-        //         timers.timer()?,
-        //         PulseCounter::new(UlpDriver::new(peripherals.ulp)?).initialize()?,
-        //     ),
-        //     &mut tasks1,
-        // )?
+        .spawn_local_collect(system.wm(pulse_counter, pulse_wakeup), &mut tasks1)?
         .spawn_local_collect(
             system.battery(
                 timers.timer()?,
@@ -480,9 +491,16 @@ fn display<'d>(
     sdo: impl Peripheral<P = impl OutputPin> + 'd,
     cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
 ) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
-    let mut backlight = PinDriver::new(backlight)?.into_output()?;
+    let mut backlight = PinDriver::new(backlight)?.into_output_od()?;
 
+    backlight.set_drive_strength(DriveStrength::I40mA)?;
     backlight.set_high()?;
+
+    #[cfg(feature = "st7789")]
+    let baudrate = 26.MHz().into();
+
+    #[cfg(feature = "ili9341")]
+    let baudrate = 26.MHz().into();
 
     let di = SPIInterfaceNoCS::new(
         SpiMasterDriver::<SPI2>::new(
@@ -491,29 +509,47 @@ fn display<'d>(
             sdo,
             Option::<Gpio21>::None,
             cs,
-            &SpiMasterConfig::new().baudrate(26.MHz().into()),
+            &SpiMasterConfig::new().baudrate(baudrate),
         )?,
         PinDriver::new(dc)?.into_output()?,
     );
 
-    let mut display = st7789::ST7789::new(
+    let rst = PinDriver::new(rst)?.into_output()?;
+
+    #[cfg(feature = "st7789")]
+    let display = {
+        let mut display = st7789::ST7789::new(
+            di, rst,
+            // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
+            240, 320,
+        );
+
+        display.init(&mut delay::Ets).unwrap();
+        display
+            .set_orientation(st7789::Orientation::Portrait)
+            .unwrap();
+
+        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+        #[cfg(feature = "ttgo")]
+        let display = CroppedAdaptor::new(
+            Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
+            display,
+        );
+
+        display
+    };
+
+    #[cfg(feature = "ili9341")]
+    let display = ili9341::Ili9341::new(
         di,
-        PinDriver::new(rst)?.into_output()?,
-        // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
-        240,
-        320,
-    );
+        rst,
+        &mut delay::Ets,
+        ili9341::Orientation::Portrait,
+        ili9341::DisplaySize240x320,
+    )
+    .unwrap();
 
-    display.init(&mut delay::Ets).unwrap();
-    display
-        .set_orientation(st7789::Orientation::Portrait)
-        .unwrap();
-
-    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
-    let display = FlushableAdaptor::noop(CroppedAdaptor::new(
-        Rectangle::new(Point::new(52, 40), Size::new(135, 240)),
-        display,
-    ));
+    let display = FlushableAdaptor::noop(display);
 
     Ok(display)
 }

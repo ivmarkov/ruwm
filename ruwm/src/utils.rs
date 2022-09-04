@@ -37,6 +37,18 @@ where
     }
 }
 
+impl<'a> Receiver for NotifReceiver<'a, ()> {
+    type Data = ();
+
+    type RecvFuture<'b> = impl Future<Output = ()> where Self: 'b;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            self.0.wait().await;
+        }
+    }
+}
+
 pub struct SignalReceiver<'a, R, T>(&'a Signal<R, T>)
 where
     R: RawMutex;
@@ -87,7 +99,7 @@ where
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
         async move {
-            info!("[{}] = {:?}", self.1, value);
+            info!("[{} SIGNAL]: {:?}", self.1, value);
 
             for notif in self.0 {
                 notif.notify();
@@ -125,7 +137,7 @@ where
 
     fn send(&mut self, value: Self::Data) -> Self::SendFuture<'_> {
         async move {
-            info!("[{}] = {:?}", self.2, value);
+            info!("[{}] SIGNAL: {:?}", self.2, value);
 
             for notif in self.0 {
                 notif.notify();
@@ -167,7 +179,7 @@ where
                 signal.signal(value.clone());
             }
 
-            info!("{}: {:?}", self.1, value);
+            info!("[{} SIGNAL]: {:?}", self.1, value);
         }
     }
 }

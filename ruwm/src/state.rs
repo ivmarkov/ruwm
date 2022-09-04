@@ -26,7 +26,10 @@ pub trait StateCell: StateCellRead {
     where
         F: FnOnce(Self::Data) -> Self::Data,
     {
-        (self.get(), self.set(updater(self.get())))
+        let old = self.set(updater(self.get()));
+        let new = self.get();
+
+        (old, new)
     }
 }
 
@@ -43,9 +46,9 @@ where
     let (old, new) = state.update(updater);
 
     if old != new {
-        info!("{} STATE: {:?}", state_name, new);
+        info!("[{} STATE]: {:?}", state_name, new);
 
-        notif.send(());
+        notif.send(()).await;
 
         true
     } else {
