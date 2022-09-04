@@ -26,7 +26,7 @@ use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::notification::Notification;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
-use crate::screen::{FlushableDrawTarget, Screen, Q};
+use crate::screen::{FlushableDrawTarget, Screen};
 use crate::signal::Signal;
 use crate::state::NoopStateCell;
 use crate::utils::{NotifReceiver, NotifSender, NotifSender2, SignalSender};
@@ -39,7 +39,7 @@ use crate::wifi::Wifi;
 #[derive(Default)]
 pub struct SlowMem {
     valve: Option<ValveState>,
-    wm: WaterMeterState, // Only a cache for NVS
+    wm: Option<WaterMeterState>, // Only a cache for NVS
     wm_stats: WaterMeterStatsState,
 }
 
@@ -50,7 +50,7 @@ where
 {
     storage: &'static Mutex<R, RefCell<S>>,
     valve: Valve<R>,
-    wm: WaterMeter<R>, //, S>,
+    wm: WaterMeter<R, S>,
     wm_stats: WaterMeterStats<R>,
     battery: Battery<R>,
 
@@ -82,7 +82,7 @@ where
         Self {
             storage,
             valve: Valve::new(&mut slow_mem.valve),
-            wm: WaterMeter::new(&mut slow_mem.wm), //, storage),
+            wm: WaterMeter::new(&mut slow_mem.wm, storage),
             wm_stats: WaterMeterStats::new(&mut slow_mem.wm_stats),
             battery: Battery::new(),
             button1: Notification::new(),

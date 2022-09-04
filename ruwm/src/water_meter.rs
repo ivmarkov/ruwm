@@ -1,7 +1,6 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use log::info;
 use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::select;
@@ -42,41 +41,39 @@ pub enum WaterMeterCommand {
     Disarm,
 }
 
-pub struct WaterMeter<R>
+pub struct WaterMeter<R, S>
 where
     R: RawMutex + 'static,
-    //S: Storage + Send + 'static,
+    S: Storage + Send + 'static,
 {
     state: CachingStateCell<
         R,
         MemoryStateCell<NoopRawMutex, Option<WaterMeterState>>,
-        MutRefStateCell<NoopRawMutex, WaterMeterState>,
-        // CachingStateCell<
-        //     NoopRawMutex,
-        //     MutRefStateCell<NoopRawMutex, Option<WaterMeterState>>,
-        //     StorageStateCell<'static, R, S, WaterMeterState>,
-        // >,
+        CachingStateCell<
+            NoopRawMutex,
+            MutRefStateCell<NoopRawMutex, Option<WaterMeterState>>,
+            StorageStateCell<'static, R, S, WaterMeterState>,
+        >,
     >,
     command_signal: Signal<R, WaterMeterCommand>,
 }
 
-impl<R> WaterMeter<R>
+impl<R, S> WaterMeter<R, S>
 where
     R: RawMutex + Send + Sync + 'static,
-    //S: Storage + Send + 'static,
+    S: Storage + Send + 'static,
 {
     pub fn new(
-        state: &'static mut WaterMeterState,
-        //storage: &'static Mutex<R, RefCell<S>>,
+        state: &'static mut Option<WaterMeterState>,
+        storage: &'static Mutex<R, RefCell<S>>,
     ) -> Self {
         Self {
             state: CachingStateCell::new(
                 MemoryStateCell::new(None),
-                MutRefStateCell::new(state),
-                // CachingStateCell::new(
-                //     MutRefStateCell::new(state),
-                //     StorageStateCell::new(storage, "wm"),
-                // ),
+                CachingStateCell::new(
+                    MutRefStateCell::new(state),
+                    StorageStateCell::new(storage, "wm", Default::default()),
+                ),
             ),
             command_signal: Signal::new(),
         }
