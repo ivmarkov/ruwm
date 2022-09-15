@@ -2,7 +2,6 @@ use core::fmt::Debug;
 use core::future::pending;
 use core::time::Duration;
 
-use log::info;
 use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
