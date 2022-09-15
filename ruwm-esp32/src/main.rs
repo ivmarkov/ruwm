@@ -13,9 +13,8 @@ use edge_executor::{Local, SpawnError, Task};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
-use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
-use esp_idf_hal::delay::Ets;
 use log::info;
+
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::RgbColor;
@@ -89,9 +88,9 @@ fn main() -> Result<(), InitError> {
 fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     let peripherals = Peripherals::take().unwrap();
 
-    let mut valve_power_pin = PinDriver::new(peripherals.pins.gpio25)?.into_input_output()?;
-    let mut valve_open_pin = PinDriver::new(peripherals.pins.gpio26)?.into_input_output()?;
-    let mut valve_close_pin = PinDriver::new(peripherals.pins.gpio27)?.into_input_output()?;
+    let mut valve_power_pin = PinDriver::input_output(peripherals.pins.gpio25)?;
+    let mut valve_open_pin = PinDriver::input_output(peripherals.pins.gpio26)?;
+    let mut valve_close_pin = PinDriver::input_output(peripherals.pins.gpio27)?;
 
     valve_power_pin.set_pull(Pull::Floating)?;
     valve_open_pin.set_pull(Pull::Floating)?;
@@ -161,12 +160,6 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     let (pulse_counter, pulse_wakeup) = pulse_counter.split();
 
-    info!("Waiting for 5s");
-
-    Ets.delay_us(5000_u32 * 1000);
-
-    info!("Waiting done");
-
     executor1
         .spawn_local_collect(system.valve(), &mut tasks1)?
         .spawn_local_collect(
@@ -184,7 +177,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
                 timers.timer()?,
                 AdcDriver::new(peripherals.adc1, &AdcConfig::new().calibration(true))?,
                 AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio36)?,
-                PinDriver::new(peripherals.pins.gpio35)?.into_input()?,
+                PinDriver::input(peripherals.pins.gpio35)?,
             ),
             &mut tasks1,
         )?
@@ -273,13 +266,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     log::info!("Starting execution");
 
-    let display_backlight = peripherals.pins.gpio5;
+    let display_backlight = peripherals.pins.gpio15;
     let display_dc = peripherals.pins.gpio18;
     let display_rst = peripherals.pins.gpio19;
     let display_spi = peripherals.spi2;
     let display_sclk = peripherals.pins.gpio14;
     let display_sdo = peripherals.pins.gpio13;
-    let display_cs = peripherals.pins.gpio15;
+    let display_cs = peripherals.pins.gpio5;
 
     let execution2 = spawn_executor::<8>(
         b"async-exec-mid\0",
@@ -401,7 +394,7 @@ fn subscribe_pin<'d, P: InputPin + OutputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notify: impl Fn() + Send + 'static,
 ) -> Result<PinDriver<'d, P, Input>, EspError> {
-    let mut pin = PinDriver::new(pin)?.into_input()?;
+    let mut pin = PinDriver::input(pin)?;
 
     pin.set_interrupt_type(InterruptType::NegEdge)?;
 
@@ -503,7 +496,7 @@ fn display<'d>(
     sdo: impl Peripheral<P = impl OutputPin> + 'd,
     cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
 ) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
-    let mut backlight = PinDriver::new(backlight)?.into_output()?;
+    let mut backlight = PinDriver::output(backlight)?;
 
     backlight.set_drive_strength(DriveStrength::I40mA)?;
     backlight.set_high()?;
@@ -512,7 +505,7 @@ fn display<'d>(
     let baudrate = 26.MHz().into();
 
     #[cfg(feature = "ili9341")]
-    let baudrate = 100.kHz().into();
+    let baudrate = 40.MHz().into();
 
     let di = SPIInterfaceNoCS::new(
         SpiMasterDriver::<SPI2>::new(
@@ -523,10 +516,10 @@ fn display<'d>(
             cs,
             &SpiMasterConfig::new().baudrate(baudrate),
         )?,
-        PinDriver::new(dc)?.into_output()?,
+        PinDriver::output(dc)?,
     );
 
-    let rst = PinDriver::new(rst)?.into_output()?;
+    let rst = PinDriver::output(rst)?;
 
     #[cfg(feature = "st7789")]
     let display = {
@@ -555,14 +548,40 @@ fn display<'d>(
     };
 
     #[cfg(feature = "ili9341")]
-    let display = ili9341::Ili9341::new(
-        di,
-        rst,
-        &mut delay::Ets,
-        ili9341::Orientation::Portrait,
-        ili9341::DisplaySize240x320,
-    )
-    .unwrap();
+    let display = {
+        // Kaluga needs customized screen orientation commands
+        // (not a surprise; quite a few ILI9341 boards need these as evidenced in the TFT_eSPI & lvgl ESP32 C drivers)
+        pub enum RgbMode {
+            Portrait,
+            PortraitFlipped,
+            Landscape,
+            LandscapeFlipped,
+        }
+
+        impl ili9341::Mode for RgbMode {
+            fn mode(&self) -> u8 {
+                match self {
+                    Self::Portrait => 0,
+                    Self::Landscape => 0x20 | 0x40,
+                    Self::PortraitFlipped => 0x80 | 0x40,
+                    Self::LandscapeFlipped => 0x80 | 0x20,
+                }
+            }
+
+            fn is_landscape(&self) -> bool {
+                matches!(self, Self::Landscape | Self::LandscapeFlipped)
+            }
+        }
+
+        ili9341::Ili9341::new(
+            di,
+            rst,
+            &mut delay::Ets,
+            RgbMode::Portrait,
+            ili9341::DisplaySize240x320,
+        )
+        .unwrap()
+    };
 
     let display = FlushableAdaptor::noop(display);
 
