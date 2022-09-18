@@ -29,7 +29,7 @@ futures = { version = "0.3", default-features = false }
 derive_more = "0.99"
 wasm-logger = "0.2"
 wasm-bindgen-futures = "0.4"
-wee_alloc = { version = "0.4", optional = true }
+#wee_alloc = { version = "0.4", optional = true } # No longer maintained
 web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.19", default-features = false }
 yew-router = { version = "0.16" }
