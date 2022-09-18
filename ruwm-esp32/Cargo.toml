@@ -34,7 +34,7 @@ esp-idf-hal = { version = "0.39", features = ["edge-executor"] }
 embassy-futures = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
 embassy-sync = { version = "0.1", git = "https://github.com/embassy-rs/embassy", features = ["std"] }
 static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
-edge-frame = { version = "0.2", default-features = false, features = ["assets-serve"] }
+edge-frame = { version = "0.3", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }
 edge-executor = { version = "0.2" }
 embedded-graphics = "0.7"
 display-interface = "0.4"
@@ -48,4 +48,4 @@ ruwm-std = { version = "0.1", path = "../ruwm-std" }
 [build-dependencies]
 anyhow = "1"
 embuild = { version = "0.30.3", features = ["espidf", "elf"] }
-edge-frame = { version = "0.2", default-features = false, features = ["assets-prepare"] }
+edge-frame = { version = "0.3", default-features = false, features = ["assets-prepare"], git = "https://github.com/ivmarkov/edge-frame" }
