@@ -1,13 +1,10 @@
 use core::mem;
-use core::time::Duration;
 
+use embassy_time::{Duration, Instant, Timer};
 use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
-
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
@@ -30,21 +27,21 @@ const DURATIONS: [Duration; FLOW_STATS_INSTANCES] = [
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FlowSnapshot {
-    time: Duration,
+    time_secs: u64,
     edges_count: u64,
 }
 
 impl FlowSnapshot {
-    pub const fn new(current_time: Duration, current_edges_count: u64) -> Self {
+    pub const fn new(current_time: Instant, current_edges_count: u64) -> Self {
         Self {
-            time: current_time,
+            time_secs: current_time.as_secs(),
             edges_count: current_edges_count,
         }
     }
 
     /// Get a reference to the flow snapshot's time.
-    pub fn time(&self) -> Duration {
-        self.time
+    pub fn time(&self) -> Instant {
+        Instant::from_secs(self.time_secs)
     }
 
     /// Get a reference to the flow snapshot's edges count.
@@ -55,9 +52,13 @@ impl FlowSnapshot {
     pub fn is_measurement_due(
         &self,
         measurement_duration: Duration,
-        current_time: Duration,
+        current_time: Instant,
     ) -> bool {
-        Self::is_aligned_measurement_due(self.time, current_time, measurement_duration)
+        Self::is_aligned_measurement_due(
+            Instant::from_secs(self.time_secs),
+            current_time,
+            measurement_duration,
+        )
     }
 
     pub fn flow_detected(&self, current_edges_count: u64) -> bool {
@@ -69,19 +70,19 @@ impl FlowSnapshot {
     }
 
     fn is_nonaligned_measurement_due(
-        start_time: Duration,
-        current_time: Duration,
+        start_time: Instant,
+        current_time: Instant,
         measurement_duration: Duration,
     ) -> bool {
         current_time - start_time >= measurement_duration
     }
 
     fn is_aligned_measurement_due(
-        start_time: Duration,
-        current_time: Duration,
+        start_time: Instant,
+        current_time: Instant,
         measurement_duration: Duration,
     ) -> bool {
-        let start_time = Duration::from_secs(
+        let start_time = Instant::from_secs(
             start_time.as_secs() / measurement_duration.as_secs() * measurement_duration.as_secs(),
         );
 
@@ -124,7 +125,7 @@ impl WaterMeterStatsState {
         Default::default()
     }
 
-    fn update(&mut self, edges_count: u64, now: Duration) -> bool {
+    fn update(&mut self, edges_count: u64, now: Instant) -> bool {
         let most_recent = FlowSnapshot::new(now, edges_count);
 
         let mut updated = self.most_recent != most_recent;
@@ -178,14 +179,10 @@ where
 
     pub async fn process(
         &'static self,
-        timer: impl OnceTimer,
-        sys_time: impl SystemTime,
         wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
         state_sink: impl Sender<Data = ()>,
     ) {
         process(
-            timer,
-            sys_time,
             &self.state,
             NotifReceiver::new(&self.wm_state_notif, wm_state),
             state_sink,
@@ -195,17 +192,13 @@ where
 }
 
 pub async fn process(
-    mut timer: impl OnceTimer,
-    sys_time: impl SystemTime,
     state: &impl StateCell<Data = WaterMeterStatsState>,
     mut wm_state_source: impl Receiver<Data = WaterMeterState>,
     mut state_sink: impl Sender<Data = ()>,
 ) {
     loop {
         let wm_state = wm_state_source.recv();
-        let tick = timer
-            .after(Duration::from_secs(10) /*Duration::from_millis(200)*/)
-            .unwrap();
+        let tick = Timer::after(Duration::from_secs(10) /*Duration::from_millis(200)*/);
 
         //pin_mut!(wm_state, tick);
 
@@ -218,7 +211,7 @@ pub async fn process(
             "WM STATS",
             state,
             |mut state| {
-                state.update(edges_count, sys_time.now());
+                state.update(edges_count, Instant::now());
 
                 state
             },

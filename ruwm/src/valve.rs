@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::future::pending;
-use core::time::Duration;
 
+use embassy_time::{Duration, Timer};
 use log::info;
 use serde::{Deserialize, Serialize};
 
@@ -9,8 +9,6 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 
 use embedded_hal::digital::v2::OutputPin;
-
-use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
@@ -74,13 +72,11 @@ where
 
     pub async fn spin(
         &'static self,
-        once: impl OnceTimer,
         power_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
         open_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
         close_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
     ) {
         spin(
-            once,
             power_pin,
             open_pin,
             close_pin,
@@ -103,7 +99,6 @@ where
 }
 
 pub async fn spin(
-    mut once: impl OnceTimer,
     mut power_pin: impl OutputPin<Error = impl Debug>,
     mut open_pin: impl OutputPin<Error = impl Debug>,
     mut close_pin: impl OutputPin<Error = impl Debug>,
@@ -123,7 +118,7 @@ pub async fn spin(
         let command = command_source.recv();
 
         let timer = if current_command.is_some() {
-            futures::future::Either::Left(once.after(VALVE_TURN_DELAY).unwrap())
+            futures::future::Either::Left(Timer::after(VALVE_TURN_DELAY))
         } else {
             futures::future::Either::Right(pending())
         };

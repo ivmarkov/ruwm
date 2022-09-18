@@ -1,14 +1,12 @@
 use core::fmt::Debug;
-use core::time::Duration;
 
+use embassy_time::{Duration, Timer};
 use serde::{Deserialize, Serialize};
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
-
-use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::Sender;
 use crate::state::{update_with, MemoryStateCell, StateCell, StateCellRead};
@@ -56,7 +54,6 @@ where
 
     pub async fn process<ADC, BP>(
         &self,
-        timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
         power_pin: impl InputPin,
@@ -64,20 +61,11 @@ where
     ) where
         BP: adc::Channel<ADC>,
     {
-        process(
-            timer,
-            one_shot,
-            battery_pin,
-            power_pin,
-            &self.state,
-            state_sink,
-        )
-        .await
+        process(one_shot, battery_pin, power_pin, &self.state, state_sink).await
     }
 }
 
 pub async fn process<ADC, BP>(
-    mut timer: impl OnceTimer,
     mut one_shot: impl adc::OneShot<ADC, u16, BP>,
     mut battery_pin: BP,
     power_pin: impl InputPin,
@@ -87,7 +75,7 @@ pub async fn process<ADC, BP>(
     BP: adc::Channel<ADC>,
 {
     loop {
-        timer.after(Duration::from_secs(2)).unwrap().await;
+        Timer::after(Duration::from_secs(2)).await;
 
         let voltage = Some(100);
         // let voltage = one_shot

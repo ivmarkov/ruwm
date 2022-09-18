@@ -1,14 +1,12 @@
 use core::fmt::Debug;
 use core::future::pending;
-use core::time::Duration;
 
+use embassy_time::{Duration, Timer};
 use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
 
 use embedded_hal::digital::v2::InputPin;
-
-use embedded_svc::timer::asynch::OnceTimer;
 
 use crate::channel::{Receiver, Sender};
 
@@ -22,19 +20,11 @@ pub async fn process(
     mut pin_edge: impl Receiver,
     mut pin: impl InputPin,
     pressed_level: PressedLevel,
-    mut debounce_params: Option<(impl OnceTimer, Duration)>,
+    debounce_duration: Option<Duration>,
     mut pressed_sink: impl Sender<Data = ()>,
 ) {
     loop {
-        wait_press(
-            &mut pin_edge,
-            &mut pin,
-            pressed_level,
-            debounce_params
-                .as_mut()
-                .map(|(timer, duration)| (timer, *duration)),
-        )
-        .await;
+        wait_press(&mut pin_edge, &mut pin, pressed_level, debounce_duration).await;
 
         pressed_sink.send(()).await;
     }
@@ -44,7 +34,7 @@ pub async fn wait_press(
     mut pin_edge: impl Receiver,
     pin: &mut impl InputPin,
     pressed_level: PressedLevel,
-    mut debounce_params: Option<(impl OnceTimer, Duration)>,
+    debounce_duration: Option<Duration>,
 ) {
     let mut debounce = false;
 
@@ -52,8 +42,8 @@ pub async fn wait_press(
         let pin_edge = pin_edge.recv();
 
         let timer = if debounce {
-            if let Some((timer, debounce_time)) = &mut debounce_params {
-                futures::future::Either::Left(timer.after(*debounce_time).unwrap())
+            if let Some(debounce_duration) = debounce_duration {
+                futures::future::Either::Left(Timer::after(debounce_duration))
             } else {
                 futures::future::Either::Right(pending())
             }
@@ -65,7 +55,7 @@ pub async fn wait_press(
 
         let check = match select(pin_edge, timer).await {
             Either::First(_) => {
-                if debounce_params.is_some() {
+                if debounce_duration.is_some() {
                     debounce = true;
                     false
                 } else {

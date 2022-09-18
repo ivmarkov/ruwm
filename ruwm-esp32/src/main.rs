@@ -2,7 +2,6 @@
 #![feature(type_alias_impl_trait)]
 
 use core::fmt::Debug;
-use core::time::Duration;
 use std::cell::RefCell;
 use std::thread::JoinHandle;
 
@@ -12,6 +11,7 @@ use edge_executor::{Local, SpawnError, Task};
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_time::{queue::Queue, Duration};
 
 use log::info;
 
@@ -41,8 +41,6 @@ use esp_idf_svc::http::server::ws::{EspHttpWsAsyncConnection, EspHttpWsProcessor
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
-use esp_idf_svc::systime::EspSystemTime;
-use esp_idf_svc::timer::EspISRTimerService;
 use esp_idf_svc::wifi::{EspWifi, WifiEvent};
 
 use esp_idf_sys::{esp, EspError};
@@ -70,6 +68,8 @@ const SLEEP_TIME: Duration = Duration::from_secs(30);
 const MQTT_MAX_TOPIC_LEN: usize = 64;
 const WS_MAX_CONNECTIONS: usize = 2;
 const WS_MAX_FRAME_SIZE: usize = 4096;
+
+embassy_time::generic_queue!(static TIMER_QUEUE: Queue = Queue::new());
 
 fn main() -> Result<(), InitError> {
     let wakeup_reason = get_sleep_wakeup_reason();
@@ -134,15 +134,12 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     > = StaticCell::new();
     let system = &*SYSTEM.init(System::new(unsafe { SLOW_MEM.as_mut().unwrap() }, storage));
 
-    let mut timers = unsafe { EspISRTimerService::new() }?.into_async();
-
     let mut tasks1 = heapless::Vec::<Task<()>, 16>::new();
     let mut executor1 = EspExecutor::<16, Local>::new();
 
     #[cfg(feature = "ulp")]
     let mut pulse_counter = ulp_pulse_counter::UlpPulseCounter::new(
         esp_idf_hal::ulp::UlpDriver::new(peripherals.ulp)?,
-        timers.timer()?,
         peripherals.pins.gpio33,
         wakeup_reason == SleepWakeupReason::Unknown,
     )?;
@@ -155,7 +152,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         ruwm::utils::NotifReceiver::new(&PULSE_SIGNAL, &()),
         subscribe_pin(peripherals.pins.gpio33, || PULSE_SIGNAL.notify())?,
         PressedLevel::Low,
-        Some((timers.timer()?, Duration::from_millis(50))),
+        Some(Duration::from_millis(50)),
     );
 
     let (pulse_counter, pulse_wakeup) = pulse_counter.split();
@@ -163,18 +160,12 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     executor1
         .spawn_local_collect(system.valve(), &mut tasks1)?
         .spawn_local_collect(
-            system.valve_spin(
-                timers.timer()?,
-                valve_power_pin,
-                valve_open_pin,
-                valve_close_pin,
-            ),
+            system.valve_spin(valve_power_pin, valve_open_pin, valve_close_pin),
             &mut tasks1,
         )?
         .spawn_local_collect(system.wm(pulse_counter, pulse_wakeup), &mut tasks1)?
         .spawn_local_collect(
             system.battery(
-                timers.timer()?,
                 AdcDriver::new(peripherals.adc1, &AdcConfig::new().calibration(true))?,
                 AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio36)?,
                 PinDriver::input(peripherals.pins.gpio35)?,
@@ -183,7 +174,6 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         )?
         .spawn_local_collect(
             system.button1(
-                timers.timer()?,
                 subscribe_pin(button1_pin, move || system.button1_signal())?,
                 PressedLevel::Low,
             ),
@@ -191,7 +181,6 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         )?
         .spawn_local_collect(
             system.button2(
-                timers.timer()?,
                 subscribe_pin(button2_pin, move || system.button2_signal())?,
                 PressedLevel::Low,
             ),
@@ -199,17 +188,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         )?
         .spawn_local_collect(
             system.button3(
-                timers.timer()?,
                 subscribe_pin(button3_pin, move || system.button3_signal())?,
                 PressedLevel::Low,
             ),
             &mut tasks1,
         )?
         .spawn_local_collect(system.emergency(), &mut tasks1)?
-        .spawn_local_collect(
-            system.keepalive(timers.timer()?, EspSystemTime),
-            &mut tasks1,
-        )?;
+        .spawn_local_collect(system.keepalive(), &mut tasks1)?;
 
     let mut sysloop = EspSystemEventLoop::take()?;
 
@@ -279,10 +264,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         5000,
         move |executor, tasks| {
             executor
-                .spawn_local_collect(
-                    system.wm_stats(timers.timer().unwrap(), EspSystemTime),
-                    tasks,
-                )?
+                .spawn_local_collect(system.wm_stats(), tasks)?
                 .spawn_local_collect(system.screen(), tasks)?
                 .spawn_local_collect(
                     system.screen_draw(
@@ -339,7 +321,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
 
-    std::thread::sleep(Duration::from_millis(2000));
+    std::thread::sleep(core::time::Duration::from_millis(2000));
 
     execution2.join().unwrap();
     execution3.join().unwrap();
@@ -419,6 +401,10 @@ fn init() -> Result<(), InitError> {
         })
     })?;
 
+    unsafe {
+        TIMER_QUEUE.initialize();
+    }
+
     Ok(())
 }
 
@@ -430,7 +416,9 @@ fn emergency_valve_close(
     log::error!("Start: emergency closing valve due to ULP wakeup...");
 
     valve::start_spin(Some(ValveCommand::Close), power_pin, open_pin, close_pin);
-    std::thread::sleep(valve::VALVE_TURN_DELAY);
+    std::thread::sleep(core::time::Duration::from_secs(
+        valve::VALVE_TURN_DELAY.as_secs(),
+    ));
     valve::start_spin(None, power_pin, open_pin, close_pin);
 
     log::error!("End: emergency closing valve due to ULP wakeup");

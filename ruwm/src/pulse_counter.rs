@@ -1,10 +1,11 @@
 use core::convert::Infallible;
 use core::fmt::Debug;
-use core::time::Duration;
+
+use futures::Future;
 
 use embedded_hal::digital::v2::InputPin;
-use embedded_svc::timer::asynch::OnceTimer;
-use futures::Future;
+
+use embassy_time::Duration;
 
 use crate::{
     button::{self, PressedLevel},
@@ -51,25 +52,25 @@ where
     }
 }
 
-pub struct CpuPulseCounter<E, P, T> {
+pub struct CpuPulseCounter<E, P> {
     pin_edge: E,
     pin: P,
     pressed_level: PressedLevel,
-    debounce_params: Option<(T, Duration)>,
+    debounce_duration: Option<Duration>,
 }
 
-impl<E, P, T> CpuPulseCounter<E, P, T> {
+impl<E, P> CpuPulseCounter<E, P> {
     pub const fn new(
         pin_edge: E,
         pin: P,
         pressed_level: PressedLevel,
-        debounce_params: Option<(T, Duration)>,
+        debounce_duration: Option<Duration>,
     ) -> Self {
         Self {
             pin_edge,
             pin,
             pressed_level,
-            debounce_params,
+            debounce_duration,
         }
     }
 
@@ -77,7 +78,6 @@ impl<E, P, T> CpuPulseCounter<E, P, T> {
     where
         E: Receiver,
         P: InputPin,
-        T: OnceTimer,
     {
         let ptr: *mut Self = self;
 
@@ -86,11 +86,10 @@ impl<E, P, T> CpuPulseCounter<E, P, T> {
     }
 }
 
-impl<E, P, T> PulseCounter for CpuPulseCounter<E, P, T>
+impl<E, P> PulseCounter for CpuPulseCounter<E, P>
 where
     E: Receiver,
     P: InputPin,
-    T: OnceTimer,
 {
     type Error = Infallible;
 
@@ -102,9 +101,7 @@ where
                 &mut self.pin_edge,
                 &mut self.pin,
                 self.pressed_level,
-                self.debounce_params
-                    .as_mut()
-                    .map(|(timer, duration)| (timer, *duration)),
+                self.debounce_duration,
             )
             .await;
 
@@ -113,7 +110,7 @@ where
     }
 }
 
-impl<E, P, T> PulseWakeup for CpuPulseCounter<E, P, T> {
+impl<E, P> PulseWakeup for CpuPulseCounter<E, P> {
     type Error = Infallible;
 
     fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
