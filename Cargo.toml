@@ -3,7 +3,6 @@ resolver = "2"
 
 members = [
     "ruwm",
-    "ruwm-std",
     "ruwm-esp32",
 ]
 
@@ -32,6 +31,9 @@ esp-idf-svc = { path = "../esp-idf-svc" }
 
 [patch.'https://github.com/ivmarkov/edge-frame']
 edge-frame = { path = "../edge-frame/edge-frame" }
+
+[patch.'https://github.com/ivmarkov/embassy']
+embassy-time = { path = "../embassy/embassy-time" }
 
 [profile.release]
 opt-level = "s"

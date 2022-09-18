@@ -1,7 +1,6 @@
 use core::future::Future;
-use core::time::Duration;
 
-use embedded_svc::timer::asynch::OnceTimer;
+use embassy_time::{Duration, Timer};
 
 use esp_idf_hal::{
     gpio::RTCPin,
@@ -20,13 +19,12 @@ mod ulp_code_vars {
     include!(env!("ULP_FSM_RS"));
 }
 
-pub struct UlpPulseCounter<'d, T, P> {
+pub struct UlpPulseCounter<'d, P> {
     driver: ulp::UlpDriver<'d>,
-    timer: T,
     pin: PeripheralRef<'d, P>,
 }
 
-impl<'d, T, P> UlpPulseCounter<'d, T, P>
+impl<'d, P> UlpPulseCounter<'d, P>
 where
     P: RTCPin,
 {
@@ -34,7 +32,6 @@ where
 
     pub fn new(
         driver: ulp::UlpDriver<'d>,
-        timer: T,
         pin: impl Peripheral<P = P> + 'd,
         cold_boot: bool,
     ) -> Result<Self, EspError> {
@@ -55,10 +52,7 @@ where
     ) -> (
         &mut (impl pulse_counter::PulseCounter + 'd),
         &mut (impl pulse_counter::PulseWakeup + 'd),
-    )
-    where
-        T: OnceTimer + 'd,
-    {
+    ) {
         let ptr: *mut Self = self;
 
         // This is safe because the access to the Ulp driver is protected with critical sections
@@ -93,9 +87,8 @@ where
     // }
 }
 
-impl<'d, T, P> pulse_counter::PulseCounter for UlpPulseCounter<'d, T, P>
+impl<'d, P> pulse_counter::PulseCounter for UlpPulseCounter<'d, P>
 where
-    T: OnceTimer,
     P: 'd,
 {
     type Error = EspError;
@@ -104,10 +97,7 @@ where
 
     fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_> {
         async move {
-            self.timer
-                .after(Duration::from_secs(2) /*TODO*/)
-                .unwrap()
-                .await;
+            Timer::after(Duration::from_secs(2) /*TODO*/).await;
 
             let edges_count = {
                 let _cs = CriticalSection::new();
@@ -126,7 +116,7 @@ where
     }
 }
 
-impl<'d, T, P> pulse_counter::PulseWakeup for UlpPulseCounter<'d, T, P>
+impl<'d, P> pulse_counter::PulseWakeup for UlpPulseCounter<'d, P>
 where
     P: RTCPin,
 {

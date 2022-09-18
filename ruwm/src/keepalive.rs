@@ -1,12 +1,7 @@
 use core::fmt::Debug;
-use core::time::Duration;
-
-use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
-
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asynch::OnceTimer;
+use embassy_time::{Duration, Instant, Timer};
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
@@ -16,7 +11,7 @@ use crate::utils::NotifReceiver;
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RemainingTime {
     Indefinite,
     Duration(Duration),
@@ -39,14 +34,10 @@ impl Keepalive {
 
     pub async fn process(
         &'static self,
-        timer: impl OnceTimer,
-        system_time: impl SystemTime,
         remaining_time_sink: impl Sender<Data = RemainingTime>,
         quit_sink: impl Sender<Data = ()>,
     ) {
         process(
-            timer,
-            system_time,
             NotifReceiver::new(&self.event_notif, &NoopStateCell),
             remaining_time_sink,
             quit_sink,
@@ -56,25 +47,21 @@ impl Keepalive {
 }
 
 pub async fn process(
-    mut timer: impl OnceTimer,
-    system_time: impl SystemTime,
     mut event_source: impl Receiver<Data = ()>,
     mut remaining_time_sink: impl Sender<Data = RemainingTime>,
     mut quit_sink: impl Sender<Data = ()>,
 ) {
-    let mut quit_time = Some(system_time.now() + TIMEOUT);
+    let mut quit_time = Some(Instant::now() + TIMEOUT);
     let mut quit_time_sent = None;
 
     loop {
         let event = event_source.recv();
-        let tick = timer
-            .after(Duration::from_secs(2) /*Duration::from_millis(500)*/)
-            .unwrap();
+        let tick = Timer::after(Duration::from_secs(2) /*Duration::from_millis(500)*/);
 
         //pin_mut!(event, tick);
 
         let result = select(event, tick).await;
-        let now = system_time.now();
+        let now = Instant::now();
 
         if let Either::First(_) = result {
             quit_time = Some(now + TIMEOUT);

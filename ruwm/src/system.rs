@@ -1,10 +1,10 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
-use core::time::Duration;
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
+use embassy_time::Duration;
 use embedded_graphics::prelude::RgbColor;
 
 use embedded_hal::adc;
@@ -115,12 +115,11 @@ where
 
     pub async fn valve_spin(
         &'static self,
-        once: impl OnceTimer,
         power_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
         open_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
         close_pin: impl OutputPin<Error = impl Debug> + Send + 'static,
     ) {
-        self.valve.spin(once, power_pin, open_pin, close_pin).await
+        self.valve.spin(power_pin, open_pin, close_pin).await
     }
 
     pub async fn wm(
@@ -156,11 +155,9 @@ where
             .await
     }
 
-    pub async fn wm_stats(&'static self, timer: impl OnceTimer, sys_time: impl SystemTime) {
+    pub async fn wm_stats(&'static self) {
         self.wm_stats
             .process(
-                timer,
-                sys_time,
                 self.wm.state(),
                 NotifSender2::new(
                     "WM STATS STATE",
@@ -176,7 +173,6 @@ where
 
     pub async fn battery<ADC, BP>(
         &'static self,
-        timer: impl OnceTimer,
         one_shot: impl adc::OneShot<ADC, u16, BP>,
         battery_pin: BP,
         power_pin: impl InputPin,
@@ -185,7 +181,6 @@ where
     {
         self.battery
             .process(
-                timer,
                 one_shot,
                 battery_pin,
                 power_pin,
@@ -214,17 +209,12 @@ where
         self.button3.notify();
     }
 
-    pub async fn button1(
-        &'static self,
-        timer: impl OnceTimer,
-        pin: impl InputPin,
-        pressed_level: PressedLevel,
-    ) {
+    pub async fn button1(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
             NotifReceiver::new(&self.button1, &NoopStateCell),
             pin,
             pressed_level,
-            Some((timer, Duration::from_millis(50))),
+            Some(Duration::from_millis(50)),
             NotifSender::new(
                 "BUTTON1 STATE",
                 [
@@ -236,17 +226,12 @@ where
         .await
     }
 
-    pub async fn button2(
-        &'static self,
-        timer: impl OnceTimer,
-        pin: impl InputPin,
-        pressed_level: PressedLevel,
-    ) {
+    pub async fn button2(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
             NotifReceiver::new(&self.button2, &NoopStateCell),
             pin,
             pressed_level,
-            Some((timer, Duration::from_millis(50))),
+            Some(Duration::from_millis(50)),
             NotifSender::new(
                 "BUTTON2 STATE",
                 [
@@ -258,17 +243,12 @@ where
         .await
     }
 
-    pub async fn button3(
-        &'static self,
-        timer: impl OnceTimer,
-        pin: impl InputPin,
-        pressed_level: PressedLevel,
-    ) {
+    pub async fn button3(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
             NotifReceiver::new(&self.button3, &NoopStateCell),
             pin,
             pressed_level,
-            Some((timer, Duration::from_millis(50))),
+            Some(Duration::from_millis(50)),
             NotifSender::new(
                 "BUTTON3 STATE",
                 [
@@ -291,11 +271,9 @@ where
             .await // TODO: Screen
     }
 
-    pub async fn keepalive(&'static self, timer: impl OnceTimer, system_time: impl SystemTime) {
+    pub async fn keepalive(&'static self) {
         self.keepalive
             .process(
-                timer,
-                system_time,
                 SignalSender::new("KEEPALIVE/REMAINING TIME", [&self.remaining_time]), // TODO: Screen
                 NotifSender::new("KEEPALIVE/QUIT", [&self.quit]), // TODO: Screen
             )
