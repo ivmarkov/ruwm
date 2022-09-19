@@ -30,9 +30,9 @@ embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
 esp-idf-sys = { version = "0.31.9", features = ["binstart"] }
 esp-idf-svc = { version = "0.43", features = ["nightly", "experimental", "embassy-time"] }
-esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-time-timer11", "critical-section-mutex"] }
-embassy-futures = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
-embassy-sync = { version = "0.1", git = "https://github.com/embassy-rs/embassy", features = ["std"] }
+esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-time-timer11", "embassy-sync", "critical-section-mutex"] }
+embassy-futures = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
+embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["std"] }
 embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
 static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
 edge-frame = { version = "0.3", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }

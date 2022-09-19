@@ -1,6 +1,5 @@
 use core::cell::{Cell, RefCell};
 use core::fmt::Debug;
-use core::marker::PhantomData;
 
 use serde::{de::DeserializeOwned, Serialize};
 

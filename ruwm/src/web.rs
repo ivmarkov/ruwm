@@ -9,7 +9,6 @@ use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex as AsyncMutex;
-use embassy_sync::waitqueue::MultiWakerRegistration;
 
 use embedded_svc::ws::{self, FrameType};
 

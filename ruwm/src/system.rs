@@ -12,8 +12,6 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::storage::Storage;
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::asynch::OnceTimer;
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws;
 use embedded_svc::ws::asynch::server::Acceptor;
