@@ -11,6 +11,7 @@ use edge_executor::{Local, SpawnError, Task};
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_time::driver::AlarmHandle;
 use embassy_time::{queue::Queue, Duration};
 
 use log::info;
@@ -69,7 +70,10 @@ const MQTT_MAX_TOPIC_LEN: usize = 64;
 const WS_MAX_CONNECTIONS: usize = 2;
 const WS_MAX_FRAME_SIZE: usize = 4096;
 
-embassy_time::generic_queue!(static TIMER_QUEUE: Queue = Queue::new());
+embassy_time::generic_queue!(static TIMER_QUEUE: Queue<128, esp_idf_hal::interrupt::embassy_sync::CriticalSectionRawMutex> = Queue::new());
+
+// TODO: Linker issues if esp-idf-hal's "embassy-time-driver" feature is used instead
+embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
 
 fn main() -> Result<(), InitError> {
     let wakeup_reason = get_sleep_wakeup_reason();
