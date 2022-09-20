@@ -73,17 +73,6 @@ impl<E, P> CpuPulseCounter<E, P> {
             debounce_duration,
         }
     }
-
-    pub fn split(&mut self) -> (&mut impl PulseCounter, &mut impl PulseWakeup)
-    where
-        E: Receiver,
-        P: InputPin,
-    {
-        let ptr: *mut Self = self;
-
-        // This is safe because PulseWakeup is a no-op
-        unsafe { (ptr.as_mut().unwrap(), ptr.as_mut().unwrap()) }
-    }
 }
 
 impl<E, P> PulseCounter for CpuPulseCounter<E, P>
@@ -111,6 +100,14 @@ where
 }
 
 impl<E, P> PulseWakeup for CpuPulseCounter<E, P> {
+    type Error = Infallible;
+
+    fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl PulseWakeup for () {
     type Error = Infallible;
 
     fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {

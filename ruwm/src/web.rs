@@ -32,6 +32,8 @@ enum WebFrame {
     Unknown,
 }
 
+pub const WS_MAX_FRAME_SIZE: usize = 4096;
+
 pub struct Web<const N: usize, R, T>
 where
     R: RawMutex,
@@ -78,7 +80,7 @@ where
         self.channel.send(connection).await
     }
 
-    pub async fn process<const F: usize>(
+    pub async fn process(
         &'static self,
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
@@ -101,7 +103,7 @@ where
                         loop {
                             let connection = self.channel.recv().await;
 
-                            handle_connection::<R, F>(
+                            handle_connection::<R>(
                                 connection,
                                 NotifReceiver::new(&self.valve_state_signals[index], valve_state),
                                 NotifReceiver::new(&self.wm_state_signals[index], wm_state),
@@ -144,7 +146,7 @@ where
     }
 }
 
-pub async fn handle_connection<R: RawMutex, const F: usize>(
+pub async fn handle_connection<R: RawMutex>(
     connection: impl ws::asynch::Sender + ws::asynch::Receiver,
     valve_state: impl Receiver<Data = Option<ValveState>>,
     wm_state: impl Receiver<Data = WaterMeterState>,
@@ -161,7 +163,7 @@ pub async fn handle_connection<R: RawMutex, const F: usize>(
     let role = Mutex::<R, _>::new(Cell::new(Role::None));
 
     select4(
-        receive::<F, _>(
+        receive(
             &connection,
             &role,
             valve_command,
@@ -170,13 +172,13 @@ pub async fn handle_connection<R: RawMutex, const F: usize>(
             wm,
             battery,
         ),
-        send_state::<F, _, _>(&connection, &role, valve_state, |state| {
+        send_state(&connection, &role, valve_state, |state| {
             WebEvent::ValveState(state)
         }),
-        send_state::<F, _, _>(&connection, &role, wm_state, |state| {
+        send_state(&connection, &role, wm_state, |state| {
             WebEvent::WaterMeterState(state)
         }),
-        send_state::<F, _, _>(&connection, &role, battery_state, |state| {
+        send_state(&connection, &role, battery_state, |state| {
             WebEvent::BatteryState(state)
         }),
     )
@@ -185,7 +187,7 @@ pub async fn handle_connection<R: RawMutex, const F: usize>(
     Ok(())
 }
 
-async fn receive<const F: usize, R: RawMutex>(
+async fn receive<R: RawMutex>(
     connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
     role: &Mutex<R, Cell<Role>>,
     mut valve_command: impl Sender<Data = ValveCommand>,
@@ -196,10 +198,7 @@ async fn receive<const F: usize, R: RawMutex>(
 ) -> Result<(), ()> //WrapError<impl Debug>>
 {
     loop {
-        let request = match web_receive::<F, _>(&mut *connection.lock().await)
-            .await
-            .unwrap()
-        {
+        let request = match web_receive(&mut *connection.lock().await).await.unwrap() {
             WebFrame::Request(request) => request,
             WebFrame::Control => todo!(),
             WebFrame::Close => break,
@@ -244,7 +243,7 @@ async fn receive<const F: usize, R: RawMutex>(
             WebEvent::Response(response)
         };
 
-        web_send::<F, _>(&mut *connection.lock().await, &web_event)
+        web_send(&mut *connection.lock().await, &web_event)
             .await
             .unwrap();
     }
@@ -252,7 +251,7 @@ async fn receive<const F: usize, R: RawMutex>(
     Ok(())
 }
 
-async fn send_state<const F: usize, R: RawMutex, T>(
+async fn send_state<R: RawMutex, T>(
     connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
     role: &Mutex<R, Cell<Role>>,
     mut state: impl Receiver<Data = T>,
@@ -262,7 +261,7 @@ async fn send_state<const F: usize, R: RawMutex, T>(
     loop {
         let state = state.recv().await;
 
-        web_send_auth::<F, _>(
+        web_send_auth(
             &mut *connection.lock().await,
             &to_web_event(state),
             role.lock(|role| role.get()),
@@ -276,7 +275,7 @@ fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 
-async fn web_send_auth<const F: usize, S>(
+async fn web_send_auth<S>(
     ws_sender: S,
     event: &WebEvent,
     role: Role,
@@ -285,13 +284,13 @@ where
     S: ws::asynch::Sender,
 {
     if event.role() >= role {
-        web_send::<F, _>(ws_sender, event).await
+        web_send(ws_sender, event).await
     } else {
         Ok(())
     }
 }
 
-async fn web_send<const F: usize, S>(
+async fn web_send<S>(
     mut ws_sender: S,
     event: &WebEvent,
 ) -> Result<(), EitherError<S::Error, postcard::Error>>
@@ -300,7 +299,7 @@ where
 {
     info!("[WS SEND] {:?}", event);
 
-    let mut frame_buf = [0_u8; F];
+    let mut frame_buf = [0_u8; WS_MAX_FRAME_SIZE];
 
     let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
 
@@ -312,11 +311,11 @@ where
     Ok(())
 }
 
-async fn web_receive<const F: usize, R>(mut ws_receiver: R) -> Result<WebFrame, R::Error>
+async fn web_receive<R>(mut ws_receiver: R) -> Result<WebFrame, R::Error>
 where
     R: ws::asynch::Receiver,
 {
-    let mut frame_buf = [0_u8; F];
+    let mut frame_buf = [0_u8; WS_MAX_FRAME_SIZE];
 
     let (frame_type, size) = ws_receiver.recv(&mut frame_buf).await?;
 

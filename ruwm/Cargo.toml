@@ -11,8 +11,11 @@ repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
+[features]
+default = ["edge-executor"] # Note that edge-executor requires alloc
+std = []
+
 [dependencies]
-anyhow = "1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 embedded-hal = { version = "0.2.7", features = [ "unproven" ] }
@@ -27,3 +30,4 @@ postcard = "0.7"
 serde = { version = "1", default-features = false }
 heapless = "0.7"
 enumset = "1"
+edge-executor = { version = "0.2", optional = true }
