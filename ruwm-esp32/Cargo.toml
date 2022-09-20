@@ -22,6 +22,7 @@ ttgo = []
 
 [dependencies]
 anyhow = "1"
+critical-section = "1.1"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
 async-broadcast = "0.3.4"
@@ -30,7 +31,7 @@ embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
 esp-idf-sys = { version = "0.31.9", features = ["binstart"] }
 esp-idf-svc = { version = "0.43", features = ["nightly", "experimental", "embassy-time"] }
-esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-time-timer11", "embassy-sync", "critical-section-mutex"] }
+esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-time-timer00", "embassy-sync", "critical-section"] }
 embassy-futures = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
 embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["std"] }
 embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
