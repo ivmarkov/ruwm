@@ -1,6 +1,6 @@
 [package]
 name = "ruwm-esp32"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["ivmarkov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
@@ -21,12 +21,10 @@ espidf = []
 ttgo = []
 
 [dependencies]
-anyhow = "1"
 critical-section = "1.1"
+heapless = "0.7"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
-async-broadcast = "0.3.4"
-smol = "1.2"
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
 esp-idf-sys = { version = "0.31.9", features = ["binstart"] }
@@ -43,8 +41,7 @@ display-interface = "0.4"
 display-interface-spi = "0.4"
 st7789 = { version = "0.6", optional = true }
 ili9341 = { version = "0.5", git = "https://github.com/yuri91/ili9341-rs", optional = true }
-heapless = "0.7.12"
-ruwm = { version = "0.1", path = "../ruwm", features = ["std", "edge-executor"] }
+ruwm = { version = "0.2", path = "../ruwm", features = ["std", "edge-executor"] }
 
 [build-dependencies]
 anyhow = "1"
