@@ -4,7 +4,9 @@ target = "xtensa-esp32-espidf"
 #target = "xtensa-esp32s2-espidf"
 #target = "xtensa-esp32s3-espidf"
 #target = "riscv32imc-esp-espidf"
-rustflags = "--cfg espidf_time64"
+
+# Uncomment for ESP-IDF 5 and later
+#rustflags = "--cfg espidf_time64"
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
