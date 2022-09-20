@@ -67,6 +67,7 @@ const PASS: &str = env!("RUWM_WIFI_PASS");
 const ASSETS: assets::serve::Assets = edge_frame::assets!("RUWM_WEB");
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 const WS_MAX_CONNECTIONS: usize = 2;
+const MQTT_MAX_TOPIC_LEN: usize = 64;
 
 type EspSystem =
     System<WS_MAX_CONNECTIONS, CriticalSectionRawMutex, EspStorage, EspHttpWsAsyncConnection<()>>;
@@ -109,8 +110,8 @@ enum SleepWakeupReason {
 
 // TODO: Linker issues
 embassy_time::generic_queue!(static TIMER_QUEUE: Queue<128, esp_idf_hal::interrupt::embassy_sync::CriticalSectionRawMutex> = Queue::new());
-embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
-//embassy_time::time_driver_impl!(static DRIVER: esp_idf_svc::timer::embassy_time::EspDriver = esp_idf_svc::timer::embassy_time::EspDriver::new());
+//embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
+embassy_time::time_driver_impl!(static DRIVER: esp_idf_svc::timer::embassy_time::EspDriver = esp_idf_svc::timer::embassy_time::EspDriver::new());
 critical_section::set_impl!(esp_idf_hal::cs::critical_section::EspCriticalSection);
 
 fn main() -> Result<(), InitError> {
@@ -252,13 +253,13 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
         subscribe_pin(button3_pin, move || system.button1_signal())?,
     )?;
 
-    log::info!("Starting execution");
-
     // Mid-prio executor
+
+    log::info!("Starting mid-prio executor");
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-mid\0"),
-        stack_size: 5000,
+        stack_size: 10000,
         ..Default::default()
     }
     .set()
@@ -284,16 +285,18 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     // Low-prio executor
 
+    log::info!("Starting low-prio executor");
+
     ThreadSpawnConfiguration {
-        name: Some(b"async-exec-slow\0"),
-        stack_size: 10000,
+        name: Some(b"async-exec-low\0"),
+        stack_size: 20000,
         ..Default::default()
     }
     .set()
     .unwrap();
 
     let execution3 = system.schedule::<4, TaskHandle, CurrentTaskWait>(move || {
-        system.spawn_executor2::<WS_MAX_CONNECTIONS, _, _>(
+        system.spawn_executor2::<MQTT_MAX_TOPIC_LEN, _, _>(
             mqtt_topic_prefix,
             mqtt_client,
             ws_acceptor,
@@ -302,7 +305,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     // Start main execution
 
-    log::info!("Starting main thread execution");
+    log::info!("Starting high-prio executor");
 
     system.run(&mut executor1, tasks1);
 
@@ -498,7 +501,7 @@ fn httpd() -> Result<
     InitError,
 > {
     let (ws_processor, ws_acceptor) =
-        EspHttpWsProcessor::<WS_MAX_CONNECTIONS, { web::WS_MAX_FRAME_SIZE }>::new(());
+        EspHttpWsProcessor::<WS_MAX_CONNECTIONS, { web::WS_MAX_FRAME_LEN }>::new(());
 
     let ws_processor = Mutex::<CriticalSectionRawMutex, _>::new(RefCell::new(ws_processor));
 

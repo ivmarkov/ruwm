@@ -32,7 +32,7 @@ enum WebFrame {
     Unknown,
 }
 
-pub const WS_MAX_FRAME_SIZE: usize = 4096;
+pub const WS_MAX_FRAME_LEN: usize = 4096;
 
 pub struct Web<const N: usize, R, T>
 where
@@ -299,7 +299,7 @@ where
 {
     info!("[WS SEND] {:?}", event);
 
-    let mut frame_buf = [0_u8; WS_MAX_FRAME_SIZE];
+    let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
 
     let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
 
@@ -315,7 +315,7 @@ async fn web_receive<R>(mut ws_receiver: R) -> Result<WebFrame, R::Error>
 where
     R: ws::asynch::Receiver,
 {
-    let mut frame_buf = [0_u8; WS_MAX_FRAME_SIZE];
+    let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
 
     let (frame_type, size) = ws_receiver.recv(&mut frame_buf).await?;
 
