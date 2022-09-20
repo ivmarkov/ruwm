@@ -469,7 +469,7 @@ where
                 &mut tasks,
             )?
             //.spawn_local_collect(self.0.web_accept(ws_acceptor), &mut tasks)?
-            //.spawn_local_collect(self.0.web_process::<WS_MAX_FRAME_SIZE>(), &mut tasks)?
+            //.spawn_local_collect(self.0.web_process(), &mut tasks)?
             ;
 
         Ok((executor, tasks))
