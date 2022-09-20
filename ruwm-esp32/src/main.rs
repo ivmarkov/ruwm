@@ -11,7 +11,6 @@ use edge_executor::{Local, SpawnError, Task};
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_time::driver::AlarmHandle;
 use embassy_time::{queue::Queue, Duration};
 
 use log::info;
@@ -74,6 +73,9 @@ embassy_time::generic_queue!(static TIMER_QUEUE: Queue<128, esp_idf_hal::interru
 
 // TODO: Linker issues if esp-idf-hal's "embassy-time-driver" feature is used instead
 embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
+//embassy_time::time_driver_impl!(static DRIVER: esp_idf_svc::timer::embassy_time::EspDriver = esp_idf_svc::timer::embassy_time::EspDriver::new());
+
+critical_section::set_impl!(esp_idf_hal::cs::critical_section::EspCriticalSection);
 
 fn main() -> Result<(), InitError> {
     let wakeup_reason = get_sleep_wakeup_reason();
@@ -406,7 +408,7 @@ fn init() -> Result<(), InitError> {
     })?;
 
     unsafe {
-        TIMER_QUEUE.initialize();
+        embassy_time::queue::initialize();
     }
 
     Ok(())

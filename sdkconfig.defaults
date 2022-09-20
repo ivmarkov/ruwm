@@ -18,12 +18,12 @@ CONFIG_ULP_COPROC_RESERVE_MEM=2048
 # Enable HTTP server websockets (necessary for web UI)
 CONFIG_HTTPD_WS_SUPPORT=y
 
-# This is only 10 by default. 16 is the maximum
+# This is 10 by default. 16 is the maximum
 CONFIG_LWIP_MAX_SOCKETS=16
 
 # Enable the option to dispatch timer events directly from the timer ISR 
 # (the executor & async timer wrapper of `esp-idf-svc` are compatible with this dispatch method)
-# This has lower latency as compared to dispatcching via an intermediate task
+# This has lower latency as compared to dispatching via an intermediate task
 CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
 
 # Enable posting to event loops directly from an ISR 
