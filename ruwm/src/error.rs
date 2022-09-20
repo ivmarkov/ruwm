@@ -35,8 +35,8 @@ where
 #[cfg(feature = "std")]
 impl<E1, E2> std::error::Error for EitherError<E1, E2>
 where
-    E1: Display + Debug,
-    E2: Display + Debug,
+    E1: Display + core::fmt::Debug,
+    E2: Display + core::fmt::Debug,
 {
 }
 

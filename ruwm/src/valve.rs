@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 
+use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 
 use crate::channel::{Receiver, Sender};
@@ -96,6 +97,23 @@ where
         )
         .await
     }
+}
+
+pub fn emergency_close(
+    power_pin: &mut impl OutputPin<Error = impl Debug>,
+    open_pin: &mut impl OutputPin<Error = impl Debug>,
+    close_pin: &mut impl OutputPin<Error = impl Debug>,
+    delay: &mut impl DelayMs<u32>,
+) {
+    log::error!("Start: emergency closing valve due to ULP wakeup...");
+
+    start_spin(Some(ValveCommand::Close), power_pin, open_pin, close_pin);
+
+    delay.delay_ms((VALVE_TURN_DELAY.as_secs() * 1000) as u32);
+
+    start_spin(None, power_pin, open_pin, close_pin);
+
+    log::error!("End: emergency closing valve due to ULP wakeup");
 }
 
 pub async fn spin(
