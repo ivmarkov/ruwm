@@ -24,7 +24,7 @@ use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use esp_idf_hal::cs::embassy_sync::CriticalSectionRawMutex;
-use esp_idf_hal::delay::Rtos;
+use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::executor::{CurrentTaskWait, TaskHandle};
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::modem::WifiModemPeripheral;
@@ -182,7 +182,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
             &mut valve_power_pin,
             &mut valve_open_pin,
             &mut valve_close_pin,
-            &mut Rtos,
+            &mut FreeRtos,
         );
     }
 
