@@ -62,7 +62,7 @@ where
     emergency: Emergency,
     keepalive: Keepalive,
 
-    remaining_time: Signal<R, RemainingTime>,
+    remaining_time: Signal<RemainingTime, R>,
 
     quit: Notification,
 

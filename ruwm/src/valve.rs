@@ -45,8 +45,8 @@ where
         MemoryStateCell<NoopRawMutex, Option<Option<ValveState>>>,
         MutRefStateCell<NoopRawMutex, Option<ValveState>>,
     >,
-    command_signal: Signal<R, ValveCommand>,
-    spin_command_signal: Signal<R, ValveCommand>,
+    command_signal: Signal<ValveCommand, R>,
+    spin_command_signal: Signal<ValveCommand, R>,
     spin_finished_notif: Notification,
 }
 
@@ -67,7 +67,7 @@ where
         &self.state
     }
 
-    pub fn command_sink(&self) -> &Signal<R, ValveCommand> {
+    pub fn command_sink(&self) -> &Signal<ValveCommand, R> {
         &self.command_signal
     }
 

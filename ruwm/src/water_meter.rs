@@ -55,7 +55,7 @@ where
             StorageStateCell<'static, R, S, WaterMeterState>,
         >,
     >,
-    command_signal: Signal<R, WaterMeterCommand>,
+    command_signal: Signal<WaterMeterCommand, R>,
 }
 
 impl<R, S> WaterMeter<R, S>
@@ -83,7 +83,7 @@ where
         &self.state
     }
 
-    pub fn command_sink(&self) -> &Signal<R, WaterMeterCommand> {
+    pub fn command_sink(&self) -> &Signal<WaterMeterCommand, R> {
         &self.command_signal
     }
 

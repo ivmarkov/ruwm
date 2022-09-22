@@ -4,7 +4,7 @@ use core::future::Future;
 use core::mem;
 use core::task::{Context, Poll, Waker};
 
-use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 
 /// Single-slot signaling primitive.
@@ -31,7 +31,7 @@ use embassy_sync::blocking_mutex::Mutex;
 ///
 /// static SOME_SIGNAL: Signal<SomeCommand> = Signal::new();
 /// ```
-pub struct Signal<R, T>
+pub struct Signal<T, R = CriticalSectionRawMutex>
 where
     R: RawMutex,
 {
@@ -44,7 +44,7 @@ enum State<T> {
     Signaled(T),
 }
 
-impl<R, T> Signal<R, T>
+impl<T, R> Signal<T, R>
 where
     R: RawMutex,
 {
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<R, T: Send> Signal<R, T>
+impl<R, T: Send> Signal<T, R>
 where
     R: RawMutex,
 {

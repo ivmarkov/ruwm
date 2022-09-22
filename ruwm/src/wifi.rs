@@ -22,7 +22,7 @@ where
     R: RawMutex,
 {
     state: MemoryStateCell<R, Option<bool>>,
-    command: Signal<R, WifiCommand>,
+    command: Signal<WifiCommand, R>,
 }
 
 impl<R> Wifi<R>
@@ -40,7 +40,7 @@ where
         &self.state
     }
 
-    pub fn command_sink(&self) -> &Signal<R, WifiCommand> {
+    pub fn command_sink(&self) -> &Signal<WifiCommand, R> {
         &self.command
     }
 
