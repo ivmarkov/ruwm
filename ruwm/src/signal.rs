@@ -1,7 +1,6 @@
 //! A synchronization primitive for passing the latest value to a task.
-use core::cell::RefCell;
+use core::cell::Cell;
 use core::future::Future;
-use core::mem;
 use core::task::{Context, Poll, Waker};
 
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
@@ -9,7 +8,7 @@ use embassy_sync::blocking_mutex::Mutex;
 
 /// Single-slot signaling primitive.
 ///
-/// This is similar to a [`Channel`](crate::channel::mpmc::Channel) with a buffer size of 1, except
+/// This is similar to a [`Channel`](crate::channel::Channel) with a buffer size of 1, except
 /// "sending" to it (calling [`Signal::signal`]) when full will overwrite the previous value instead
 /// of waiting for the receiver to pop the previous value.
 ///
@@ -17,12 +16,12 @@ use embassy_sync::blocking_mutex::Mutex;
 /// the latest data, and therefore it's fine to "lose" messages. This is often the case for "state"
 /// updates.
 ///
-/// For more advanced use cases, you might want to use [`Channel`](crate::channel::mpmc::Channel) instead.
+/// For more advanced use cases, you might want to use [`Channel`](crate::channel::Channel) instead.
 ///
 /// Signals are generally declared as `static`s and then borrowed as required.
 ///
 /// ```
-/// use embassy_util::channel::signal::Signal;
+/// use embassy_sync::signal::Signal;
 ///
 /// enum SomeCommand {
 ///   On,
@@ -35,7 +34,7 @@ pub struct Signal<T, R = CriticalSectionRawMutex>
 where
     R: RawMutex,
 {
-    state: Mutex<R, RefCell<State<T>>>,
+    state: Mutex<R, Cell<State<T>>>,
 }
 
 enum State<T> {
@@ -51,7 +50,7 @@ where
     /// Create a new `Signal`.
     pub const fn new() -> Self {
         Self {
-            state: Mutex::new(RefCell::new(State::None)),
+            state: Mutex::new(Cell::new(State::None)),
         }
     }
 }
@@ -62,8 +61,8 @@ where
 {
     /// Mark this Signal as signaled.
     pub fn signal(&self, val: T) {
-        self.state.lock(|state| {
-            let state = state.replace(State::Signaled(val));
+        self.state.lock(|cell| {
+            let state = cell.replace(State::Signaled(val));
             if let State::Waiting(waker) = state {
                 waker.wake();
             }
@@ -72,29 +71,27 @@ where
 
     /// Remove the queued value in this `Signal`, if any.
     pub fn reset(&self) {
-        self.state.lock(|state| {
-            *state.borrow_mut() = State::None;
-        })
+        self.state.lock(|cell| cell.set(State::None));
     }
 
     fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<T> {
-        self.state.lock(|state| {
-            let mut state = state.borrow_mut();
-            match &mut *state {
+        self.state.lock(|cell| {
+            let state = cell.replace(State::None);
+            match state {
                 State::None => {
-                    *state = State::Waiting(cx.waker().clone());
+                    cell.set(State::Waiting(cx.waker().clone()));
                     Poll::Pending
                 }
-                State::Waiting(w) if w.will_wake(cx.waker()) => Poll::Pending,
+                State::Waiting(w) if w.will_wake(cx.waker()) => {
+                    cell.set(State::Waiting(w));
+                    Poll::Pending
+                }
                 State::Waiting(w) => {
-                    let w = mem::replace(w, cx.waker().clone());
+                    cell.set(State::Waiting(cx.waker().clone()));
                     w.wake();
                     Poll::Pending
                 }
-                State::Signaled(_) => match mem::replace(&mut *state, State::None) {
-                    State::Signaled(res) => Poll::Ready(res),
-                    _ => unreachable!(),
-                },
+                State::Signaled(res) => Poll::Ready(res),
             }
         })
     }
@@ -106,7 +103,14 @@ where
 
     /// non-blocking method to check whether this signal has been signaled.
     pub fn signaled(&self) -> bool {
-        self.state
-            .lock(|state| matches!(*state.borrow(), State::Signaled(_)))
+        self.state.lock(|cell| {
+            let state = cell.replace(State::None);
+
+            let res = matches!(state, State::Signaled(_));
+
+            cell.set(state);
+
+            res
+        })
     }
 }

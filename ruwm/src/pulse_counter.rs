@@ -1,7 +1,6 @@
 use core::convert::Infallible;
 use core::fmt::Debug;
-
-use futures::Future;
+use core::future::Future;
 
 use embedded_hal::digital::v2::InputPin;
 
