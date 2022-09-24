@@ -1,4 +1,5 @@
-#![feature(generic_associated_types)]
+#![feature(cfg_version)]
+#![cfg_attr(not(version("1.65")), feature(generic_associated_types))]
 #![feature(type_alias_impl_trait)]
 
 use core::fmt::Debug;
