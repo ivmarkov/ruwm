@@ -49,20 +49,20 @@ impl<'a> Receiver for NotifReceiver<'a, ()> {
     }
 }
 
-pub struct SignalReceiver<'a, T, R>(&'a Signal<T, R>)
+pub struct SignalReceiver<'a, R, T>(&'a Signal<R, T>)
 where
     R: RawMutex;
 
-impl<'a, R, T> SignalReceiver<'a, T, R>
+impl<'a, R, T> SignalReceiver<'a, R, T>
 where
     R: RawMutex,
 {
-    pub const fn new(signal: &'a Signal<T, R>) -> Self {
+    pub const fn new(signal: &'a Signal<R, T>) -> Self {
         Self(signal)
     }
 }
 
-impl<'a, T, R> Receiver for SignalReceiver<'a, T, R>
+impl<'a, R, T> Receiver for SignalReceiver<'a, R, T>
 where
     R: RawMutex + Send + Sync + 'a,
     T: Send + 'static,
@@ -150,7 +150,7 @@ where
     }
 }
 
-pub struct SignalSender<'a, const N: usize, R, T>([&'a Signal<T, R>; N], &'static str)
+pub struct SignalSender<'a, const N: usize, R, T>([&'a Signal<R, T>; N], &'static str)
 where
     R: RawMutex;
 
@@ -158,7 +158,7 @@ impl<'a, const N: usize, R, T> SignalSender<'a, N, R, T>
 where
     R: RawMutex,
 {
-    pub const fn new(source: &'static str, signal: [&'a Signal<T, R>; N]) -> Self {
+    pub const fn new(source: &'static str, signal: [&'a Signal<R, T>; N]) -> Self {
         Self(signal, source)
     }
 }

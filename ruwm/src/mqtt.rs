@@ -48,7 +48,7 @@ pub struct Mqtt<R>
 where
     R: RawMutex,
 {
-    conn_signal: Signal<bool, R>,
+    conn_signal: Signal<R, bool>,
     valve_state_notif: Notification,
     wm_state_notif: Notification,
     battery_state_notif: Notification,
