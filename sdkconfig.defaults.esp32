@@ -1,0 +1,7 @@
+# FSM ULP is doing the water meter edge counting, even when the main CPU is sleeping
+CONFIG_ESP32_ULP_COPROC_ENABLED=y
+CONFIG_ESP32_ULP_COPROC_RESERVE_MEM=2048
+# Same but for the master branch
+CONFIG_ULP_COPROC_ENABLED=y
+CONFIG_ULP_COPROC_TYPE=ULP_COPROC_TYPE_FSM
+CONFIG_ULP_COPROC_RESERVE_MEM=2048
