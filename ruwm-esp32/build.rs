@@ -1,7 +1,3 @@
-use std::iter;
-use std::{env, path::PathBuf};
-
-use embuild::utils::OsStrExt;
 use embuild::*;
 
 fn main() -> anyhow::Result<()> {
@@ -19,13 +15,19 @@ fn main() -> anyhow::Result<()> {
 
     edge_frame::assets::prepare::run(
         "RUWM_WEB",
-        path_buf![env::current_dir()?, "..", "ruwm-web", "dist"],
+        path_buf![std::env::current_dir()?, "..", "ruwm-web", "dist"],
     )?;
 
     Ok(())
 }
 
+#[cfg(feature = "ulp")]
 fn build_ulp() -> anyhow::Result<()> {
+    use std::iter;
+    use std::{env, path::PathBuf};
+
+    use embuild::utils::OsStrExt;
+
     let source = path_buf![env::current_dir()?, "src", "ulp_pulse_counter.S"];
     cargo::track_file(&source);
 
