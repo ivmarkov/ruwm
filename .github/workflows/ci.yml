@@ -23,10 +23,20 @@ jobs:
         with:
           toolchain: ${{ env.rust_toolchain }}
           components: rustfmt, clippy
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
       - name: Setup | Std
         run: rustup component add rust-src --toolchain ${{ env.rust_toolchain }}-x86_64-unknown-linux-gnu
       - name: Setup | Default to nightly
         run: rustup default ${{ env.rust_toolchain }}
+      - name: Setup | Trunk
+        run: cargo install trunk
+      - name: Build Web | Fmt Check
+        run: cd ruwm-web; cargo fmt -- --check
+#      - name: Build Web | Clippy
+#        run: cd ruwm-web; cargo clippy --no-deps -- -Dwarnings
+      - name: Build Web | Compile
+        run: trunk build --release
       - name: Build | Fmt Check
         run: cargo fmt -- --check
 #      - name: Build | Clippy
