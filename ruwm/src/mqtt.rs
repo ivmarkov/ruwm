@@ -17,11 +17,10 @@ use embedded_svc::mqtt::client::asynch::{
 use embedded_svc::mqtt::client::Details;
 
 use crate::battery::BatteryState;
-use crate::channel::{Receiver, Sender};
+use crate::channel::{LogSender, Receiver, Sender};
 use crate::error;
 use crate::notification::Notification;
 use crate::state::StateCellRead;
-use crate::utils::{NotifReceiver, SignalReceiver, SignalSender};
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
@@ -91,10 +90,10 @@ where
         send::<_, L>(
             topic_prefix,
             mqtt,
-            SignalReceiver::new(&self.conn_signal),
-            NotifReceiver::new(&self.valve_state_notif, valve_state),
-            NotifReceiver::new(&self.wm_state_notif, wm_state),
-            NotifReceiver::new(&self.battery_state_notif, battery_state),
+            &self.conn_signal,
+            (&self.valve_state_notif, valve_state),
+            (&self.wm_state_notif, wm_state),
+            (&self.battery_state_notif, battery_state),
             pub_sink,
         )
         .await
@@ -110,7 +109,7 @@ where
     ) {
         receive(
             connection,
-            SignalSender::new("MQTT/CONNECTION", [&self.conn_signal]),
+            (LogSender::new("MQTT/CONNECTION"), &self.conn_signal),
             notif_sink,
             valve_command_sink,
             wm_command_sink,

@@ -16,7 +16,6 @@ use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
     StorageStateCell,
 };
-use crate::utils::SignalReceiver;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WaterMeterState {
@@ -96,12 +95,7 @@ where
     ) {
         select(
             process_pulses(pulse_counter, &self.state, state_sink1),
-            process_commands(
-                pulse_wakeup,
-                &self.state,
-                SignalReceiver::new(&self.command_signal),
-                state_sink2,
-            ),
+            process_commands(pulse_wakeup, &self.state, &self.command_signal, state_sink2),
         )
         .await;
     }

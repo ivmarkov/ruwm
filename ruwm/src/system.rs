@@ -22,15 +22,13 @@ use edge_executor::*;
 
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
-use crate::channel::Receiver;
+use crate::channel::{LogSender, NotifSenderX, Receiver};
 use crate::emergency::Emergency;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
 use crate::notification::Notification;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::{FlushableDrawTarget, Screen};
-use crate::state::NoopStateCell;
-use crate::utils::{NotifReceiver, NotifSender, NotifSender2, SignalSender};
 use crate::valve::{Valve, ValveState};
 use crate::water_meter::{WaterMeter, WaterMeterState};
 use crate::water_meter_stats::{WaterMeterStats, WaterMeterStatsState};
@@ -102,8 +100,8 @@ where
 
     pub async fn valve(&'static self) {
         self.valve
-            .process(NotifSender2::new(
-                "VALVE STATE",
+            .process((
+                LogSender::new("VALVE STATE"),
                 [
                     self.keepalive.event_sink(),
                     self.screen.valve_state_sink(),
@@ -132,8 +130,8 @@ where
             .process(
                 pulse_counter,
                 pulse_wakeup,
-                NotifSender2::new(
-                    "WM STATE",
+                (
+                    LogSender::new("WM STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.wm_stats.wm_state_sink(),
@@ -142,8 +140,8 @@ where
                     ],
                     self.web.wm_state_sinks(),
                 ),
-                NotifSender2::new(
-                    "WM STATE",
+                (
+                    LogSender::new("WM STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.wm_stats.wm_state_sink(),
@@ -160,8 +158,8 @@ where
         self.wm_stats
             .process(
                 self.wm.state(),
-                NotifSender2::new(
-                    "WM STATS STATE",
+                (
+                    LogSender::new("WM STATS STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.screen.wm_stats_state_sink(),
@@ -185,8 +183,8 @@ where
                 one_shot,
                 battery_pin,
                 power_pin,
-                NotifSender2::new(
-                    "BATTERY STATE",
+                (
+                    LogSender::new("BATTERY STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.screen.battery_state_sink(),
@@ -212,12 +210,12 @@ where
 
     pub async fn button1(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
-            NotifReceiver::new(&self.button1, &NoopStateCell),
+            &self.button1,
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            NotifSender::new(
-                "BUTTON1 STATE",
+            (
+                LogSender::new("BUTTON1 STATE"),
                 [
                     self.keepalive.event_sink(),
                     self.screen.button1_pressed_sink(),
@@ -229,12 +227,12 @@ where
 
     pub async fn button2(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
-            NotifReceiver::new(&self.button2, &NoopStateCell),
+            &self.button2,
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            NotifSender::new(
-                "BUTTON2 STATE",
+            (
+                LogSender::new("BUTTON2 STATE"),
                 [
                     self.keepalive.event_sink(),
                     self.screen.button2_pressed_sink(),
@@ -246,12 +244,12 @@ where
 
     pub async fn button3(&'static self, pin: impl InputPin, pressed_level: PressedLevel) {
         button::process(
-            NotifReceiver::new(&self.button3, &NoopStateCell),
+            &self.button3,
             pin,
             pressed_level,
             Some(Duration::from_millis(50)),
-            NotifSender::new(
-                "BUTTON3 STATE",
+            (
+                LogSender::new("BUTTON3 STATE"),
                 [
                     self.keepalive.event_sink(),
                     self.screen.button3_pressed_sink(),
@@ -264,7 +262,10 @@ where
     pub async fn emergency(&'static self) {
         self.emergency
             .process(
-                SignalSender::new("EMERGENCY/VALVE COMMAND", [self.valve.command_sink()]),
+                (
+                    LogSender::new("EMERGENCY/VALVE COMMAND"),
+                    self.valve.command_sink(),
+                ),
                 self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
@@ -275,8 +276,11 @@ where
     pub async fn keepalive(&'static self) {
         self.keepalive
             .process(
-                SignalSender::new("KEEPALIVE/REMAINING TIME", [&self.remaining_time]), // TODO: Screen
-                NotifSender::new("KEEPALIVE/QUIT", [&self.quit]), // TODO: Screen
+                (
+                    LogSender::new("KEEPALIVE/REMAINING TIME"),
+                    &self.remaining_time,
+                ), // TODO: Screen
+                (LogSender::new("KEEPALIVE/QUIT"), &self.quit), // TODO: Screen
             )
             .await
     }
@@ -313,7 +317,10 @@ where
                 self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
-                NotifSender::new("MQTT/SEND", [self.keepalive.event_sink()]),
+                (
+                    LogSender::new("MQTT/SEND"),
+                    NotifSenderX::from(self.keepalive.event_sink()),
+                ),
             )
             .await
     }
@@ -325,9 +332,15 @@ where
         self.mqtt
             .receive(
                 connection,
-                NotifSender::new("MQTT/RECEIVE", [self.keepalive.event_sink()]),
-                SignalSender::new("MQTT/VALVE COMMAND", [self.valve.command_sink()]),
-                SignalSender::new("MQTT/WM COMMAND", [self.wm.command_sink()]),
+                (
+                    LogSender::new("MQTT/RECEIVE"),
+                    NotifSenderX::from(self.keepalive.event_sink()),
+                ),
+                (
+                    LogSender::new("MQTT/VALVE COMMAND"),
+                    self.valve.command_sink(),
+                ),
+                (LogSender::new("MQTT/WM COMMAND"), self.wm.command_sink()),
             )
             .await
     }
@@ -350,8 +363,11 @@ where
     pub async fn web_process(&'static self) {
         self.web
             .process(
-                SignalSender::new("WEB/VALVE COMMAND", [self.valve.command_sink()]),
-                SignalSender::new("WEB/WM COMMAND", [self.wm.command_sink()]),
+                (
+                    LogSender::new("WEB/VALVE COMMAND"),
+                    self.valve.command_sink(),
+                ),
+                (LogSender::new("WEB/WM COMMAND"), self.wm.command_sink()),
                 self.valve.state(),
                 self.wm.state(),
                 self.battery.state(),
@@ -368,7 +384,10 @@ where
             .process(
                 wifi,
                 state_changed_source,
-                NotifSender::new("WIFI", [self.keepalive.event_sink()]),
+                (
+                    LogSender::new("WIFI"),
+                    NotifSenderX::from(self.keepalive.event_sink()),
+                ),
             )
             .await
     }

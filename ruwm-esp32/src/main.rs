@@ -53,14 +53,13 @@ use esp_idf_sys::{esp, EspError};
 use edge_frame::assets;
 
 use ruwm::button::PressedLevel;
-use ruwm::channel::Receiver;
+use ruwm::channel::{Channel, Receiver};
 use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
 use ruwm::state::{PostcardSerDe, PostcardStorage};
 use ruwm::system::{SlowMem, System};
-use ruwm::utils::EventBusReceiver;
 use ruwm::valve;
 use ruwm::web;
 
@@ -367,7 +366,7 @@ fn pulse(
     static PULSE_SIGNAL: ruwm::notification::Notification = ruwm::notification::Notification::new();
 
     let pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
-        ruwm::utils::NotifReceiver::new(&PULSE_SIGNAL, &()),
+        &PULSE_SIGNAL,
         subscribe_pin(pin, || PULSE_SIGNAL.notify())?,
         PressedLevel::Low,
         Some(Duration::from_millis(50)),
@@ -482,10 +481,7 @@ fn wifi<'d>(
 
     //wait.wait(|| wifi.is_connected().unwrap());
 
-    Ok((
-        wifi,
-        EventBusReceiver::<_, WifiEvent>::new(wifi_state_changed_source),
-    ))
+    Ok((wifi, Channel::new(wifi_state_changed_source)))
 }
 
 fn httpd() -> Result<

@@ -5,8 +5,6 @@ use embassy_time::{Duration, Instant, Timer};
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
-use crate::state::NoopStateCell;
-use crate::utils::NotifReceiver;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
@@ -37,12 +35,7 @@ impl Keepalive {
         remaining_time_sink: impl Sender<Data = RemainingTime>,
         quit_sink: impl Sender<Data = ()>,
     ) {
-        process(
-            NotifReceiver::new(&self.event_notif, &NoopStateCell),
-            remaining_time_sink,
-            quit_sink,
-        )
-        .await
+        process(&self.event_notif, remaining_time_sink, quit_sink).await
     }
 }
 

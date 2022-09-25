@@ -9,7 +9,6 @@ use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::*;
-use crate::utils::NotifReceiver;
 use crate::water_meter::WaterMeterState;
 
 const FLOW_STATS_INSTANCES: usize = 8;
@@ -182,12 +181,7 @@ where
         wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
         state_sink: impl Sender<Data = ()>,
     ) {
-        process(
-            &self.state,
-            NotifReceiver::new(&self.wm_state_notif, wm_state),
-            state_sink,
-        )
-        .await
+        process(&self.state, (&self.wm_state_notif, wm_state), state_sink).await
     }
 }
 

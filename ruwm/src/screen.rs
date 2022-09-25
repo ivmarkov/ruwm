@@ -16,10 +16,9 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_svc::executor::asynch::Unblocker;
 
 use crate::battery::BatteryState;
-use crate::channel::{Receiver, Sender};
+use crate::channel::{LogSender, Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::{NoopStateCell, StateCellRead};
-use crate::utils::{NotifReceiver, NotifSender};
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
@@ -169,13 +168,9 @@ where
         D::Color: RgbColor,
         D::Error: Debug,
     {
-        run_draw(
-            NotifReceiver::new(&self.draw_request_notif, &NoopStateCell),
-            display,
-            &self.state,
-        )
-        .await
-        .unwrap(); // TODO
+        run_draw(&self.draw_request_notif, display, &self.state)
+            .await
+            .unwrap(); // TODO
     }
 
     pub async fn process(
@@ -190,13 +185,13 @@ where
     ) {
         process(
             &self.state,
-            NotifReceiver::new(&self.button1_pressed_notif, &()),
-            NotifReceiver::new(&self.button2_pressed_notif, &()),
-            NotifReceiver::new(&self.button3_pressed_notif, &()),
-            NotifReceiver::new(&self.valve_state_notif, valve_state),
-            NotifReceiver::new(&self.wm_state_notif, wm_state),
-            NotifReceiver::new(&self.battery_state_notif, battery_state),
-            NotifSender::new("DRAW", [&self.draw_request_notif]),
+            &self.button1_pressed_notif,
+            &self.button2_pressed_notif,
+            &self.button3_pressed_notif,
+            (&self.valve_state_notif, valve_state),
+            (&self.wm_state_notif, wm_state),
+            (&self.battery_state_notif, battery_state),
+            (LogSender::new("DRAW"), &self.draw_request_notif),
         )
         .await;
     }

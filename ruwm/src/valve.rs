@@ -12,13 +12,11 @@ use embassy_sync::signal::Signal;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 
-use crate::channel::{Receiver, Sender};
+use crate::channel::{LogSender, Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::{
-    update, CachingStateCell, MemoryStateCell, MutRefStateCell, NoopStateCell, StateCell,
-    StateCellRead,
+    update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
-use crate::utils::{NotifReceiver, NotifSender, SignalReceiver, SignalSender};
 
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
 
@@ -81,8 +79,11 @@ where
             power_pin,
             open_pin,
             close_pin,
-            SignalReceiver::new(&self.spin_command_signal),
-            NotifSender::new("VALVE/SPIN FINISHED", [&self.spin_finished_notif]),
+            &self.spin_command_signal,
+            (
+                LogSender::new("VALVE/SPIN FINISHED"),
+                &self.spin_finished_notif,
+            ),
         )
         .await
     }
@@ -90,9 +91,12 @@ where
     pub async fn process(&'static self, notif: impl Sender<Data = ()>) {
         process(
             &self.state,
-            SignalReceiver::new(&self.command_signal),
-            NotifReceiver::new(&self.spin_finished_notif, &NoopStateCell),
-            SignalSender::new("VALVE/SPIN COMMAND", [&self.spin_command_signal]),
+            &self.command_signal,
+            &self.spin_finished_notif,
+            (
+                LogSender::new("VALVE/SPIN COMMAND"),
+                &self.spin_command_signal,
+            ),
             notif,
         )
         .await

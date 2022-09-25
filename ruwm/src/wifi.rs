@@ -10,7 +10,6 @@ use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
 use crate::channel::{Receiver, Sender};
 use crate::state::{update, MemoryStateCell, StateCell, StateCellRead};
-use crate::utils::SignalReceiver;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum WifiCommand {
@@ -54,7 +53,7 @@ where
             wifi,
             &self.state,
             state_changed_source,
-            SignalReceiver::new(&self.command),
+            &self.command,
             state_sink,
         )
         .await

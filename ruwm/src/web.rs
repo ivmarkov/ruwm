@@ -19,7 +19,6 @@ use crate::channel::{Receiver, Sender};
 use crate::error::EitherError;
 use crate::notification::Notification;
 use crate::state::StateCellRead;
-use crate::utils::NotifReceiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 use crate::web_dto::*;
@@ -105,12 +104,9 @@ where
 
                             handle_connection::<R>(
                                 connection,
-                                NotifReceiver::new(&self.valve_state_signals[index], valve_state),
-                                NotifReceiver::new(&self.wm_state_signals[index], wm_state),
-                                NotifReceiver::new(
-                                    &self.battery_state_signals[index],
-                                    battery_state,
-                                ),
+                                (&self.valve_state_signals[index], valve_state),
+                                (&self.wm_state_signals[index], wm_state),
+                                (&self.battery_state_signals[index], battery_state),
                                 &mut *valve_command.lock().await,
                                 &mut *wm_command.lock().await,
                                 valve_state,

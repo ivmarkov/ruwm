@@ -4,7 +4,6 @@ use crate::battery::BatteryState;
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
 use crate::state::StateCellRead;
-use crate::utils::NotifReceiver;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::WaterMeterState;
 
@@ -43,9 +42,9 @@ impl Emergency {
         battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync),
     ) {
         process(
-            NotifReceiver::new(&self.valve_state_notif, valve_state),
-            NotifReceiver::new(&self.wm_state_notif, wm_state),
-            NotifReceiver::new(&self.battery_state_notif, battery_state),
+            (&self.valve_state_notif, valve_state),
+            (&self.wm_state_notif, wm_state),
+            (&self.battery_state_notif, battery_state),
             valve_command,
         )
         .await
