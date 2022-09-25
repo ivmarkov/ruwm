@@ -20,6 +20,8 @@ use embedded_graphics::prelude::RgbColor;
 
 use display_interface_spi::SPIInterfaceNoCS;
 
+use embedded_hal::digital::v2::OutputPin as EHOutputPin;
+
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::utils::asyncify::Asyncify;
@@ -164,22 +166,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // Valve pins
 
-    let mut valve_power_pin = PinDriver::input_output(peripherals.pins.gpio25)?;
-    let mut valve_open_pin = PinDriver::input_output(peripherals.pins.gpio26)?;
-    let mut valve_close_pin = PinDriver::input_output(peripherals.pins.gpio27)?;
-
-    valve_power_pin.set_pull(Pull::Floating)?;
-    valve_open_pin.set_pull(Pull::Floating)?;
-    valve_close_pin.set_pull(Pull::Floating)?;
-
-    if wakeup_reason == WakeupReason::ULP {
-        valve::emergency_close(
-            &mut valve_power_pin,
-            &mut valve_open_pin,
-            &mut valve_close_pin,
-            &mut FreeRtos,
-        );
-    }
+    let (valve_power_pin, valve_open_pin, valve_close_pin) = valve_pins(
+        wakeup_reason,
+        peripherals.pins.gpio25,
+        peripherals.pins.gpio26,
+        peripherals.pins.gpio27,
+    )?;
 
     // Button pins
 
@@ -315,6 +307,39 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     log::info!("Finished execution");
 
     Ok(())
+}
+
+fn valve_pins<P, O, C>(
+    wakeup_reason: WakeupReason,
+    power: P,
+    open: O,
+    close: C,
+) -> Result<
+    (
+        impl EHOutputPin<Error = impl Debug>,
+        impl EHOutputPin<Error = impl Debug>,
+        impl EHOutputPin<Error = impl Debug>,
+    ),
+    EspError,
+>
+where
+    P: InputPin + OutputPin,
+    O: InputPin + OutputPin,
+    C: InputPin + OutputPin,
+{
+    let mut power = PinDriver::input_output(power)?;
+    let mut open = PinDriver::input_output(open)?;
+    let mut close = PinDriver::input_output(close)?;
+
+    power.set_pull(Pull::Floating)?;
+    open.set_pull(Pull::Floating)?;
+    close.set_pull(Pull::Floating)?;
+
+    if wakeup_reason == WakeupReason::ULP {
+        valve::emergency_close(&mut power, &mut open, &mut close, &mut FreeRtos);
+    }
+
+    Ok((power, open, close))
 }
 
 fn system(partition: EspDefaultNvsPartition) -> Result<&'static EspSystem, InitError> {
