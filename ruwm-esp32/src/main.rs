@@ -12,6 +12,7 @@ use edge_executor::SpawnError;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{queue::Queue, Duration};
 
+use mipidsi::{Display, DisplayOptions};
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::RgbColor;
@@ -386,11 +387,8 @@ fn display<'d>(
     backlight.set_drive_strength(DriveStrength::I40mA)?;
     backlight.set_high()?;
 
-    #[cfg(feature = "st7789")]
     let baudrate = 26.MHz().into();
-
-    #[cfg(feature = "ili9341")]
-    let baudrate = 40.MHz().into();
+    //let baudrate = 40.MHz().into();
 
     let di = SPIInterfaceNoCS::new(
         SpiMasterDriver::<SPI2>::new(
@@ -406,67 +404,25 @@ fn display<'d>(
 
     let rst = PinDriver::output(rst)?;
 
+    #[cfg(feature = "ili9342")]
+    let mut display = Display::ili9342c_rgb565(di, rst);
+
     #[cfg(feature = "st7789")]
-    let display = {
-        let mut display = st7789::ST7789::new(
-            di, rst,
-            // SP7789V is designed to drive 240x320 screens, even though the TTGO physical screen is smaller
-            240, 320,
-        );
+    let mut display = Display::st7789_rgb565(di, rst);
 
-        display.init(&mut delay::Ets).unwrap();
-        display
-            .set_orientation(st7789::Orientation::Portrait)
-            .unwrap();
+    display
+        .init(&mut delay::Ets, DisplayOptions::default())
+        .unwrap();
 
-        // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
-        #[cfg(feature = "ttgo")]
-        let display = ruwm::screen::CroppedAdaptor::new(
-            embedded_graphics::primitives::Rectangle::new(
-                embedded_graphics::prelude::Point::new(52, 40),
-                embedded_graphics::prelude::Size::new(135, 240),
-            ),
-            display,
-        );
-
-        display
-    };
-
-    #[cfg(feature = "ili9341")]
-    let display = {
-        // Kaluga needs customized screen orientation commands
-        // (not a surprise; quite a few ILI9341 boards need these as evidenced in the TFT_eSPI & lvgl ESP32 C drivers)
-        pub enum RgbMode {
-            Portrait,
-            PortraitFlipped,
-            Landscape,
-            LandscapeFlipped,
-        }
-
-        impl ili9341::Mode for RgbMode {
-            fn mode(&self) -> u8 {
-                match self {
-                    Self::Portrait => 0,
-                    Self::Landscape => 0x20 | 0x40,
-                    Self::PortraitFlipped => 0x80 | 0x40,
-                    Self::LandscapeFlipped => 0x80 | 0x20,
-                }
-            }
-
-            fn is_landscape(&self) -> bool {
-                matches!(self, Self::Landscape | Self::LandscapeFlipped)
-            }
-        }
-
-        ili9341::Ili9341::new(
-            di,
-            rst,
-            &mut delay::Ets,
-            RgbMode::Portrait,
-            ili9341::DisplaySize240x320,
-        )
-        .unwrap()
-    };
+    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
+    #[cfg(feature = "ttgo")]
+    let display = ruwm::screen::CroppedAdaptor::new(
+        embedded_graphics::primitives::Rectangle::new(
+            embedded_graphics::prelude::Point::new(52, 40),
+            embedded_graphics::prelude::Size::new(135, 240),
+        ),
+        display,
+    );
 
     let display = FlushableAdaptor::noop(display);
 
