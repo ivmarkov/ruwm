@@ -1,7 +1,4 @@
 use core::cell::RefCell;
-use core::fmt::Debug;
-
-use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
@@ -17,28 +14,7 @@ use crate::state::{
     StorageStateCell,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct WaterMeterState {
-    pub edges_count: u64,
-    pub armed: bool,
-    pub leaking: bool,
-}
-
-impl WaterMeterState {
-    pub const fn new() -> Self {
-        Self {
-            edges_count: 0,
-            armed: false,
-            leaking: false,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum WaterMeterCommand {
-    Arm,
-    Disarm,
-}
+pub use crate::dto::water_meter::*;
 
 pub struct WaterMeter<R, S>
 where

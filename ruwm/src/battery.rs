@@ -1,7 +1,4 @@
-use core::fmt::Debug;
-
 use embassy_time::{Duration, Timer};
-use serde::{Deserialize, Serialize};
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 
@@ -11,25 +8,9 @@ use embedded_hal::digital::v2::InputPin;
 use crate::channel::Sender;
 use crate::state::{update_with, MemoryStateCell, StateCell, StateCellRead};
 
+pub use crate::dto::battery::*;
+
 const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct BatteryState {
-    pub voltage: Option<u16>,
-    pub powered: Option<bool>,
-}
-
-impl BatteryState {
-    pub const LOW_VOLTAGE: u16 = 2700;
-    pub const MAX_VOLTAGE: u16 = 3100;
-
-    pub const fn new() -> Self {
-        Self {
-            voltage: None,
-            powered: None,
-        }
-    }
-}
 
 pub struct Battery<R>
 where

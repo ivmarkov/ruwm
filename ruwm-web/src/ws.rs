@@ -5,7 +5,7 @@ use futures::{
 
 use gloo_net::websocket::{futures::WebSocket, Message};
 
-use ruwm::web_dto::{WebEvent, WebRequest};
+use ruwm::dto::web::{WebEvent, WebRequest};
 
 use postcard::*;
 

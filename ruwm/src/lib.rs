@@ -4,21 +4,38 @@
 #![cfg_attr(not(version("1.64")), feature(future_poll_fn))]
 #![feature(type_alias_impl_trait)]
 
+#[cfg(feature = "system")]
 pub mod battery;
+#[cfg(feature = "system")]
 pub mod button;
+#[cfg(feature = "system")]
 pub mod channel;
+pub mod dto;
+#[cfg(feature = "system")]
 pub mod emergency;
+#[cfg(feature = "system")]
 pub mod error;
+#[cfg(feature = "system")]
 pub mod keepalive;
+#[cfg(feature = "system")]
 pub mod mqtt;
+#[cfg(feature = "system")]
 pub mod notification;
+#[cfg(feature = "system")]
 pub mod pulse_counter;
+#[cfg(feature = "system")]
 pub mod screen;
+#[cfg(feature = "system")]
 pub mod state;
+#[cfg(feature = "system")]
 pub mod system;
+#[cfg(feature = "system")]
 pub mod valve;
+#[cfg(feature = "system")]
 pub mod water_meter;
+#[cfg(feature = "system")]
 pub mod water_meter_stats;
+#[cfg(feature = "system")]
 pub mod web;
-pub mod web_dto;
+#[cfg(feature = "system")]
 pub mod wifi;

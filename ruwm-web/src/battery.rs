@@ -1,4 +1,4 @@
-use ruwm::battery::BatteryState as BatteryValue;
+use ruwm::dto::battery::BatteryState as BatteryValue;
 
 use yew::prelude::*;
 

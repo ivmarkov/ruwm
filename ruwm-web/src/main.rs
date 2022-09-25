@@ -53,16 +53,16 @@ fn render(route: &Routes) -> Html {
             app_title="RUWM"
             app_url="https://github.com/ivmarkov/ruwm">
             <Nav>
-                // <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
+                // <Role<AppState> role={RoleDto::User} projection={AppState::role()}>
                 //     <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
                 // </Role<AppState>>
-                <Role<AppState> role={RoleValue::Admin} projection={AppState::role()}>
+                <Role<AppState> role={RoleDto::Admin} projection={AppState::role()}>
                     <RouteNavItem<Routes> text="Home" icon="fa-solid fa-droplet" route={Routes::Home}/>
                     <WifiNavItem<Routes> route={Routes::Wifi}/>
                 </Role<AppState>>
             </Nav>
             <Status>
-                <Role<AppState> role={RoleValue::User} projection={AppState::role()}>
+                <Role<AppState> role={RoleDto::User} projection={AppState::role()}>
                     <WifiStatusItem<Routes, AppState> route={Routes::Wifi} projection={AppState::wifi()}/>
                     <RoleLogoutStatusItem<Routes, AppState> auth_status_route={Routes::AuthState} projection={AppState::role()}/>
                 </Role<AppState>>
@@ -71,7 +71,7 @@ fn render(route: &Routes) -> Html {
                 {
                     match route {
                         Routes::Home => html! {
-                            <Role<AppState> role={RoleValue::User} projection={AppState::role()} auth=true>
+                            <Role<AppState> role={RoleDto::User} projection={AppState::role()} auth=true>
                                 <Valve<AppState> projection={AppState::valve()}/>
                                 <Battery<AppState> projection={AppState::battery()}/>
                             </Role<AppState>>
@@ -80,7 +80,7 @@ fn render(route: &Routes) -> Html {
                             <RoleAuthState<Routes, AppState> home={Some(Routes::Home)} projection={AppState::role()}/>
                         },
                         Routes::Wifi => html! {
-                            <Role<AppState> role={RoleValue::Admin} projection={AppState::role()} auth=true>
+                            <Role<AppState> role={RoleDto::Admin} projection={AppState::role()} auth=true>
                                 <Wifi<AppState> projection={AppState::wifi()}/>
                             </Role<AppState>>
                         },

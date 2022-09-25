@@ -12,10 +12,10 @@ use edge_frame::role::Credentials;
 use edge_frame::role::RoleAction;
 use edge_frame::role::RoleStateValue;
 
-use ruwm::web_dto::RequestId;
-use ruwm::web_dto::WebEvent;
-use ruwm::web_dto::WebRequest;
-use ruwm::web_dto::WebRequestPayload;
+use ruwm::dto::web::RequestId;
+use ruwm::dto::web::WebEvent;
+use ruwm::dto::web::WebRequest;
+use ruwm::dto::web::WebRequestPayload;
 
 use crate::battery::BatteryAction;
 use crate::error;
@@ -140,10 +140,11 @@ fn to_request(action: &AppAction, request_id_gen: &mut RequestId) -> Option<WebR
         AppAction::Valve(ValveAction::Update(value)) => Some(WebRequestPayload::ValveCommand(
             matches!(
                 value,
-                Some(ruwm::valve::ValveState::Open) | Some(ruwm::valve::ValveState::Opening)
+                Some(ruwm::dto::valve::ValveState::Open)
+                    | Some(ruwm::dto::valve::ValveState::Opening)
             )
-            .then(|| ruwm::valve::ValveCommand::Open)
-            .unwrap_or(ruwm::valve::ValveCommand::Close),
+            .then(|| ruwm::dto::valve::ValveCommand::Open)
+            .unwrap_or(ruwm::dto::valve::ValveCommand::Close),
         )),
         _ => None,
     };

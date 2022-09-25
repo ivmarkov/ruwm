@@ -1,9 +1,9 @@
 use core::fmt::Debug;
 use core::future::pending;
 
-use embassy_time::{Duration, Timer};
 use log::info;
-use serde::{Deserialize, Serialize};
+
+use embassy_time::{Duration, Timer};
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
@@ -18,21 +18,9 @@ use crate::state::{
     update, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
 };
 
+pub use crate::dto::valve::*;
+
 pub const VALVE_TURN_DELAY: Duration = Duration::from_secs(20);
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ValveState {
-    Open,
-    Closed,
-    Opening,
-    Closing,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum ValveCommand {
-    Open,
-    Close,
-}
 
 pub struct Valve<R>
 where

@@ -21,7 +21,8 @@ use crate::notification::Notification;
 use crate::state::StateCellRead;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
-use crate::web_dto::*;
+
+pub use crate::dto::web::*;
 
 #[derive(Debug)]
 enum WebFrame {

@@ -1,11 +1,14 @@
-use heapless::String;
+use core::fmt::Debug;
+
 use serde::{Deserialize, Serialize};
+
+use heapless::String;
 
 use edge_frame::dto::Role;
 
-use crate::battery::BatteryState;
-use crate::valve::{ValveCommand, ValveState};
-use crate::water_meter::{WaterMeterCommand, WaterMeterState};
+use super::battery::BatteryState;
+use super::valve::{ValveCommand, ValveState};
+use super::water_meter::{WaterMeterCommand, WaterMeterState};
 
 pub type RequestId = usize;
 
@@ -127,7 +130,6 @@ impl WebEvent {
             Self::WaterMeterState(_) => Role::User,
             Self::BatteryState(_) => Role::User,
             //Self::WifiState(_) => Role::User,
-            _ => Role::None,
         }
     }
 }

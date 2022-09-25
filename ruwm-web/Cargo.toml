@@ -14,9 +14,11 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
-#[patch.crates-io]
+[patch.crates-io]
 #embedded-svc = { path = "../../embedded-svc" }
 #edge-frame = { path = "../../edge-frame/edge-frame" }
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
 
 [profile.release]
 lto = true
@@ -25,11 +27,10 @@ opt-level = 'z'
 [dependencies]
 anyhow = "1"
 log = "0.4"
-futures = { version = "0.3", default-features = false }
+futures = "0.3"
 derive_more = "0.99"
 wasm-logger = "0.2"
 wasm-bindgen-futures = "0.4"
-#wee_alloc = { version = "0.4", optional = true } # No longer maintained
 web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.19", default-features = false }
 yew-router = { version = "0.16" }
@@ -37,9 +38,9 @@ gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
 postcard = { version = "0.7", features = [ "alloc" ] }
-embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
-edge-frame = { version = "0.3", default-features = false, features = ["dto"], git = "https://github.com/ivmarkov/edge-frame" }
-ruwm = { version = "0.1", path = "../ruwm" }
+embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
+edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame" }
+ruwm = { version = "0.2", path = "../ruwm", default-features = false }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

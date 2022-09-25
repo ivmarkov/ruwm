@@ -4,7 +4,7 @@ use yew::prelude::*;
 
 use edge_frame::redust::*;
 
-pub type ValveValue = Option<ruwm::valve::ValveState>;
+pub type ValveValue = Option<ruwm::dto::valve::ValveState>;
 
 pub type ValveState = ValueState<ValveValue>;
 pub type ValveAction = ValueAction<ValveValue>;

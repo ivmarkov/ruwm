@@ -1,7 +1,4 @@
-use core::mem;
-
 use embassy_time::{Duration, Instant, Timer};
-use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
@@ -11,139 +8,7 @@ use crate::notification::Notification;
 use crate::state::*;
 use crate::water_meter::WaterMeterState;
 
-const FLOW_STATS_INSTANCES: usize = 8;
-
-const DURATIONS: [Duration; FLOW_STATS_INSTANCES] = [
-    Duration::from_secs(60 * 5),
-    Duration::from_secs(60 * 30),
-    Duration::from_secs(60 * 60),
-    Duration::from_secs(60 * 60 * 6),
-    Duration::from_secs(60 * 60 * 12),
-    Duration::from_secs(60 * 60 * 24),
-    Duration::from_secs(60 * 60 * 24 * 7),
-    Duration::from_secs(60 * 60 * 24 * 30),
-];
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct FlowSnapshot {
-    time_secs: u64,
-    edges_count: u64,
-}
-
-impl FlowSnapshot {
-    pub const fn new(current_time: Instant, current_edges_count: u64) -> Self {
-        Self {
-            time_secs: current_time.as_secs(),
-            edges_count: current_edges_count,
-        }
-    }
-
-    /// Get a reference to the flow snapshot's time.
-    pub fn time(&self) -> Instant {
-        Instant::from_secs(self.time_secs)
-    }
-
-    /// Get a reference to the flow snapshot's edges count.
-    pub fn edges_count(&self) -> u64 {
-        self.edges_count
-    }
-
-    pub fn is_measurement_due(
-        &self,
-        measurement_duration: Duration,
-        current_time: Instant,
-    ) -> bool {
-        Self::is_aligned_measurement_due(
-            Instant::from_secs(self.time_secs),
-            current_time,
-            measurement_duration,
-        )
-    }
-
-    pub fn flow_detected(&self, current_edges_count: u64) -> bool {
-        self.statistics(current_edges_count) > 1
-    }
-
-    pub fn statistics(&self, current_edges_count: u64) -> u64 {
-        current_edges_count - self.edges_count
-    }
-
-    fn is_nonaligned_measurement_due(
-        start_time: Instant,
-        current_time: Instant,
-        measurement_duration: Duration,
-    ) -> bool {
-        current_time - start_time >= measurement_duration
-    }
-
-    fn is_aligned_measurement_due(
-        start_time: Instant,
-        current_time: Instant,
-        measurement_duration: Duration,
-    ) -> bool {
-        let start_time = Instant::from_secs(
-            start_time.as_secs() / measurement_duration.as_secs() * measurement_duration.as_secs(),
-        );
-
-        Self::is_nonaligned_measurement_due(start_time, current_time, measurement_duration)
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct FlowMeasurement {
-    start: FlowSnapshot,
-    end: FlowSnapshot,
-}
-
-impl FlowMeasurement {
-    pub const fn new(start: FlowSnapshot, end: FlowSnapshot) -> Self {
-        Self { start, end }
-    }
-
-    pub fn start(&self) -> &FlowSnapshot {
-        &self.start
-    }
-
-    pub fn end(&self) -> &FlowSnapshot {
-        &self.end
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct WaterMeterStatsState {
-    pub installation: FlowSnapshot,
-
-    pub most_recent: FlowSnapshot,
-
-    pub snapshots: [FlowSnapshot; FLOW_STATS_INSTANCES],
-    pub measurements: [Option<FlowMeasurement>; FLOW_STATS_INSTANCES],
-}
-
-impl WaterMeterStatsState {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    fn update(&mut self, edges_count: u64, now: Instant) -> bool {
-        let most_recent = FlowSnapshot::new(now, edges_count);
-
-        let mut updated = self.most_recent != most_recent;
-        if updated {
-            self.most_recent = most_recent;
-        }
-
-        for (index, snapshot) in self.snapshots.iter_mut().enumerate() {
-            if snapshot.is_measurement_due(DURATIONS[index], now) {
-                let prev = mem::replace(snapshot, self.most_recent);
-                self.measurements[index] = Some(FlowMeasurement::new(prev, self.most_recent));
-
-                updated = true;
-            }
-        }
-
-        updated
-    }
-}
+pub use crate::dto::water_meter_stats::*;
 
 pub struct WaterMeterStats<R>
 where
@@ -205,7 +70,7 @@ pub async fn process(
             "WM STATS",
             state,
             |mut state| {
-                state.update(edges_count, Instant::now());
+                state.update(edges_count, Instant::now().as_secs());
 
                 state
             },
