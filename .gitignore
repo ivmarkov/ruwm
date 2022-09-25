@@ -6,3 +6,4 @@
 /ruwm-web/.vscode
 /ruwm-web/target
 /ruwm-web/Cargo.lock
+rust-toolchain.toml
