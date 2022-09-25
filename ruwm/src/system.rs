@@ -22,7 +22,7 @@ use edge_executor::*;
 
 use crate::battery::Battery;
 use crate::button::{self, PressedLevel};
-use crate::channel::{LogSender, NotifSenderX, Receiver};
+use crate::channel::{LogSender, NotifSender, Receiver};
 use crate::emergency::Emergency;
 use crate::keepalive::{Keepalive, RemainingTime};
 use crate::mqtt::{Mqtt, MqttCommand};
@@ -101,7 +101,6 @@ where
     pub async fn valve(&'static self) {
         self.valve
             .process((
-                LogSender::new("VALVE STATE"),
                 [
                     self.keepalive.event_sink(),
                     self.screen.valve_state_sink(),
@@ -131,7 +130,6 @@ where
                 pulse_counter,
                 pulse_wakeup,
                 (
-                    LogSender::new("WM STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.wm_stats.wm_state_sink(),
@@ -141,7 +139,6 @@ where
                     self.web.wm_state_sinks(),
                 ),
                 (
-                    LogSender::new("WM STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.wm_stats.wm_state_sink(),
@@ -159,7 +156,6 @@ where
             .process(
                 self.wm.state(),
                 (
-                    LogSender::new("WM STATS STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.screen.wm_stats_state_sink(),
@@ -184,7 +180,6 @@ where
                 battery_pin,
                 power_pin,
                 (
-                    LogSender::new("BATTERY STATE"),
                     [
                         self.keepalive.event_sink(),
                         self.screen.battery_state_sink(),
@@ -319,7 +314,7 @@ where
                 self.battery.state(),
                 (
                     LogSender::new("MQTT/SEND"),
-                    NotifSenderX::from(self.keepalive.event_sink()),
+                    NotifSender::from(self.keepalive.event_sink()),
                 ),
             )
             .await
@@ -334,7 +329,7 @@ where
                 connection,
                 (
                     LogSender::new("MQTT/RECEIVE"),
-                    NotifSenderX::from(self.keepalive.event_sink()),
+                    NotifSender::from(self.keepalive.event_sink()),
                 ),
                 (
                     LogSender::new("MQTT/VALVE COMMAND"),
@@ -386,7 +381,7 @@ where
                 state_changed_source,
                 (
                     LogSender::new("WIFI"),
-                    NotifSenderX::from(self.keepalive.event_sink()),
+                    NotifSender::from(self.keepalive.event_sink()),
                 ),
             )
             .await

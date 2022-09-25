@@ -180,7 +180,7 @@ where
     }
 }
 
-pub type NotifSenderX<'a, P> = (&'a Notification, PhantomData<fn() -> P>);
+pub type NotifSender<'a, P> = (&'a Notification, PhantomData<fn() -> P>);
 
 impl<'a, P> From<&'a Notification> for (&'a Notification, PhantomData<fn() -> P>) {
     fn from(notification: &'a Notification) -> Self {
