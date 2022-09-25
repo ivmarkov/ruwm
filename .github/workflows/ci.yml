@@ -36,7 +36,7 @@ jobs:
 #      - name: Build Web | Clippy
 #        run: cd ruwm-web; cargo clippy --no-deps -- -Dwarnings
       - name: Build Web | Compile
-        run: trunk build --release
+        run: cd ruwm-web; trunk build --release
       - name: Build | Fmt Check
         run: cargo fmt -- --check
 #      - name: Build | Clippy
