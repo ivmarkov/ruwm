@@ -246,7 +246,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-mid\0"),
-        stack_size: 10000,
+        stack_size: 50000,
         ..Default::default()
     }
     .set()
@@ -276,7 +276,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-low\0"),
-        stack_size: 20000,
+        stack_size: 50000,
         ..Default::default()
     }
     .set()

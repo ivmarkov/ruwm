@@ -482,9 +482,8 @@ where
                 self.mqtt_send::<L>(mqtt_topic_prefix, mqtt_client),
                 &mut tasks,
             )?
-            //.spawn_local_collect(self.0.web_accept(ws_acceptor), &mut tasks)?
-            //.spawn_local_collect(self.0.web_process(), &mut tasks)?
-            ;
+            .spawn_local_collect(self.web_accept(ws_acceptor), &mut tasks)?
+            .spawn_local_collect(self.web_process(), &mut tasks)?;
 
         Ok((executor, tasks))
     }

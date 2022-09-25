@@ -32,7 +32,7 @@ enum WebFrame {
     Unknown,
 }
 
-pub const WS_MAX_FRAME_LEN: usize = 4096;
+pub const WS_MAX_FRAME_LEN: usize = 512;
 
 pub struct Web<const N: usize, R, T>
 where

@@ -1,8 +1,5 @@
 # The low-latency executor runs off from the main thread
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=80000
-
-# Two of the other executors run from pthreads. TODO: set this at runtime
-CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=20000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=50000
 
 # Necessary, as we process Rust code on the system event loop, and sometimes run out of stack
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
