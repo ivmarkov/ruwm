@@ -13,6 +13,7 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{queue::Queue, Duration};
 
 use mipidsi::{Display, DisplayOptions};
+
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::RgbColor;
@@ -32,6 +33,7 @@ use esp_idf_hal::gpio::*;
 use esp_idf_hal::modem::WifiModemPeripheral;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
+use esp_idf_hal::reset::WakeupReason;
 use esp_idf_hal::spi::*;
 use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_hal::{adc::*, delay};
@@ -101,15 +103,6 @@ impl From<SpawnError> for InitError {
 
 //impl std::error::Error for InitError {}
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-enum SleepWakeupReason {
-    Unknown,
-    ULP,
-    Button,
-    Timer,
-    Other(u32),
-}
-
 // TODO: Linker issues
 embassy_time::generic_queue!(static TIMER_QUEUE: Queue<128, esp_idf_hal::interrupt::embassy_sync::CriticalSectionRawMutex> = Queue::new());
 //embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
@@ -117,7 +110,7 @@ embassy_time::time_driver_impl!(static DRIVER: esp_idf_svc::timer::embassy_time:
 critical_section::set_impl!(esp_idf_hal::cs::critical_section::EspCriticalSection);
 
 fn main() -> Result<(), InitError> {
-    let wakeup_reason = get_sleep_wakeup_reason();
+    let wakeup_reason = WakeupReason::get();
 
     init()?;
 
@@ -166,7 +159,7 @@ fn sleep() -> Result<(), InitError> {
     Ok(())
 }
 
-fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
+fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let peripherals = Peripherals::take().unwrap();
 
     // Valve pins
@@ -179,7 +172,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     valve_open_pin.set_pull(Pull::Floating)?;
     valve_close_pin.set_pull(Pull::Floating)?;
 
-    if wakeup_reason == SleepWakeupReason::ULP {
+    if wakeup_reason == WakeupReason::ULP {
         valve::emergency_close(
             &mut valve_power_pin,
             &mut valve_open_pin,
@@ -208,7 +201,8 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     // Pulse counter
 
     #[cfg(feature = "ulp")]
-    let (pulse_counter, pulse_wakeup) = pulse(peripherals.ulp, peripherals.pins.gpio33)?;
+    let (pulse_counter, pulse_wakeup) =
+        pulse(peripherals.ulp, peripherals.pins.gpio33, wakeup_reason)?;
 
     #[cfg(not(feature = "ulp"))]
     let (pulse_counter, pulse_wakeup) = pulse(peripherals.pins.gpio33)?;
@@ -361,11 +355,12 @@ fn pulse(
 fn pulse(
     ulp: ULP,
     pin: impl RTCPin + InputPin + OutputPin,
+    wakeup_reason: WakeupReason,
 ) -> Result<(impl PulseCounter, impl PulseWakeup), InitError> {
     let mut pulse_counter = ulp_pulse_counter::UlpPulseCounter::new(
         esp_idf_hal::ulp::UlpDriver::new(ulp)?,
         pin,
-        wakeup_reason == SleepWakeupReason::Unknown,
+        wakeup_reason == WakeupReason::Unknown,
     )?;
 
     //let (pulse_counter, pulse_wakeup) = pulse_counter.split();
@@ -535,16 +530,6 @@ fn subscribe_pin<'d, P: InputPin + OutputPin>(
     }
 
     Ok(pin)
-}
-
-fn get_sleep_wakeup_reason() -> SleepWakeupReason {
-    match unsafe { esp_idf_sys::esp_sleep_get_wakeup_cause() } {
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_UNDEFINED => SleepWakeupReason::Unknown,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1 => SleepWakeupReason::Button,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_COCPU => SleepWakeupReason::ULP,
-        esp_idf_sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_TIMER => SleepWakeupReason::Timer,
-        other => SleepWakeupReason::Other(other),
-    }
 }
 
 fn mark_wakeup_pins(
