@@ -18,7 +18,7 @@ use embedded_svc::executor::asynch::Unblocker;
 use crate::battery::BatteryState;
 use crate::channel::{LogSender, Receiver, Sender};
 use crate::notification::Notification;
-use crate::state::{NoopStateCell, StateCellRead};
+use crate::state::StateCellRead;
 use crate::valve::ValveState;
 use crate::water_meter::WaterMeterState;
 use crate::water_meter_stats::WaterMeterStatsState;
