@@ -21,7 +21,7 @@ use display_interface_spi::SPIInterfaceNoCS;
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use esp_idf_hal::cs::embassy_sync::CriticalSectionRawMutex;
@@ -41,7 +41,7 @@ use esp_idf_svc::http::server::ws::{EspHttpWsAsyncConnection, EspHttpWsProcessor
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
-use esp_idf_svc::wifi::{EspWifi, WifiEvent};
+use esp_idf_svc::wifi::{EspWifi, WifiEvent, WifiWait};
 
 use esp_idf_sys::{esp, EspError};
 
@@ -480,13 +480,31 @@ fn wifi<'d>(
 ) -> Result<(impl Wifi + 'd, impl Receiver<Data = WifiEvent>), InitError> {
     let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
 
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: SSID.into(),
-        password: PASS.into(),
-        ..Default::default()
-    }))?;
+    if PASS.is_empty() {
+        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+            ssid: SSID.into(),
+            auth_method: AuthMethod::None,
+            ..Default::default()
+        }))?;
+    } else {
+        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+            ssid: SSID.into(),
+            password: PASS.into(),
+            ..Default::default()
+        }))?;
+    }
 
     let wifi_state_changed_source = sysloop.as_async().subscribe()?;
+
+    let wait = WifiWait::new(&sysloop)?;
+
+    wifi.start()?;
+
+    wait.wait(|| wifi.is_started().unwrap());
+
+    wifi.connect()?;
+
+    //wait.wait(|| wifi.is_connected().unwrap());
 
     Ok((
         wifi,
