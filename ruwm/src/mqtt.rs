@@ -9,6 +9,7 @@ use heapless::String;
 
 use embassy_futures::select::{select4, Either4};
 use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::signal::Signal;
 
 use embedded_svc::mqtt::client::asynch::{
     Client, Connection, Event, Message, MessageId, Publish, QoS,
@@ -19,7 +20,6 @@ use crate::battery::BatteryState;
 use crate::channel::{Receiver, Sender};
 use crate::error;
 use crate::notification::Notification;
-use crate::signal::Signal;
 use crate::state::StateCellRead;
 use crate::utils::{NotifReceiver, SignalReceiver, SignalSender};
 use crate::valve::{ValveCommand, ValveState};

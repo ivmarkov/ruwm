@@ -5,10 +5,10 @@ use core::marker::PhantomData;
 use log::info;
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::signal::Signal;
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
-use crate::signal::Signal;
 use crate::state::StateCellRead;
 
 pub struct NotifReceiver<'a, S>(&'a Notification, &'a S);

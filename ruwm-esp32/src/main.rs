@@ -198,7 +198,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
     // ESP-IDF basics
 
     let nvs_default_partition = EspDefaultNvsPartition::take()?;
-    let mut sysloop = EspSystemEventLoop::take()?;
+    let sysloop = EspSystemEventLoop::take()?;
 
     // System
 
@@ -222,7 +222,7 @@ fn run(wakeup_reason: SleepWakeupReason) -> Result<(), InitError> {
 
     // Httpd
 
-    let (httpd, ws_acceptor) = httpd()?;
+    let (_httpd, ws_acceptor) = httpd()?;
 
     // Mqtt
 

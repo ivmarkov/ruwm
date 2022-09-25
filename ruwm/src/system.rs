@@ -3,6 +3,7 @@ use core::fmt::Debug;
 
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::signal::Signal;
 
 use embassy_time::Duration;
 use embedded_graphics::prelude::RgbColor;
@@ -28,7 +29,6 @@ use crate::mqtt::{Mqtt, MqttCommand};
 use crate::notification::Notification;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::{FlushableDrawTarget, Screen};
-use crate::signal::Signal;
 use crate::state::NoopStateCell;
 use crate::utils::{NotifReceiver, NotifSender, NotifSender2, SignalSender};
 use crate::valve::{Valve, ValveState};

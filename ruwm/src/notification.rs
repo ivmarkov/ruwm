@@ -1,4 +1,4 @@
-use core::future::Future;
+use core::future::{poll_fn, Future};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 
@@ -42,7 +42,7 @@ impl Notification {
     }
 
     pub fn wait(&self) -> impl Future<Output = ()> + '_ {
-        futures::future::poll_fn(move |cx| self.poll_wait(cx))
+        poll_fn(move |cx| self.poll_wait(cx))
     }
 
     pub fn try_get(&self) -> bool {

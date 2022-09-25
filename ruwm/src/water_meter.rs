@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::signal::Signal;
 
 use embedded_svc::storage::Storage;
 
 use crate::channel::{Receiver, Sender};
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
-use crate::signal::Signal;
 use crate::state::{
     update_with, CachingStateCell, MemoryStateCell, MutRefStateCell, StateCell, StateCellRead,
     StorageStateCell,

@@ -7,8 +7,11 @@ use embuild::*;
 fn main() -> anyhow::Result<()> {
     let cfg = build::CfgArgs::try_from_env("ESP_IDF")?;
 
-    if cfg.get("esp32").is_some() || cfg.get("esp32s2").is_some() {
-        build_ulp()?;
+    #[cfg(feature = "ulp")]
+    {
+        if cfg.get("esp32").is_some() || cfg.get("esp32s2").is_some() {
+            build_ulp()?;
+        }
     }
 
     cfg.output();

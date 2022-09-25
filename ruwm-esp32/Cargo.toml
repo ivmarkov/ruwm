@@ -13,11 +13,9 @@ readme = "README.md"
 rust-version = "1.61"
 
 [features]
-#default = ["espidf"]
 default = ["ili9341"]
 
 ulp = []
-espidf = []
 ttgo = []
 
 [dependencies]

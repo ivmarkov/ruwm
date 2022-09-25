@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
+use embassy_sync::signal::Signal;
 
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 
 use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
-use crate::signal::Signal;
 use crate::state::{
     update, CachingStateCell, MemoryStateCell, MutRefStateCell, NoopStateCell, StateCell,
     StateCellRead,

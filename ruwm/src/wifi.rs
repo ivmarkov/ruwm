@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::signal::Signal;
 
 use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
 use crate::channel::{Receiver, Sender};
-use crate::signal::Signal;
 use crate::state::{update, MemoryStateCell, StateCell, StateCellRead};
 use crate::utils::SignalReceiver;
 
