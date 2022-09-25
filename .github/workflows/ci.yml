@@ -28,7 +28,7 @@ jobs:
       - name: Setup | Default to nightly
         run: rustup default ${{ env.rust_toolchain }}
       - name: Build | Fmt Check
-        run: cargo fmt -- --check
+        run: cargo fmt --toolchain nightly -- --check
 #      - name: Build | Clippy
 #        run: export ESP_IDF_SDKCONFIG_DEFAULTS=$(pwd)/sdkconfig.defaults; cargo clippy --no-deps --toolchain nightly --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Dwarnings
       - name: Build | Compile, Experimental
