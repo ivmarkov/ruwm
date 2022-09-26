@@ -246,13 +246,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-mid\0"),
-        stack_size: 50000,
         ..Default::default()
     }
     .set()
     .unwrap();
 
-    let execution2 = system.schedule::<8, TaskHandle, CurrentTaskWait>(move || {
+    let execution2 = system.schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
         system.spawn_executor1(
             display(
                 display_backlight,
@@ -276,13 +275,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-low\0"),
-        stack_size: 50000,
         ..Default::default()
     }
     .set()
     .unwrap();
 
-    let execution3 = system.schedule::<4, TaskHandle, CurrentTaskWait>(move || {
+    let execution3 = system.schedule::<4, TaskHandle, CurrentTaskWait>(50000, move || {
         system.spawn_executor2::<MQTT_MAX_TOPIC_LEN, _, _>(
             mqtt_topic_prefix,
             mqtt_client,

@@ -505,6 +505,7 @@ where
     #[cfg(all(feature = "std", feature = "edge-executor"))]
     pub fn schedule<'a, const C: usize, EN, EW>(
         &'static self,
+        stack_size: usize,
         spawner: impl FnOnce() -> Result<
                 (Executor<'a, C, EN, EW, Local>, heapless::Vec<Task<()>, C>),
                 SpawnError,
@@ -516,15 +517,18 @@ where
         EW: Wait + Default,
         T: Send + 'static,
     {
-        std::thread::spawn(move || {
-            let (mut executor, tasks) = spawner().unwrap();
+        std::thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(move || {
+                let (mut executor, tasks) = spawner().unwrap();
 
-            // info!(
-            //     "Tasks on thread {:?} scheduled, about to run the executor now",
-            //     "TODO"
-            // );
+                // info!(
+                //     "Tasks on thread {:?} scheduled, about to run the executor now",
+                //     "TODO"
+                // );
 
-            self.run(&mut executor, tasks);
-        })
+                self.run(&mut executor, tasks);
+            })
+            .unwrap()
     }
 }
