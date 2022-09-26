@@ -9,6 +9,7 @@ extern crate alloc;
 
 use edge_executor::SpawnError;
 
+use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{queue::Queue, Duration};
 
@@ -498,7 +499,9 @@ fn httpd() -> Result<
 
     for asset in &ASSETS {
         if !asset.0.is_empty() {
-            httpd.fn_handler(asset.0, Method::Get, move |req| {
+            let metadata = AssetMetadata::derive(asset.0);
+
+            httpd.fn_handler(metadata.uri, Method::Get, move |req| {
                 assets::serve::serve(req, &asset)
             })?;
         }
