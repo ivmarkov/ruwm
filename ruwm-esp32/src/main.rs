@@ -11,7 +11,7 @@ use edge_executor::SpawnError;
 
 use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_time::{queue::Queue, Duration};
+use embassy_time::Duration;
 
 use mipidsi::{Display, DisplayOptions};
 
@@ -105,13 +105,11 @@ impl From<SpawnError> for InitError {
 
 //impl std::error::Error for InitError {}
 
-// TODO: Linker issues
-embassy_time::generic_queue!(static TIMER_QUEUE: Queue<128, esp_idf_hal::interrupt::embassy_sync::CriticalSectionRawMutex> = Queue::new());
-//embassy_time::time_driver_impl!(static DRIVER: esp_idf_hal::timer::embassy_time::EspDriver = esp_idf_hal::timer::embassy_time::EspDriver::new());
-embassy_time::time_driver_impl!(static DRIVER: esp_idf_svc::timer::embassy_time::EspDriver = esp_idf_svc::timer::embassy_time::EspDriver::new());
-critical_section::set_impl!(esp_idf_hal::cs::critical_section::EspCriticalSection);
-
 fn main() -> Result<(), InitError> {
+    esp_idf_hal::cs::critical_section::link();
+    esp_idf_hal::timer::embassy_time::queue::link();
+    esp_idf_svc::timer::embassy_time::driver::link();
+
     let wakeup_reason = WakeupReason::get();
 
     init()?;
@@ -138,10 +136,6 @@ fn init() -> Result<(), InitError> {
             ..Default::default()
         })
     })?;
-
-    unsafe {
-        embassy_time::queue::initialize();
-    }
 
     Ok(())
 }
@@ -497,14 +491,21 @@ fn httpd() -> Result<
 
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
-    for asset in &ASSETS {
-        if !asset.0.is_empty() {
-            let metadata = AssetMetadata::derive(asset.0);
+    let mut assets = ASSETS
+        .iter()
+        .filter(|asset| !asset.0.is_empty())
+        .collect::<heapless::Vec<_, { assets::MAX_ASSETS }>>();
 
-            httpd.fn_handler(metadata.uri, Method::Get, move |req| {
-                assets::serve::serve(req, &asset)
-            })?;
-        }
+    assets.sort_by_key(|asset| AssetMetadata::derive(asset.0).uri);
+
+    for asset in assets.iter().rev() {
+        let asset = **asset;
+
+        let metadata = AssetMetadata::derive(asset.0);
+
+        httpd.fn_handler(metadata.uri, Method::Get, move |req| {
+            assets::serve::serve(req, asset)
+        })?;
     }
 
     httpd.ws_handler("/ws", move |connection| {
