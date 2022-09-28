@@ -526,7 +526,7 @@ fn subscribe_pin<'d, P: InputPin + OutputPin>(
 }
 
 fn mark_wakeup_pins(
-    _pulse_counter_peripherals: &(impl RTCPin + InputPin),
+    pulse_counter_peripheral: &(impl RTCPin + InputPin),
     buttons_peripherals: &ButtonsPeripherals<
         impl RTCPin + InputPin,
         impl RTCPin + InputPin,
@@ -534,9 +534,14 @@ fn mark_wakeup_pins(
     >,
 ) -> Result<(), InitError> {
     unsafe {
-        let mask = 1 << buttons_peripherals.button1.pin();
-        //| (1 << buttons_peripherals.button2.pin())
-        //| (1 << buttons_peripherals.button3.pin());
+        let mut mask = (1 << buttons_peripherals.button1.pin())
+            | (1 << buttons_peripherals.button2.pin())
+            | (1 << buttons_peripherals.button3.pin());
+
+        #[cfg(not(feature = "ulp"))]
+        {
+            mask |= 1 << pulse_counter_peripheral.pin();
+        }
 
         #[cfg(any(esp32, esp32s2, esp32s3))]
         esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
