@@ -51,6 +51,44 @@ impl SystemPeripherals<Gpio33, ADC1, Gpio36, Gpio2, Gpio4, Gpio32, SPI2> {
     }
 }
 
+#[cfg(not(any(esp32, esp32s2, esp32s3)))]
+impl SystemPeripherals<Gpio11, ADC1, Gpio0, Gpio5, Gpio6, Gpio7, SPI2> {
+    pub fn take() -> Self {
+        let peripherals = Peripherals::take().unwrap();
+
+        SystemPeripherals {
+            pulse_counter: peripherals.pins.gpio11,
+            valve: ValvePeripherals {
+                power: peripherals.pins.gpio2.into(),
+                open: peripherals.pins.gpio3.into(),
+                close: peripherals.pins.gpio4.into(),
+            },
+            battery: BatteryPeripherals {
+                power: peripherals.pins.gpio1.into(),
+                voltage: peripherals.pins.gpio0,
+                adc: peripherals.adc1,
+            },
+            buttons: ButtonsPeripherals {
+                button1: peripherals.pins.gpio5,
+                button2: peripherals.pins.gpio6,
+                button3: peripherals.pins.gpio7,
+            },
+            display: DisplaySpiPeripherals {
+                control: DisplayControlPeripherals {
+                    backlight: Some(peripherals.pins.gpio8.into()),
+                    dc: peripherals.pins.gpio9.into(),
+                    rst: peripherals.pins.gpio10.into(),
+                },
+                spi: peripherals.spi2,
+                sclk: peripherals.pins.gpio15.into(),
+                sdo: peripherals.pins.gpio16.into(),
+                cs: Some(peripherals.pins.gpio14.into()),
+            },
+            modem: peripherals.modem,
+        }
+    }
+}
+
 pub struct ValvePeripherals {
     pub power: AnyIOPin,
     pub open: AnyIOPin,
