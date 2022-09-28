@@ -1,7 +1,7 @@
 use core::cell::Cell;
-use core::fmt::Debug;
+use core::fmt::{self, Debug, Display};
 
-use log::info;
+use log::{info, warn};
 
 use postcard::{from_bytes, to_slice};
 
@@ -17,13 +17,41 @@ use edge_frame::dto::Role;
 
 use crate::battery::BatteryState;
 use crate::channel::{Receiver, Sender};
-use crate::error::EitherError;
 use crate::notification::Notification;
 use crate::state::StateCellRead;
 use crate::valve::{ValveCommand, ValveState};
 use crate::water_meter::{WaterMeterCommand, WaterMeterState};
 
 pub use crate::dto::web::*;
+
+#[derive(Debug)]
+pub enum WebError<E> {
+    IoError(E),
+    UnknownFrameError,
+    PostcardError(postcard::Error),
+}
+
+impl<E> Display for WebError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IoError(e) => write!(f, "IO Error: {}", e),
+            Self::UnknownFrameError => write!(f, "Unknown Frame Error"),
+            Self::PostcardError(e) => write!(f, "Postcard Error: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for WebError<E> where E: Display + Debug {}
+
+impl<E> From<postcard::Error> for WebError<E> {
+    fn from(e: postcard::Error) -> Self {
+        WebError::PostcardError(e)
+    }
+}
 
 #[derive(Debug)]
 enum WebFrame {
@@ -97,7 +125,9 @@ impl<const N: usize> Web<N> {
                         loop {
                             let (sender, receiver) = channel.recv().await;
 
-                            handle_connection::<R>(
+                            info!("Handler {}: Got new connection", index);
+
+                            let res = handle_connection::<R, _, _>(
                                 sender,
                                 receiver,
                                 (&self.valve_state_signals[index], valve_state),
@@ -109,13 +139,23 @@ impl<const N: usize> Web<N> {
                                 wm_state,
                                 battery_state,
                             )
-                            .await
-                            .unwrap(); // TODO
+                            .await;
+
+                            match res {
+                                Ok(()) => {
+                                    info!("Handler {}: connection closed", index);
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Handler {}: connection closed with error {:?}",
+                                        index, e
+                                    );
+                                }
+                            }
                         }
                     }
                 })
-                .map_err(|_| ())
-                .unwrap();
+                .unwrap_or_else(|_| unreachable!());
         }
 
         let workers = workers.into_array::<N>().unwrap_or_else(|_| unreachable!());
@@ -132,7 +172,7 @@ impl<const N: usize> Web<N> {
                             info!("Acceptor: connection sent");
                         }
                         Err(e) => {
-                            info!("Got error when accepting a new connection: {:?}", e);
+                            warn!("Got error when accepting a new connection: {:?}", e);
                         }
                     }
                 }
@@ -161,9 +201,9 @@ impl<const N: usize> Web<N> {
     }
 }
 
-pub async fn handle_connection<R: RawMutex>(
-    sender: impl ws::asynch::Sender,
-    receiver: impl ws::asynch::Receiver,
+pub async fn handle_connection<R, WS, WR>(
+    mut sender: WS,
+    receiver: WR,
     valve_state: impl Receiver<Data = Option<ValveState>>,
     wm_state: impl Receiver<Data = WaterMeterState>,
     battery_state: impl Receiver<Data = BatteryState>,
@@ -172,11 +212,18 @@ pub async fn handle_connection<R: RawMutex>(
     valve: &impl StateCellRead<Data = Option<ValveState>>,
     wm: &impl StateCellRead<Data = WaterMeterState>,
     battery: &impl StateCellRead<Data = BatteryState>,
-) -> Result<(), ()> //WrapError<impl Debug>>
+) -> Result<(), WebError<WS::Error>>
+where
+    R: RawMutex,
+    WR: ws::asynch::Receiver,
+    WS: ws::asynch::Sender<Error = WR::Error>,
 {
-    let sender = AsyncMutex::new(sender);
+    let role = Role::None;
 
-    let role = Mutex::<R, _>::new(Cell::new(Role::None));
+    web_send(&mut sender, &WebEvent::RoleState(role)).await?;
+
+    let role = Mutex::<R, _>::new(Cell::new(role));
+    let sender = AsyncMutex::new(sender);
 
     select4(
         receive(
@@ -204,23 +251,27 @@ pub async fn handle_connection<R: RawMutex>(
     Ok(())
 }
 
-async fn receive<R: RawMutex>(
-    mut receiver: impl ws::asynch::Receiver,
-    sender: &AsyncMutex<R, impl ws::asynch::Sender>,
+async fn receive<R, WS, WR>(
+    mut receiver: WR,
+    sender: &AsyncMutex<R, WS>,
     role: &Mutex<R, Cell<Role>>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
     valve: &impl StateCellRead<Data = Option<ValveState>>,
     wm: &impl StateCellRead<Data = WaterMeterState>,
     battery: &impl StateCellRead<Data = BatteryState>,
-) -> Result<(), ()> //WrapError<impl Debug>>
+) -> Result<(), WebError<WS::Error>>
+where
+    R: RawMutex,
+    WR: ws::asynch::Receiver,
+    WS: ws::asynch::Sender<Error = WR::Error>,
 {
     loop {
-        let request = match web_receive(&mut receiver).await.unwrap() {
+        let request = match web_receive(&mut receiver).await? {
             WebFrame::Request(request) => request,
             WebFrame::Control => todo!(),
             WebFrame::Close => break,
-            WebFrame::Unknown => return Err(()),
+            WebFrame::Unknown => return Err(WebError::UnknownFrameError),
         };
 
         let response = request.response(role.lock(|role| role.get()));
@@ -261,20 +312,21 @@ async fn receive<R: RawMutex>(
             WebEvent::Response(response)
         };
 
-        web_send(&mut *sender.lock().await, &web_event)
-            .await
-            .unwrap();
+        web_send(&mut *sender.lock().await, &web_event).await?;
     }
 
     Ok(())
 }
 
-async fn send_state<R: RawMutex, T>(
-    connection: &AsyncMutex<R, impl ws::asynch::Sender>,
+async fn send_state<R, S, T>(
+    connection: &AsyncMutex<R, S>,
     role: &Mutex<R, Cell<Role>>,
     mut state: impl Receiver<Data = T>,
     to_web_event: impl Fn(T) -> WebEvent,
-) -> Result<(), ()> //WrapError<impl Debug>>
+) -> Result<(), WebError<S::Error>>
+where
+    R: RawMutex,
+    S: ws::asynch::Sender,
 {
     loop {
         let state = state.recv().await;
@@ -284,8 +336,7 @@ async fn send_state<R: RawMutex, T>(
             &to_web_event(state),
             role.lock(|role| role.get()),
         )
-        .await
-        .unwrap();
+        .await?;
     }
 }
 
@@ -297,7 +348,7 @@ async fn web_send_auth<S>(
     ws_sender: S,
     event: &WebEvent,
     role: Role,
-) -> Result<(), EitherError<S::Error, postcard::Error>>
+) -> Result<(), WebError<S::Error>>
 where
     S: ws::asynch::Sender,
 {
@@ -308,10 +359,7 @@ where
     }
 }
 
-async fn web_send<S>(
-    mut ws_sender: S,
-    event: &WebEvent,
-) -> Result<(), EitherError<S::Error, postcard::Error>>
+async fn web_send<S>(mut ws_sender: S, event: &WebEvent) -> Result<(), WebError<S::Error>>
 where
     S: ws::asynch::Sender,
 {
@@ -319,23 +367,26 @@ where
 
     let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
 
-    let (frame_type, size) = to_ws_frame(event, &mut frame_buf).map_err(EitherError::E2)?;
+    let (frame_type, size) = to_ws_frame(event, &mut frame_buf)?;
 
     ws_sender
         .send(frame_type, &frame_buf[..size])
         .await
-        .map_err(EitherError::E1)?;
+        .map_err(WebError::IoError)?;
 
     Ok(())
 }
 
-async fn web_receive<R>(mut ws_receiver: R) -> Result<WebFrame, R::Error>
+async fn web_receive<R>(mut ws_receiver: R) -> Result<WebFrame, WebError<R::Error>>
 where
     R: ws::asynch::Receiver,
 {
     let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
 
-    let (frame_type, size) = ws_receiver.recv(&mut frame_buf).await?;
+    let (frame_type, size) = ws_receiver
+        .recv(&mut frame_buf)
+        .await
+        .map_err(WebError::IoError)?;
 
     let receive = from_ws_frame(frame_type, &frame_buf[..size]);
 
