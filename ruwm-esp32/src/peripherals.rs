@@ -52,26 +52,26 @@ impl SystemPeripherals<Gpio33, ADC1, Gpio36, Gpio2, Gpio4, Gpio32, SPI2> {
 }
 
 #[cfg(not(any(esp32, esp32s2, esp32s3)))]
-impl SystemPeripherals<Gpio11, ADC1, Gpio0, Gpio5, Gpio6, Gpio7, SPI2> {
+impl SystemPeripherals<Gpio1, ADC1, Gpio0, Gpio2, Gpio3, Gpio4, SPI2> {
     pub fn take() -> Self {
         let peripherals = Peripherals::take().unwrap();
 
         SystemPeripherals {
-            pulse_counter: peripherals.pins.gpio11,
+            pulse_counter: peripherals.pins.gpio1,
             valve: ValvePeripherals {
-                power: peripherals.pins.gpio2.into(),
-                open: peripherals.pins.gpio3.into(),
-                close: peripherals.pins.gpio4.into(),
+                power: peripherals.pins.gpio6.into(),
+                open: peripherals.pins.gpio7.into(),
+                close: peripherals.pins.gpio8.into(),
             },
             battery: BatteryPeripherals {
-                power: peripherals.pins.gpio1.into(),
+                power: peripherals.pins.gpio5.into(),
                 voltage: peripherals.pins.gpio0,
                 adc: peripherals.adc1,
             },
             buttons: ButtonsPeripherals {
-                button1: peripherals.pins.gpio5,
-                button2: peripherals.pins.gpio6,
-                button3: peripherals.pins.gpio7,
+                button1: peripherals.pins.gpio2,
+                button2: peripherals.pins.gpio3,
+                button3: peripherals.pins.gpio4,
             },
             display: DisplaySpiPeripherals {
                 control: DisplayControlPeripherals {

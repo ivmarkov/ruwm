@@ -552,7 +552,7 @@ fn mark_wakeup_pins(
         #[cfg(not(any(esp32, esp32s2, esp32s3)))]
         esp!(esp_idf_sys::esp_deep_sleep_enable_gpio_wakeup(
             mask,
-            esp_idf_sys::esp_deepsleep_gpio_wakeup_mode_t_ESP_GPIO_WAKEUP_GPIO_LOW,
+            esp_idf_sys::esp_deepsleep_gpio_wake_up_mode_t_ESP_GPIO_WAKEUP_GPIO_LOW,
         ))?;
     }
 
