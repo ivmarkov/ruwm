@@ -3,6 +3,8 @@
 #![feature(type_alias_impl_trait)]
 
 use core::fmt::Debug;
+use core::mem;
+
 use std::cell::RefCell;
 
 extern crate alloc;
@@ -15,6 +17,7 @@ use embassy_time::Duration;
 
 use mipidsi::{Display, DisplayOptions};
 
+use peripherals::{ButtonsPeripherals, DisplaySpiPeripherals, ValvePeripherals};
 use static_cell::StaticCell;
 
 use embedded_graphics::prelude::RgbColor;
@@ -64,8 +67,12 @@ use ruwm::system::{SlowMem, System};
 use ruwm::valve;
 use ruwm::web;
 
+mod peripherals;
 #[cfg(feature = "ulp")]
 mod ulp_pulse_counter;
+
+#[cfg(all(feature = "ulp", not(any(esp32, esp32s2, esp32s3))))]
+compile_error!("Feature `ulp` is supported only on esp32, esp32s2 and esp32s3");
 
 const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
@@ -142,7 +149,9 @@ fn init() -> Result<(), InitError> {
 
 fn sleep() -> Result<(), InitError> {
     unsafe {
+        #[cfg(feature = "ulp")]
         esp!(esp_idf_sys::esp_sleep_enable_ulp_wakeup())?;
+
         esp!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
             SLEEP_TIME.as_micros() as u64
         ))?;
@@ -156,24 +165,16 @@ fn sleep() -> Result<(), InitError> {
 }
 
 fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals = peripherals::SystemPeripherals::take();
 
     // Valve pins
 
-    let (valve_power_pin, valve_open_pin, valve_close_pin) = valve_pins(
-        wakeup_reason,
-        peripherals.pins.gpio25,
-        peripherals.pins.gpio26,
-        peripherals.pins.gpio27,
-    )?;
+    let (valve_power_pin, valve_open_pin, valve_close_pin) =
+        valve_pins(peripherals.valve, wakeup_reason)?;
 
-    // Button pins
+    // Deep sleep wakeup init
 
-    let button1_pin = peripherals.pins.gpio2;
-    let button2_pin = peripherals.pins.gpio4;
-    let button3_pin = peripherals.pins.gpio32;
-
-    mark_wakeup_pins(&button1_pin, &button2_pin, &button3_pin)?;
+    mark_wakeup_pins(&peripherals.pulse_counter, &peripherals.buttons)?;
 
     // ESP-IDF basics
 
@@ -188,10 +189,10 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     #[cfg(feature = "ulp")]
     let (pulse_counter, pulse_wakeup) =
-        pulse(peripherals.ulp, peripherals.pins.gpio33, wakeup_reason)?;
+        pulse(peripherals.ulp, pulse_counter_peripheral, wakeup_reason)?;
 
     #[cfg(not(feature = "ulp"))]
-    let (pulse_counter, pulse_wakeup) = pulse(peripherals.pins.gpio33)?;
+    let (pulse_counter, pulse_wakeup) = pulse(peripherals.pulse_counter)?;
 
     // Wifi
 
@@ -209,16 +210,6 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = mqtt()?;
 
-    // Display
-
-    let display_backlight = peripherals.pins.gpio15;
-    let display_dc = peripherals.pins.gpio18;
-    let display_rst = peripherals.pins.gpio19;
-    let display_spi = peripherals.spi2;
-    let display_sclk = peripherals.pins.gpio14;
-    let display_sdo = peripherals.pins.gpio13;
-    let display_cs = peripherals.pins.gpio5;
-
     // High-prio executor
 
     let (mut executor1, tasks1) = system.spawn_executor0::<TaskHandle, CurrentTaskWait, _, _>(
@@ -227,12 +218,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         valve_close_pin,
         pulse_counter,
         pulse_wakeup,
-        AdcDriver::new(peripherals.adc1, &AdcConfig::new().calibration(true))?,
-        AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.pins.gpio36)?,
-        PinDriver::input(peripherals.pins.gpio35)?,
-        subscribe_pin(button1_pin, move || system.button1_signal())?,
-        subscribe_pin(button2_pin, move || system.button1_signal())?,
-        subscribe_pin(button3_pin, move || system.button1_signal())?,
+        AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
+        AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
+        PinDriver::input(peripherals.battery.power)?,
+        subscribe_pin(peripherals.buttons.button1, move || system.button1_signal())?,
+        subscribe_pin(peripherals.buttons.button2, move || system.button1_signal())?,
+        subscribe_pin(peripherals.buttons.button3, move || system.button1_signal())?,
     )?;
 
     // Mid-prio executor
@@ -246,18 +237,11 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
+    let display_peripherals = peripherals.display;
+
     let execution2 = system.schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
         system.spawn_executor1(
-            display(
-                display_backlight,
-                display_dc,
-                display_rst,
-                display_spi,
-                display_sclk,
-                display_sdo,
-                Some(display_cs),
-            )
-            .unwrap(),
+            display(display_peripherals).unwrap(),
             wifi,
             wifi_notif,
             mqtt_conn,
@@ -301,11 +285,9 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     Ok(())
 }
 
-fn valve_pins<P, O, C>(
+fn valve_pins(
+    peripherals: ValvePeripherals,
     wakeup_reason: WakeupReason,
-    power: P,
-    open: O,
-    close: C,
 ) -> Result<
     (
         impl EHOutputPin<Error = impl Debug>,
@@ -313,15 +295,10 @@ fn valve_pins<P, O, C>(
         impl EHOutputPin<Error = impl Debug>,
     ),
     EspError,
->
-where
-    P: InputPin + OutputPin,
-    O: InputPin + OutputPin,
-    C: InputPin + OutputPin,
-{
-    let mut power = PinDriver::input_output(power)?;
-    let mut open = PinDriver::input_output(open)?;
-    let mut close = PinDriver::input_output(close)?;
+> {
+    let mut power = PinDriver::input_output(peripherals.power)?;
+    let mut open = PinDriver::input_output(peripherals.open)?;
+    let mut close = PinDriver::input_output(peripherals.close)?;
 
     power.set_pull(Pull::Floating)?;
     open.set_pull(Pull::Floating)?;
@@ -385,36 +362,35 @@ fn pulse(
     Ok((pulse_counter, ()))
 }
 
-fn display<'d>(
-    backlight: impl Peripheral<P = impl OutputPin> + 'd,
-    dc: impl Peripheral<P = impl OutputPin> + 'd,
-    rst: impl Peripheral<P = impl OutputPin> + 'd,
-    spi: impl Peripheral<P = SPI2> + 'd,
-    sclk: impl Peripheral<P = impl OutputPin> + 'd,
-    sdo: impl Peripheral<P = impl OutputPin> + 'd,
-    cs: Option<impl Peripheral<P = impl OutputPin> + 'd>,
-) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'd, InitError> {
-    let mut backlight = PinDriver::output(backlight)?;
+fn display(
+    peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
+) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'static, InitError>
+{
+    if let Some(backlight) = peripherals.control.backlight {
+        let mut backlight = PinDriver::output(backlight)?;
 
-    backlight.set_drive_strength(DriveStrength::I40mA)?;
-    backlight.set_high()?;
+        backlight.set_drive_strength(DriveStrength::I40mA)?;
+        backlight.set_high()?;
+
+        mem::forget(backlight); // TODO: For now
+    }
 
     let baudrate = 26.MHz().into();
     //let baudrate = 40.MHz().into();
 
     let di = SPIInterfaceNoCS::new(
-        SpiMasterDriver::<SPI2>::new(
-            spi,
-            sclk,
-            sdo,
+        SpiMasterDriver::new(
+            peripherals.spi,
+            peripherals.sclk,
+            peripherals.sdo,
             Option::<Gpio21>::None,
-            cs,
+            peripherals.cs,
             &SpiMasterConfig::new().baudrate(baudrate),
         )?,
-        PinDriver::output(dc)?,
+        PinDriver::output(peripherals.control.dc)?,
     );
 
-    let rst = PinDriver::output(rst)?;
+    let rst = PinDriver::output(peripherals.control.rst)?;
 
     #[cfg(feature = "ili9342")]
     let mut display = Display::ili9342c_rgb565(di, rst);
@@ -550,16 +526,28 @@ fn subscribe_pin<'d, P: InputPin + OutputPin>(
 }
 
 fn mark_wakeup_pins(
-    button1_pin: &impl RTCPin,
-    _button2_pin: &impl RTCPin,
-    _button3_pin: &impl RTCPin,
+    _pulse_counter_peripherals: &(impl RTCPin + InputPin),
+    buttons_peripherals: &ButtonsPeripherals<
+        impl RTCPin + InputPin,
+        impl RTCPin + InputPin,
+        impl RTCPin + InputPin,
+    >,
 ) -> Result<(), InitError> {
     unsafe {
+        let mask = 1 << buttons_peripherals.button1.pin();
+        //| (1 << buttons_peripherals.button2.pin())
+        //| (1 << buttons_peripherals.button3.pin());
+
+        #[cfg(any(esp32, esp32s2, esp32s3))]
         esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
-            1 << button1_pin.pin(),
-            //| (1 << button2_pin.pin())
-            //| (1 << button3_pin.pin())
+            mask,
             esp_idf_sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
+        ))?;
+
+        #[cfg(not(any(esp32, esp32s2, esp32s3)))]
+        esp!(esp_idf_sys::esp_deep_sleep_enable_gpio_wakeup(
+            mask,
+            esp_idf_sys::esp_deepsleep_gpio_wakeup_mode_t_ESP_GPIO_WAKEUP_GPIO_LOW,
         ))?;
     }
 
