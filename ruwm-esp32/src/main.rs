@@ -43,7 +43,7 @@ use esp_idf_hal::{adc::*, delay};
 
 use esp_idf_svc::errors::EspIOError;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::http::server::ws::{EspHttpWsAsyncConnection, EspHttpWsProcessor};
+use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
@@ -75,8 +75,7 @@ const SLEEP_TIME: Duration = Duration::from_secs(30);
 const WS_MAX_CONNECTIONS: usize = 2;
 const MQTT_MAX_TOPIC_LEN: usize = 64;
 
-type EspSystem =
-    System<WS_MAX_CONNECTIONS, CriticalSectionRawMutex, EspStorage, EspHttpWsAsyncConnection<()>>;
+type EspSystem = System<WS_MAX_CONNECTIONS, CriticalSectionRawMutex, EspStorage>;
 type EspStorage = PostcardStorage<500, EspNvs<NvsDefault>>;
 
 #[derive(Debug)]
@@ -478,13 +477,7 @@ fn wifi<'d>(
     Ok((wifi, Channel::new(wifi_state_changed_source)))
 }
 
-fn httpd() -> Result<
-    (
-        EspHttpServer,
-        impl Acceptor<Connection = EspHttpWsAsyncConnection<()>>,
-    ),
-    InitError,
-> {
+fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<WS_MAX_CONNECTIONS, { web::WS_MAX_FRAME_LEN }>::new(());
 

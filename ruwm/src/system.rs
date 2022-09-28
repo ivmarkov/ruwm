@@ -14,7 +14,6 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::storage::Storage;
 use embedded_svc::wifi::Wifi as WifiTrait;
-use embedded_svc::ws;
 use embedded_svc::ws::asynch::server::Acceptor;
 
 #[cfg(feature = "edge-executor")]
@@ -42,7 +41,7 @@ pub struct SlowMem {
     wm_stats: WaterMeterStatsState,
 }
 
-pub struct System<const N: usize, R, S, T>
+pub struct System<const N: usize, R, S>
 where
     R: RawMutex + 'static,
     S: Storage + Send + 'static,
@@ -67,15 +66,14 @@ where
     screen: Screen<R>,
 
     wifi: Wifi<R>,
-    web: Web<N, R, T>,
+    web: Web<N>,
     mqtt: Mqtt<R>,
 }
 
-impl<const N: usize, R, S, T> System<N, R, S, T>
+impl<const N: usize, R, S> System<N, R, S>
 where
     R: RawMutex + Send + Sync + 'static,
     S: Storage + Send + 'static,
-    T: ws::asynch::Sender + ws::asynch::Receiver,
 {
     pub fn new(slow_mem: &'static mut SlowMem, storage: &'static Mutex<R, RefCell<S>>) -> Self {
         Self {
@@ -340,24 +338,10 @@ where
             .await
     }
 
-    pub async fn web_accept<A>(&'static self, acceptor: A)
-    where
-        A: Acceptor<Connection = T>,
-    {
-        loop {
-            let connection = acceptor.accept().await.unwrap();
-
-            self.web.handle(connection).await;
-        }
-    }
-
-    pub async fn web_accept_handle(&'static self, connection: T) {
-        self.web.handle(connection).await;
-    }
-
-    pub async fn web_process(&'static self) {
+    pub async fn web_process(&'static self, acceptor: impl Acceptor) {
         self.web
-            .process(
+            .process::<_, R, 1>(
+                acceptor,
                 (
                     LogSender::new("WEB/VALVE COMMAND"),
                     self.valve.command_sink(),
@@ -468,7 +452,7 @@ where
         &'static self,
         mqtt_topic_prefix: &'static str,
         mqtt_client: impl Client + Publish + 'static,
-        ws_acceptor: impl Acceptor<Connection = T> + 'static,
+        ws_acceptor: impl Acceptor + 'static,
     ) -> Result<(Executor<4, EN, EW, Local>, heapless::Vec<Task<()>, 4>), SpawnError>
     where
         EN: NotifyFactory + RunContextFactory + Default,
@@ -482,8 +466,7 @@ where
                 self.mqtt_send::<L>(mqtt_topic_prefix, mqtt_client),
                 &mut tasks,
             )?
-            .spawn_local_collect(self.web_accept(ws_acceptor), &mut tasks)?
-            .spawn_local_collect(self.web_process(), &mut tasks)?;
+            .spawn_local_collect(self.web_process(ws_acceptor), &mut tasks)?;
 
         Ok((executor, tasks))
     }
@@ -515,7 +498,6 @@ where
     where
         EN: NotifyFactory + RunContextFactory + Default,
         EW: Wait + Default,
-        T: Send + 'static,
     {
         std::thread::Builder::new()
             .stack_size(stack_size)

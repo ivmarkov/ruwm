@@ -2,14 +2,15 @@ use core::cell::Cell;
 use core::fmt::Debug;
 
 use log::info;
+
 use postcard::{from_bytes, to_slice};
 
-use embassy_futures::select::{select4, select_array};
+use embassy_futures::select::select4;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex as AsyncMutex;
 
+use embedded_svc::ws::asynch::server::Acceptor;
 use embedded_svc::ws::{self, FrameType};
 
 use edge_frame::dto::Role;
@@ -34,25 +35,16 @@ enum WebFrame {
 
 pub const WS_MAX_FRAME_LEN: usize = 512;
 
-pub struct Web<const N: usize, R, T>
-where
-    R: RawMutex,
-{
-    channel: Channel<R, T, 1>,
+pub struct Web<const N: usize> {
     valve_state_signals: [Notification; N],
     wm_state_signals: [Notification; N],
     wm_stats_state_signals: [Notification; N],
     battery_state_signals: [Notification; N],
 }
 
-impl<const N: usize, R, T> Web<N, R, T>
-where
-    R: RawMutex,
-    T: ws::asynch::Receiver + ws::asynch::Sender,
-{
+impl<const N: usize> Web<N> {
     pub fn new() -> Self {
         Self {
-            channel: Channel::new(),
             valve_state_signals: Self::notif_arr(),
             wm_state_signals: Self::notif_arr(),
             wm_stats_state_signals: Self::notif_arr(),
@@ -76,12 +68,9 @@ where
         Self::as_refs_notif_arr(&self.battery_state_signals)
     }
 
-    pub async fn handle(&self, connection: T) {
-        self.channel.send(connection).await
-    }
-
-    pub async fn process(
+    pub async fn process<A: Acceptor, R: RawMutex, const W: usize>(
         &'static self,
+        acceptor: A,
         valve_command: impl Sender<Data = ValveCommand>,
         wm_command: impl Sender<Data = WaterMeterCommand>,
         valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static),
@@ -91,9 +80,14 @@ where
         let valve_command = AsyncMutex::<R, _>::new(valve_command);
         let wm_command = AsyncMutex::<R, _>::new(wm_command);
 
+        info!("Creating queue for {} workers", W);
+        let channel = embassy_sync::channel::Channel::<R, _, W>::new();
+
         let mut workers = heapless::Vec::<_, N>::new();
 
         for index in 0..N {
+            let channel = &channel;
+
             workers
                 .push({
                     let valve_command = &valve_command;
@@ -101,10 +95,11 @@ where
 
                     async move {
                         loop {
-                            let connection = self.channel.recv().await;
+                            let (sender, receiver) = channel.recv().await;
 
                             handle_connection::<R>(
-                                connection,
+                                sender,
+                                receiver,
                                 (&self.valve_state_signals[index], valve_state),
                                 (&self.wm_state_signals[index], wm_state),
                                 (&self.battery_state_signals[index], battery_state),
@@ -123,7 +118,30 @@ where
                 .unwrap();
         }
 
-        select_array(workers.into_array::<N>().unwrap_or_else(|_| unreachable!())).await;
+        let workers = workers.into_array::<N>().unwrap_or_else(|_| unreachable!());
+
+        embassy_futures::select::select(
+            async {
+                loop {
+                    info!("Acceptor: waiting for new connection");
+
+                    match acceptor.accept().await {
+                        Ok((sender, receiver)) => {
+                            info!("Acceptor: got new connection");
+                            channel.send((sender, receiver)).await;
+                            info!("Acceptor: connection sent");
+                        }
+                        Err(e) => {
+                            info!("Got error when accepting a new connection: {:?}", e);
+                        }
+                    }
+                }
+            },
+            embassy_futures::select::select_array(workers),
+        )
+        .await;
+
+        info!("Server processing loop quit");
     }
 
     fn as_refs_notif_arr(arr: &[Notification; N]) -> [&Notification; N] {
@@ -144,7 +162,8 @@ where
 }
 
 pub async fn handle_connection<R: RawMutex>(
-    connection: impl ws::asynch::Sender + ws::asynch::Receiver,
+    sender: impl ws::asynch::Sender,
+    receiver: impl ws::asynch::Receiver,
     valve_state: impl Receiver<Data = Option<ValveState>>,
     wm_state: impl Receiver<Data = WaterMeterState>,
     battery_state: impl Receiver<Data = BatteryState>,
@@ -155,13 +174,14 @@ pub async fn handle_connection<R: RawMutex>(
     battery: &impl StateCellRead<Data = BatteryState>,
 ) -> Result<(), ()> //WrapError<impl Debug>>
 {
-    let connection = AsyncMutex::<R, _>::new(connection);
+    let sender = AsyncMutex::new(sender);
 
     let role = Mutex::<R, _>::new(Cell::new(Role::None));
 
     select4(
         receive(
-            &connection,
+            receiver,
+            &sender,
             &role,
             valve_command,
             wm_command,
@@ -169,13 +189,13 @@ pub async fn handle_connection<R: RawMutex>(
             wm,
             battery,
         ),
-        send_state(&connection, &role, valve_state, |state| {
+        send_state(&sender, &role, valve_state, |state| {
             WebEvent::ValveState(state)
         }),
-        send_state(&connection, &role, wm_state, |state| {
+        send_state(&sender, &role, wm_state, |state| {
             WebEvent::WaterMeterState(state)
         }),
-        send_state(&connection, &role, battery_state, |state| {
+        send_state(&sender, &role, battery_state, |state| {
             WebEvent::BatteryState(state)
         }),
     )
@@ -185,7 +205,8 @@ pub async fn handle_connection<R: RawMutex>(
 }
 
 async fn receive<R: RawMutex>(
-    connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    mut receiver: impl ws::asynch::Receiver,
+    sender: &AsyncMutex<R, impl ws::asynch::Sender>,
     role: &Mutex<R, Cell<Role>>,
     mut valve_command: impl Sender<Data = ValveCommand>,
     mut wm_command: impl Sender<Data = WaterMeterCommand>,
@@ -195,7 +216,7 @@ async fn receive<R: RawMutex>(
 ) -> Result<(), ()> //WrapError<impl Debug>>
 {
     loop {
-        let request = match web_receive(&mut *connection.lock().await).await.unwrap() {
+        let request = match web_receive(&mut receiver).await.unwrap() {
             WebFrame::Request(request) => request,
             WebFrame::Control => todo!(),
             WebFrame::Close => break,
@@ -240,7 +261,7 @@ async fn receive<R: RawMutex>(
             WebEvent::Response(response)
         };
 
-        web_send(&mut *connection.lock().await, &web_event)
+        web_send(&mut *sender.lock().await, &web_event)
             .await
             .unwrap();
     }
@@ -249,7 +270,7 @@ async fn receive<R: RawMutex>(
 }
 
 async fn send_state<R: RawMutex, T>(
-    connection: &AsyncMutex<R, impl ws::asynch::Sender + ws::asynch::Receiver>,
+    connection: &AsyncMutex<R, impl ws::asynch::Sender>,
     role: &Mutex<R, Cell<Role>>,
     mut state: impl Receiver<Data = T>,
     to_web_event: impl Fn(T) -> WebEvent,
