@@ -75,9 +75,9 @@ impl SystemPeripherals<Gpio1, ADC1, Gpio0, Gpio2, Gpio3, Gpio4, SPI2> {
             },
             display: DisplaySpiPeripherals {
                 control: DisplayControlPeripherals {
-                    backlight: Some(peripherals.pins.gpio8.into()),
-                    dc: peripherals.pins.gpio9.into(),
-                    rst: peripherals.pins.gpio10.into(),
+                    backlight: Some(peripherals.pins.gpio9.into()),
+                    dc: peripherals.pins.gpio10.into(),
+                    rst: peripherals.pins.gpio18.into(),
                 },
                 spi: peripherals.spi2,
                 sclk: peripherals.pins.gpio15.into(),
