@@ -5,7 +5,7 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::spi::*;
 
 pub struct SystemPeripherals<P, ADC, V, B1, B2, B3, SPI> {
-    pub pulse_counter: P,
+    pub pulse_counter: PulseCounterPeripherals<P>,
     pub valve: ValvePeripherals,
     pub battery: BatteryPeripherals<ADC, V>,
     pub buttons: ButtonsPeripherals<B1, B2, B3>,
@@ -19,7 +19,11 @@ impl SystemPeripherals<Gpio33, ADC1, Gpio36, Gpio2, Gpio4, Gpio32, SPI2> {
         let peripherals = Peripherals::take().unwrap();
 
         SystemPeripherals {
-            pulse_counter: peripherals.pins.gpio33,
+            pulse_counter: PulseCounterPeripherals {
+                pulse: peripherals.pins.gpio33,
+                #[cfg(feature = "ulp")]
+                ulp: peripherals.ulp,
+            },
             valve: ValvePeripherals {
                 power: peripherals.pins.gpio25.into(),
                 open: peripherals.pins.gpio26.into(),
@@ -57,7 +61,9 @@ impl SystemPeripherals<Gpio1, ADC1, Gpio0, Gpio2, Gpio3, Gpio4, SPI2> {
         let peripherals = Peripherals::take().unwrap();
 
         SystemPeripherals {
-            pulse_counter: peripherals.pins.gpio1,
+            pulse_counter: PulseCounterPeripherals {
+                pulse: peripherals.pins.gpio1,
+            },
             valve: ValvePeripherals {
                 power: peripherals.pins.gpio6.into(),
                 open: peripherals.pins.gpio7.into(),
@@ -87,6 +93,12 @@ impl SystemPeripherals<Gpio1, ADC1, Gpio0, Gpio2, Gpio3, Gpio4, SPI2> {
             modem: peripherals.modem,
         }
     }
+}
+
+pub struct PulseCounterPeripherals<P> {
+    pub pulse: P,
+    #[cfg(feature = "ulp")]
+    pub ulp: esp_idf_hal::ulp::ULP,
 }
 
 pub struct ValvePeripherals {
