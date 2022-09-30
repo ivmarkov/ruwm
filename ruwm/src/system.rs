@@ -338,7 +338,7 @@ where
             .await
     }
 
-    pub async fn web_process(&'static self, acceptor: impl Acceptor) {
+    pub async fn web(&'static self, acceptor: impl Acceptor) {
         self.web
             .process::<_, R, 1>(
                 acceptor,
@@ -466,7 +466,7 @@ where
                 self.mqtt_send::<L>(mqtt_topic_prefix, mqtt_client),
                 &mut tasks,
             )?
-            .spawn_local_collect(self.web_process(ws_acceptor), &mut tasks)?;
+            .spawn_local_collect(self.web(ws_acceptor), &mut tasks)?;
 
         Ok((executor, tasks))
     }
