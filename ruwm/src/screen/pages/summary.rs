@@ -10,7 +10,7 @@ use crate::{
         DrawTargetRef, RotateAngle, TransformingAdaptor,
     },
     valve::ValveState,
-    water_meter::WaterMeterState,
+    wm::WaterMeterState,
 };
 
 pub struct Summary;

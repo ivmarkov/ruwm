@@ -4,6 +4,8 @@ use core::mem;
 
 extern crate alloc;
 
+use serde::{de::DeserializeOwned, Serialize};
+
 use edge_frame::assets::serve::AssetMetadata;
 
 use embassy_sync::blocking_mutex::Mutex;
@@ -21,6 +23,7 @@ use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
+use embedded_svc::storage::{SerDe, Storage, StorageImpl};
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::asynch::server::Acceptor;
@@ -39,7 +42,7 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
-use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
+use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};
 use esp_idf_svc::wifi::{EspWifi, WifiEvent, WifiWait};
 
 use esp_idf_sys::EspError;
@@ -52,10 +55,10 @@ use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
-use ruwm::state::{PostcardSerDe, PostcardStorage};
-use ruwm::system::{SlowMem, System};
-use ruwm::valve;
+use ruwm::valve::{self, ValveState};
 use ruwm::web;
+use ruwm::wm::WaterMeterState;
+use ruwm::wm_stats::WaterMeterStatsState;
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
@@ -64,10 +67,48 @@ const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: assets::serve::Assets = edge_frame::assets!("RUWM_WEB");
-const WS_MAX_CONNECTIONS: usize = 2;
 
-type EspSystem = System<WS_MAX_CONNECTIONS, CriticalSectionRawMutex, EspStorage>;
-type EspStorage = PostcardStorage<500, EspNvs<NvsDefault>>;
+const POSTCARD_BUF_SIZE: usize = 500;
+
+struct PostcardSerDe;
+
+impl SerDe for PostcardSerDe {
+    type Error = postcard::Error;
+
+    fn serialize<'a, T>(&self, slice: &'a mut [u8], value: &T) -> Result<&'a [u8], Self::Error>
+    where
+        T: Serialize,
+    {
+        postcard::to_slice(value, slice).map(|r| &*r)
+    }
+
+    fn deserialize<T>(&self, slice: &[u8]) -> Result<T, Self::Error>
+    where
+        T: DeserializeOwned,
+    {
+        postcard::from_bytes(slice)
+    }
+}
+
+#[derive(Default)]
+pub struct RtcMemory {
+    pub valve: Option<ValveState>,
+    pub wm: WaterMeterState,
+    pub wm_stats: WaterMeterStatsState,
+}
+
+impl RtcMemory {
+    pub const fn new() -> Self {
+        Self {
+            valve: None,
+            wm: WaterMeterState::new(),
+            wm_stats: WaterMeterStatsState::new(),
+        }
+    }
+}
+
+#[link_section = ".rtc.data.rtc_memory"]
+pub static mut RTC_MEMORY: RtcMemory = RtcMemory::new();
 
 pub fn valve_pins(
     peripherals: ValvePeripherals,
@@ -95,22 +136,22 @@ pub fn valve_pins(
     Ok((power, open, close))
 }
 
-pub fn system(partition: EspDefaultNvsPartition) -> Result<&'static EspSystem, InitError> {
-    static STORAGE: StaticCell<Mutex<CriticalSectionRawMutex, RefCell<EspStorage>>> =
-        StaticCell::new();
+pub fn storage(
+    partition: EspDefaultNvsPartition,
+) -> Result<&'static Mutex<CriticalSectionRawMutex, RefCell<impl Storage>>, InitError> {
+    static STORAGE: StaticCell<
+        Mutex<
+            CriticalSectionRawMutex,
+            RefCell<StorageImpl<{ POSTCARD_BUF_SIZE }, EspDefaultNvs, PostcardSerDe>>,
+        >,
+    > = StaticCell::new();
 
-    let storage = &*STORAGE.init(Mutex::new(RefCell::new(EspStorage::new(
+    let storage = &*STORAGE.init(Mutex::new(RefCell::new(StorageImpl::new(
         EspNvs::new(partition, "WM", true)?,
         PostcardSerDe,
     ))));
 
-    static mut SLOW_MEM: Option<SlowMem> = None;
-    unsafe { SLOW_MEM = Some(Default::default()) };
-
-    static SYSTEM: StaticCell<EspSystem> = StaticCell::new();
-    let system = &*SYSTEM.init(System::new(unsafe { SLOW_MEM.as_mut().unwrap() }, storage));
-
-    Ok(system)
+    Ok(storage)
 }
 
 #[cfg(not(feature = "ulp"))]
@@ -238,7 +279,7 @@ pub fn wifi<'d>(
 
 pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
     let (ws_processor, ws_acceptor) =
-        EspHttpWsProcessor::<WS_MAX_CONNECTIONS, { web::WS_MAX_FRAME_LEN }>::new(());
+        EspHttpWsProcessor::<{ web::WS_MAX_CONNECTIONS }, { web::WS_MAX_FRAME_LEN }>::new(());
 
     let ws_processor = Mutex::<CriticalSectionRawMutex, _>::new(RefCell::new(ws_processor));
 

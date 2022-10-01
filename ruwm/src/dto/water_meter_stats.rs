@@ -22,6 +22,10 @@ pub struct FlowSnapshot {
 }
 
 impl FlowSnapshot {
+    pub const fn new_default() -> Self {
+        Self::new(0, 0)
+    }
+
     pub const fn new(current_time_secs: u64, current_edges_count: u64) -> Self {
         Self {
             time_secs: current_time_secs,
@@ -114,8 +118,15 @@ pub struct WaterMeterStatsState {
 }
 
 impl WaterMeterStatsState {
-    pub fn new() -> Self {
-        Default::default()
+    pub const fn new() -> Self {
+        const DEFAULT_SNAPSHOT: FlowSnapshot = FlowSnapshot::new_default();
+
+        Self {
+            installation: FlowSnapshot::new_default(),
+            most_recent: FlowSnapshot::new_default(),
+            snapshots: [DEFAULT_SNAPSHOT; FLOW_STATS_INSTANCES],
+            measurements: [None; FLOW_STATS_INSTANCES],
+        }
     }
 
     pub fn update(&mut self, edges_count: u64, now_secs: u64) -> bool {

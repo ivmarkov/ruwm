@@ -1,70 +1,26 @@
 use embassy_futures::select::{select3, Either3};
 
-use crate::battery::BatteryState;
-use crate::channel::{Receiver, Sender};
+use crate::battery::{self, BatteryState};
+use crate::channel::Receiver;
 use crate::notification::Notification;
-use crate::state::StateCellRead;
-use crate::valve::{ValveCommand, ValveState};
-use crate::water_meter::WaterMeterState;
+use crate::valve::{self, ValveCommand, ValveState};
+use crate::wm;
 
-pub struct Emergency {
-    valve_state_notif: Notification,
-    wm_state_notif: Notification,
-    battery_state_notif: Notification,
-}
+pub static VALVE_STATE_NOTIF: Notification = Notification::new();
+pub static WM_STATE_NOTIF: Notification = Notification::new();
+pub static BATTERY_STATE_NOTIF: Notification = Notification::new();
 
-impl Emergency {
-    pub const fn new() -> Self {
-        Self {
-            valve_state_notif: Notification::new(),
-            wm_state_notif: Notification::new(),
-            battery_state_notif: Notification::new(),
-        }
-    }
+pub async fn process() {
+    let mut valve_source = (&VALVE_STATE_NOTIF, &valve::STATE);
+    let mut wm_source = (&WM_STATE_NOTIF, &wm::STATE);
+    let mut battery_source = (&BATTERY_STATE_NOTIF, &battery::STATE);
 
-    pub fn valve_state_sink(&self) -> &Notification {
-        &self.valve_state_notif
-    }
-
-    pub fn wm_state_sink(&self) -> &Notification {
-        &self.wm_state_notif
-    }
-
-    pub fn battery_state_sink(&self) -> &Notification {
-        &self.battery_state_notif
-    }
-
-    pub async fn process(
-        &'static self,
-        valve_command: impl Sender<Data = ValveCommand>,
-        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync),
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync),
-    ) {
-        process(
-            (&self.valve_state_notif, valve_state),
-            (&self.wm_state_notif, wm_state),
-            (&self.battery_state_notif, battery_state),
-            valve_command,
-        )
-        .await
-    }
-}
-
-pub async fn process(
-    mut valve_state_source: impl Receiver<Data = Option<ValveState>>,
-    mut wm_state_source: impl Receiver<Data = WaterMeterState>,
-    mut battery_state_source: impl Receiver<Data = BatteryState>,
-    mut valve_command_sink: impl Sender<Data = ValveCommand>,
-) {
     let mut valve_state = None;
 
     loop {
-        let valve = valve_state_source.recv();
-        let wm = wm_state_source.recv();
-        let battery = battery_state_source.recv();
-
-        //pin_mut!(valve, wm, battery);
+        let valve = valve_source.recv();
+        let wm = wm_source.recv();
+        let battery = battery_source.recv();
 
         let emergency_close = match select3(valve, wm, battery).await {
             Either3::First(valve) => {
@@ -91,7 +47,7 @@ pub async fn process(
                 Some(ValveState::Closing) | Some(ValveState::Closed)
             )
         {
-            valve_command_sink.send(ValveCommand::Close).await;
+            valve::COMMAND.signal(ValveCommand::Close);
         }
     }
 }

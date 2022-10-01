@@ -24,18 +24,20 @@ pub mod notification;
 #[cfg(feature = "system")]
 pub mod pulse_counter;
 #[cfg(feature = "system")]
+pub mod quit;
+#[cfg(feature = "system")]
 pub mod screen;
+#[cfg(all(feature = "system", feature = "edge-executor"))]
+pub mod spawn;
 #[cfg(feature = "system")]
 pub mod state;
 #[cfg(feature = "system")]
-pub mod system;
-#[cfg(feature = "system")]
 pub mod valve;
-#[cfg(feature = "system")]
-pub mod water_meter;
-#[cfg(feature = "system")]
-pub mod water_meter_stats;
 #[cfg(feature = "system")]
 pub mod web;
 #[cfg(feature = "system")]
 pub mod wifi;
+#[cfg(feature = "system")]
+pub mod wm;
+#[cfg(feature = "system")]
+pub mod wm_stats;

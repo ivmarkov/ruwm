@@ -12,5 +12,16 @@ macro_rules! check {
     };
 }
 
+#[macro_export]
+#[allow(unused_macros)]
+macro_rules! log_err {
+    ($result:expr) => {
+        let _ = $crate::check!($result);
+    };
+}
+
 #[allow(unused_imports)]
 pub use check;
+
+#[allow(unused_imports)]
+pub use log_err;
