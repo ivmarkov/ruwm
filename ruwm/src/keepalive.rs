@@ -3,11 +3,18 @@ use core::fmt::Debug;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Timer};
 
-use crate::channel::{Receiver, Sender};
 use crate::notification::Notification;
+use crate::quit;
+use crate::state::State;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
+
+pub static STATE_NOTIFY: &[&Notification] = &[];
+
+pub static STATE: State<RemainingTime> = State::new(RemainingTime::Duration(TIMEOUT));
+
+pub static NOTIF: Notification = Notification::new();
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RemainingTime {
@@ -15,43 +22,13 @@ pub enum RemainingTime {
     Duration(Duration),
 }
 
-pub struct Keepalive {
-    event_notif: Notification,
-}
-
-impl Keepalive {
-    pub const fn new() -> Self {
-        Self {
-            event_notif: Notification::new(),
-        }
-    }
-
-    pub fn event_sink(&self) -> &Notification {
-        &self.event_notif
-    }
-
-    pub async fn process(
-        &'static self,
-        remaining_time_sink: impl Sender<Data = RemainingTime>,
-        quit_sink: impl Sender<Data = ()>,
-    ) {
-        process(&self.event_notif, remaining_time_sink, quit_sink).await
-    }
-}
-
-pub async fn process(
-    mut event_source: impl Receiver<Data = ()>,
-    mut remaining_time_sink: impl Sender<Data = RemainingTime>,
-    mut quit_sink: impl Sender<Data = ()>,
-) {
+pub async fn process() {
     let mut quit_time = Some(Instant::now() + TIMEOUT);
     let mut quit_time_sent = None;
 
     loop {
-        let event = event_source.recv();
+        let event = NOTIF.wait();
         let tick = Timer::after(Duration::from_secs(2) /*Duration::from_millis(500)*/);
-
-        //pin_mut!(event, tick);
 
         let result = select(event, tick).await;
         let now = Instant::now();
@@ -72,7 +49,7 @@ pub async fn process(
         }
 
         if quit_time.map(|quit_time| now >= quit_time).unwrap_or(false) {
-            quit_sink.send(()).await;
+            quit::QUIT.notify();
         } else if quit_time.is_some() != quit_time_sent.is_some()
             || quit_time_sent
                 .map(|quit_time_sent| quit_time_sent + REMAINING_TIME_TRIGGER <= now)
@@ -84,7 +61,9 @@ pub async fn process(
                 .map(|quit_time| RemainingTime::Duration(quit_time - now))
                 .unwrap_or(RemainingTime::Indefinite);
 
-            remaining_time_sink.send(remaining_time).await;
+            STATE
+                .update_with("REMAINING TIME", |_state| remaining_time, STATE_NOTIFY)
+                .await;
         }
     }
 }

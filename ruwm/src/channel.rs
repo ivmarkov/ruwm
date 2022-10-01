@@ -5,7 +5,7 @@ use embassy_sync::{blocking_mutex::raw::RawMutex, signal::Signal};
 use log::info;
 
 use crate::notification::Notification;
-use crate::state::StateCellRead;
+use crate::state::State;
 
 pub trait Sender {
     type Data: Send;
@@ -146,12 +146,26 @@ impl<'a> Sender for &'a Notification {
     }
 }
 
-impl<'a, S> Receiver for (&'a Notification, &'a S)
+impl<'a> Sender for &'a [&'a Notification] {
+    type Data = ();
+
+    type SendFuture<'b> = impl Future<Output = ()>
+    where Self: 'b;
+
+    fn send(&mut self, _value: Self::Data) -> Self::SendFuture<'_> {
+        async move {
+            for notification in self.iter() {
+                notification.notify();
+            }
+        }
+    }
+}
+
+impl<'a, T> Receiver for (&'a Notification, &'a State<T>)
 where
-    S: StateCellRead + Send + Sync + 'a,
-    S::Data: Send,
+    T: Clone + Send + 'a,
 {
-    type Data = S::Data;
+    type Data = T;
 
     type RecvFuture<'b> = impl Future<Output = Self::Data> where Self: 'b;
 

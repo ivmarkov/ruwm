@@ -6,7 +6,7 @@ use log::{info, warn};
 use postcard::{from_bytes, to_slice};
 
 use embassy_futures::select::select4;
-use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
 
@@ -15,14 +15,29 @@ use embedded_svc::ws::{self, FrameType};
 
 use edge_frame::dto::Role;
 
-use crate::battery::BatteryState;
-use crate::channel::{Receiver, Sender};
+use crate::battery;
+use crate::channel::Receiver;
 use crate::notification::Notification;
-use crate::state::StateCellRead;
-use crate::valve::{ValveCommand, ValveState};
-use crate::water_meter::{WaterMeterCommand, WaterMeterState};
+use crate::valve;
+use crate::wm;
 
 pub use crate::dto::web::*;
+
+#[cfg(any(
+    feature = "ws-max-connections-2",
+    not(any(
+        feature = "ws-max-connections-4",
+        feature = "ws-max-connections-8",
+        feature = "ws-max-connections-16"
+    ))
+))]
+pub const WS_MAX_CONNECTIONS: usize = 2;
+#[cfg(feature = "ws-max-connections-4")]
+pub const WS_MAX_CONNECTIONS: usize = 4;
+#[cfg(feature = "ws-max-connections-8")]
+pub const WS_MAX_CONNECTIONS: usize = 8;
+#[cfg(feature = "ws-max-connections-16")]
+pub const WS_MAX_CONNECTIONS: usize = 16;
 
 #[derive(Debug)]
 pub enum WebError<E> {
@@ -63,158 +78,125 @@ enum WebFrame {
 
 pub const WS_MAX_FRAME_LEN: usize = 512;
 
-pub struct Web<const N: usize> {
-    valve_state_signals: [Notification; N],
-    wm_state_signals: [Notification; N],
-    wm_stats_state_signals: [Notification; N],
-    battery_state_signals: [Notification; N],
+pub struct StateNotifs<const N: usize>([Notification; N]);
+
+impl<const N: usize> StateNotifs<N> {
+    pub const fn new() -> Self {
+        const NOTIF: Notification = Notification::new();
+
+        Self([NOTIF; N])
+    }
 }
 
-impl<const N: usize> Web<N> {
-    pub fn new() -> Self {
-        Self {
-            valve_state_signals: Self::notif_arr(),
-            wm_state_signals: Self::notif_arr(),
-            wm_stats_state_signals: Self::notif_arr(),
-            battery_state_signals: Self::notif_arr(),
-        }
-    }
-
-    pub fn valve_state_sinks(&self) -> [&Notification; N] {
-        Self::as_refs_notif_arr(&self.valve_state_signals)
-    }
-
-    pub fn wm_state_sinks(&self) -> [&Notification; N] {
-        Self::as_refs_notif_arr(&self.wm_state_signals)
-    }
-
-    pub fn wm_stats_state_sinks(&self) -> [&Notification; N] {
-        Self::as_refs_notif_arr(&self.wm_stats_state_signals)
-    }
-
-    pub fn battery_state_sinks(&self) -> [&Notification; N] {
-        Self::as_refs_notif_arr(&self.battery_state_signals)
-    }
-
-    pub async fn process<A: Acceptor, R: RawMutex, const W: usize>(
-        &'static self,
-        acceptor: A,
-        valve_command: impl Sender<Data = ValveCommand>,
-        wm_command: impl Sender<Data = WaterMeterCommand>,
-        valve_state: &'static (impl StateCellRead<Data = Option<ValveState>> + Send + Sync + 'static),
-        wm_state: &'static (impl StateCellRead<Data = WaterMeterState> + Send + Sync + 'static),
-        battery_state: &'static (impl StateCellRead<Data = BatteryState> + Send + Sync + 'static),
-    ) {
-        let valve_command = AsyncMutex::<R, _>::new(valve_command);
-        let wm_command = AsyncMutex::<R, _>::new(wm_command);
-
-        info!("Creating queue for {} workers", W);
-        let channel = embassy_sync::channel::Channel::<R, _, W>::new();
-
-        let mut workers = heapless::Vec::<_, N>::new();
-
-        for index in 0..N {
-            let channel = &channel;
-
-            workers
-                .push({
-                    let valve_command = &valve_command;
-                    let wm_command = &wm_command;
-
-                    async move {
-                        loop {
-                            let (sender, receiver) = channel.recv().await;
-
-                            info!("Handler {}: Got new connection", index);
-
-                            let res = handle_connection::<R, _, _>(
-                                sender,
-                                receiver,
-                                (&self.valve_state_signals[index], valve_state),
-                                (&self.wm_state_signals[index], wm_state),
-                                (&self.battery_state_signals[index], battery_state),
-                                &mut *valve_command.lock().await,
-                                &mut *wm_command.lock().await,
-                                valve_state,
-                                wm_state,
-                                battery_state,
-                            )
-                            .await;
-
-                            match res {
-                                Ok(()) => {
-                                    info!("Handler {}: connection closed", index);
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Handler {}: connection closed with error {:?}",
-                                        index, e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                })
-                .unwrap_or_else(|_| unreachable!());
-        }
-
-        let workers = workers.into_array::<N>().unwrap_or_else(|_| unreachable!());
-
-        embassy_futures::select::select(
-            async {
-                loop {
-                    info!("Acceptor: waiting for new connection");
-
-                    match acceptor.accept().await {
-                        Ok((sender, receiver)) => {
-                            info!("Acceptor: got new connection");
-                            channel.send((sender, receiver)).await;
-                            info!("Acceptor: connection sent");
-                        }
-                        Err(e) => {
-                            warn!("Got error when accepting a new connection: {:?}", e);
-                        }
-                    }
-                }
-            },
-            embassy_futures::select::select_array(workers),
-        )
-        .await;
-
-        info!("Server processing loop quit");
-    }
-
-    fn as_refs_notif_arr(arr: &[Notification; N]) -> [&Notification; N] {
-        arr.iter()
+impl<const N: usize> StateNotifs<N> {
+    pub fn as_ref(&self) -> [&Notification; N] {
+        self.0
+            .iter()
             .collect::<heapless::Vec<_, N>>()
             .into_array::<N>()
             .unwrap_or_else(|_| unreachable!())
     }
+}
 
-    fn notif_arr() -> [Notification; N] {
-        (0..N)
-            .into_iter()
-            .map(|_| Notification::new())
-            .collect::<heapless::Vec<_, N>>()
-            .into_array()
-            .unwrap_or_else(|_| unreachable!())
+pub struct StateWebNotifs<const N: usize> {
+    pub valve: StateNotifs<N>,
+    pub wm: StateNotifs<N>,
+    pub wm_stats: StateNotifs<N>,
+    pub battery: StateNotifs<N>,
+}
+
+impl<const N: usize> StateWebNotifs<N> {
+    pub const fn new() -> Self {
+        Self {
+            valve: StateNotifs::new(),
+            wm: StateNotifs::new(),
+            wm_stats: StateNotifs::new(),
+            battery: StateNotifs::new(),
+        }
     }
 }
 
-pub async fn handle_connection<R, WS, WR>(
+pub static NOTIFY: StateWebNotifs<{ WS_MAX_CONNECTIONS }> = StateWebNotifs::new();
+
+pub async fn process<A: Acceptor, const W: usize>(acceptor: A) {
+    info!(
+        "Creating queue for {} tasks and {} workers",
+        W, WS_MAX_CONNECTIONS
+    );
+    let channel = embassy_sync::channel::Channel::<NoopRawMutex, _, W>::new();
+
+    let mut workers = heapless::Vec::<_, WS_MAX_CONNECTIONS>::new();
+
+    for index in 0..WS_MAX_CONNECTIONS {
+        let channel = &channel;
+
+        workers
+            .push({
+                async move {
+                    loop {
+                        let (sender, receiver) = channel.recv().await;
+
+                        info!("Handler {}: Got new connection", index);
+
+                        let res = handle_connection(
+                            sender,
+                            receiver,
+                            &NOTIFY.valve.0[index],
+                            &NOTIFY.wm.0[index],
+                            &NOTIFY.battery.0[index],
+                        )
+                        .await;
+
+                        match res {
+                            Ok(()) => {
+                                info!("Handler {}: connection closed", index);
+                            }
+                            Err(e) => {
+                                warn!("Handler {}: connection closed with error {:?}", index, e);
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap_or_else(|_| unreachable!());
+    }
+
+    let workers = workers
+        .into_array::<WS_MAX_CONNECTIONS>()
+        .unwrap_or_else(|_| unreachable!());
+
+    embassy_futures::select::select(
+        async {
+            loop {
+                info!("Acceptor: waiting for new connection");
+
+                match acceptor.accept().await {
+                    Ok((sender, receiver)) => {
+                        info!("Acceptor: got new connection");
+                        channel.send((sender, receiver)).await;
+                        info!("Acceptor: connection sent");
+                    }
+                    Err(e) => {
+                        warn!("Got error when accepting a new connection: {:?}", e);
+                    }
+                }
+            }
+        },
+        embassy_futures::select::select_array(workers),
+    )
+    .await;
+
+    info!("Server processing loop quit");
+}
+
+async fn handle_connection<WS, WR>(
     mut sender: WS,
     receiver: WR,
-    valve_state: impl Receiver<Data = Option<ValveState>>,
-    wm_state: impl Receiver<Data = WaterMeterState>,
-    battery_state: impl Receiver<Data = BatteryState>,
-    valve_command: impl Sender<Data = ValveCommand>,
-    wm_command: impl Sender<Data = WaterMeterCommand>,
-    valve: &impl StateCellRead<Data = Option<ValveState>>,
-    wm: &impl StateCellRead<Data = WaterMeterState>,
-    battery: &impl StateCellRead<Data = BatteryState>,
+    valve_state_notif: &Notification,
+    wm_state_notif: &Notification,
+    battery_state_notif: &Notification,
 ) -> Result<(), WebError<WS::Error>>
 where
-    R: RawMutex,
     WR: ws::asynch::Receiver,
     WS: ws::asynch::Sender<Error = WR::Error>,
 {
@@ -222,47 +204,38 @@ where
 
     web_send(&mut sender, &WebEvent::RoleState(role)).await?;
 
-    let role = Mutex::<R, _>::new(Cell::new(role));
-    let sender = AsyncMutex::new(sender);
+    let role = Mutex::<NoopRawMutex, _>::new(Cell::new(role));
+    let sender = AsyncMutex::<NoopRawMutex, _>::new(sender);
 
     select4(
-        receive(
-            receiver,
+        receive(receiver, &sender, &role),
+        send_state(
             &sender,
             &role,
-            valve_command,
-            wm_command,
-            valve,
-            wm,
-            battery,
+            (valve_state_notif, &valve::STATE),
+            |state| WebEvent::ValveState(state),
         ),
-        send_state(&sender, &role, valve_state, |state| {
-            WebEvent::ValveState(state)
-        }),
-        send_state(&sender, &role, wm_state, |state| {
+        send_state(&sender, &role, (wm_state_notif, &wm::STATE), |state| {
             WebEvent::WaterMeterState(state)
         }),
-        send_state(&sender, &role, battery_state, |state| {
-            WebEvent::BatteryState(state)
-        }),
+        send_state(
+            &sender,
+            &role,
+            (battery_state_notif, &battery::STATE),
+            |state| WebEvent::BatteryState(state),
+        ),
     )
     .await;
 
     Ok(())
 }
 
-async fn receive<R, WS, WR>(
+async fn receive<WS, WR>(
     mut receiver: WR,
-    sender: &AsyncMutex<R, WS>,
-    role: &Mutex<R, Cell<Role>>,
-    mut valve_command: impl Sender<Data = ValveCommand>,
-    mut wm_command: impl Sender<Data = WaterMeterCommand>,
-    valve: &impl StateCellRead<Data = Option<ValveState>>,
-    wm: &impl StateCellRead<Data = WaterMeterState>,
-    battery: &impl StateCellRead<Data = BatteryState>,
+    sender: &AsyncMutex<impl RawMutex, WS>,
+    role: &Mutex<impl RawMutex, Cell<Role>>,
 ) -> Result<(), WebError<WS::Error>>
 where
-    R: RawMutex,
     WR: ws::asynch::Receiver,
     WS: ws::asynch::Sender<Error = WR::Error>,
 {
@@ -279,11 +252,11 @@ where
         let web_event = if response.is_accepted() {
             match request.payload() {
                 WebRequestPayload::ValveCommand(command) => {
-                    valve_command.send(*command).await;
+                    valve::COMMAND.signal(*command);
                     WebEvent::Response(response)
                 }
                 WebRequestPayload::WaterMeterCommand(command) => {
-                    wm_command.send(*command).await;
+                    wm::COMMAND.signal(*command);
                     WebEvent::Response(response)
                 }
                 WebRequestPayload::Authenticate(username, password) => {
@@ -303,9 +276,13 @@ where
                     role.lock(|role| role.set(Role::None));
                     WebEvent::RoleState(Role::None)
                 }
-                WebRequestPayload::ValveStateRequest => WebEvent::ValveState(valve.get()),
-                WebRequestPayload::WaterMeterStateRequest => WebEvent::WaterMeterState(wm.get()),
-                WebRequestPayload::BatteryStateRequest => WebEvent::BatteryState(battery.get()),
+                WebRequestPayload::ValveStateRequest => WebEvent::ValveState(valve::STATE.get()),
+                WebRequestPayload::WaterMeterStateRequest => {
+                    WebEvent::WaterMeterState(wm::STATE.get())
+                }
+                WebRequestPayload::BatteryStateRequest => {
+                    WebEvent::BatteryState(battery::STATE.get())
+                }
                 WebRequestPayload::WifiStatusRequest => todo!(),
             }
         } else {
@@ -318,14 +295,13 @@ where
     Ok(())
 }
 
-async fn send_state<R, S, T>(
-    connection: &AsyncMutex<R, S>,
-    role: &Mutex<R, Cell<Role>>,
+async fn send_state<S, T>(
+    connection: &AsyncMutex<impl RawMutex, S>,
+    role: &Mutex<impl RawMutex, Cell<Role>>,
     mut state: impl Receiver<Data = T>,
     to_web_event: impl Fn(T) -> WebEvent,
 ) -> Result<(), WebError<S::Error>>
 where
-    R: RawMutex,
     S: ws::asynch::Sender,
 {
     loop {

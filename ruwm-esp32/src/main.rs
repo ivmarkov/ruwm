@@ -4,7 +4,10 @@
 
 extern crate alloc;
 
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
+
+use embedded_svc::storage::Storage;
 
 use esp_idf_hal::adc::*;
 use esp_idf_hal::executor::{CurrentTaskWait, TaskHandle};
@@ -16,6 +19,9 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
 use esp_idf_sys::esp;
+
+use ruwm::button;
+use ruwm::spawn;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
@@ -102,9 +108,20 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let nvs_default_partition = EspDefaultNvsPartition::take()?;
     let sysloop = EspSystemEventLoop::take()?;
 
-    // System
+    // Storage
 
-    let system = services::system(nvs_default_partition.clone())?;
+    let storage = services::storage(nvs_default_partition.clone())?;
+
+    unsafe {
+        services::RTC_MEMORY.wm = storage
+            .lock(|storage| storage.borrow().get("wm-state"))
+            .unwrap()
+            .unwrap_or_default();
+
+        ruwm::valve::STATE.set(services::RTC_MEMORY.valve);
+        ruwm::wm::STATE.set(services::RTC_MEMORY.wm);
+        ruwm::wm_stats::STATE.set(services::RTC_MEMORY.wm_stats);
+    }
 
     // Pulse counter
 
@@ -119,7 +136,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let (wifi, wifi_notif) = services::wifi(
         peripherals.modem,
         sysloop.clone(),
-        Some(nvs_default_partition),
+        Some(nvs_default_partition.clone()),
     )?;
 
     // Httpd
@@ -130,21 +147,41 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
 
+    // Storage
+
+    let storage: &'static Mutex<_, _> = services::storage(nvs_default_partition)?;
+
     // High-prio executor
 
-    let (mut executor1, tasks1) = system.spawn_executor0::<TaskHandle, CurrentTaskWait, _, _>(
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-        pulse_counter,
-        pulse_wakeup,
-        AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
-        AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
-        PinDriver::input(peripherals.battery.power)?,
-        services::subscribe_pin(peripherals.buttons.button1, move || system.button1_signal())?,
-        services::subscribe_pin(peripherals.buttons.button2, move || system.button1_signal())?,
-        services::subscribe_pin(peripherals.buttons.button3, move || system.button1_signal())?,
-    )?;
+    let (mut high_prio_executor, high_prio_tasks) =
+        spawn::high_prio_executor::<TaskHandle, CurrentTaskWait, _, _>(
+            valve_power_pin,
+            valve_open_pin,
+            valve_close_pin,
+            Some(|state| unsafe {
+                services::RTC_MEMORY.valve = state;
+            }),
+            pulse_counter,
+            pulse_wakeup,
+            Some(|state| unsafe {
+                services::RTC_MEMORY.wm = state;
+            }),
+            Some(|state| unsafe {
+                services::RTC_MEMORY.wm_stats = state;
+            }),
+            AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
+            AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
+            PinDriver::input(peripherals.battery.power)?,
+            services::subscribe_pin(peripherals.buttons.button1, move || {
+                button::BUTTON1_PIN_EDGE.notify()
+            })?,
+            services::subscribe_pin(peripherals.buttons.button2, move || {
+                button::BUTTON2_PIN_EDGE.notify()
+            })?,
+            services::subscribe_pin(peripherals.buttons.button3, move || {
+                button::BUTTON3_PIN_EDGE.notify()
+            })?,
+        )?;
 
     // Mid-prio executor
 
@@ -159,9 +196,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let execution2 = system.schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
-        system.spawn_executor1(
+    let mid_prio_execution = spawn::schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
+        spawn::mid_prio_executor(
             services::display(display_peripherals).unwrap(),
+            Some(move |state| {
+                ruwm::log_err!(storage.lock(|storage| storage.borrow_mut().set("wm-state", &state)));
+            }),
             wifi,
             wifi_notif,
             mqtt_conn,
@@ -179,8 +219,8 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let execution3 = system.schedule::<4, TaskHandle, CurrentTaskWait>(50000, move || {
-        system.spawn_executor2::<MQTT_MAX_TOPIC_LEN, _, _>(
+    let low_prio_execution = spawn::schedule::<4, TaskHandle, CurrentTaskWait>(50000, move || {
+        spawn::low_prio_executor::<MQTT_MAX_TOPIC_LEN, _, _>(
             mqtt_topic_prefix,
             mqtt_client,
             ws_acceptor,
@@ -191,14 +231,14 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     log::info!("Starting high-prio executor");
 
-    system.run(&mut executor1, tasks1);
+    spawn::run(&mut high_prio_executor, high_prio_tasks);
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
 
     std::thread::sleep(core::time::Duration::from_millis(2000));
 
-    execution2.join().unwrap();
-    execution3.join().unwrap();
+    mid_prio_execution.join().unwrap();
+    low_prio_execution.join().unwrap();
 
     log::info!("Finished execution");
 

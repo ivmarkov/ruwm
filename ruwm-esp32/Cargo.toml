@@ -25,6 +25,8 @@ critical-section = "1.1"
 heapless = "0.7"
 log = "0.4"
 futures = {version = "0.3", features = ["async-await"] }
+serde = { version = "1", default-features = false }
+postcard = "0.7"
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
 esp-idf-sys = { version = "0.31.9", features = ["binstart"] }
