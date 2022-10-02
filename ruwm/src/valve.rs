@@ -165,12 +165,10 @@ fn start_spin(
     };
 }
 
-pub async fn persist(mut persister: Option<impl FnMut(Option<ValveState>)>) {
+pub async fn persist(mut persister: impl FnMut(Option<ValveState>)) {
     loop {
         STATE_PERSIST_NOTIFY.wait().await;
 
-        if let Some(persister) = persister.as_mut() {
-            persister(STATE.get());
-        }
+        persister(STATE.get());
     }
 }

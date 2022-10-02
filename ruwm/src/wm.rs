@@ -75,17 +75,15 @@ async fn process_commands(mut pulse_wakeup: impl PulseWakeup) {
     }
 }
 
-pub async fn persist(mut persister: Option<impl FnMut(WaterMeterState)>) {
+pub async fn persist(mut persister: impl FnMut(WaterMeterState)) {
     loop {
         STATE_PERSIST_NOTIFY.wait().await;
 
-        if let Some(persister) = persister.as_mut() {
-            persister(STATE.get());
-        }
+        persister(STATE.get());
     }
 }
 
-pub async fn flash(mut flasher: Option<impl FnMut(WaterMeterState)>) {
+pub async fn flash(mut flasher: impl FnMut(WaterMeterState)) {
     let mut cycle = 0;
 
     loop {
@@ -96,9 +94,7 @@ pub async fn flash(mut flasher: Option<impl FnMut(WaterMeterState)>) {
         if cycle >= FLASH_WRITE_CYCLE {
             cycle = 0;
 
-            if let Some(flasher) = flasher.as_mut() {
-                flasher(STATE.get());
-            }
+            flasher(STATE.get());
         }
     }
 }
