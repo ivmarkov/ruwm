@@ -8,10 +8,7 @@ use embassy_futures::select::{select, Either};
 
 use embedded_hal::digital::v2::InputPin;
 
-use crate::{
-    channel::{LogSender, Receiver, Sender},
-    notification::Notification,
-};
+use crate::notification::{notify_all, Notification};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
@@ -32,7 +29,8 @@ pub async fn button1_process(pin: impl InputPin, pressed_level: PressedLevel) {
         pin,
         pressed_level,
         &BUTTON1_PIN_EDGE,
-        (BUTTON1_NOTIFY, LogSender::new("BUTTON1 STATE")),
+        "BUTTON1 STATE",
+        BUTTON1_NOTIFY,
     )
     .await;
 }
@@ -42,7 +40,8 @@ pub async fn button2_process(pin: impl InputPin, pressed_level: PressedLevel) {
         pin,
         pressed_level,
         &BUTTON2_PIN_EDGE,
-        (BUTTON2_NOTIFY, LogSender::new("BUTTON2 STATE")),
+        "BUTTON2 STATE",
+        BUTTON2_NOTIFY,
     )
     .await;
 }
@@ -52,51 +51,55 @@ pub async fn button3_process(pin: impl InputPin, pressed_level: PressedLevel) {
         pin,
         pressed_level,
         &BUTTON1_PIN_EDGE,
-        (BUTTON3_NOTIFY, LogSender::new("BUTTON3 STATE")),
+        "BUTTON3 STATE",
+        BUTTON3_NOTIFY,
     )
     .await;
 }
 
-async fn button_process(
+async fn button_process<'a>(
     pin: impl InputPin,
     pressed_level: PressedLevel,
-    pin_edge: &Notification,
-    pressed_sink: impl Sender<Data = ()>,
+    pin_edge: &'a Notification,
+    pressed_sink_msg: &'a str,
+    pressed_sink: &'a [&'a Notification],
 ) {
     process(
-        pin_edge,
         pin,
         pressed_level,
+        pin_edge,
         Some(Duration::from_millis(50)),
+        pressed_sink_msg,
         pressed_sink,
     )
-    .await
+    .await;
 }
 
-pub async fn process(
-    mut pin_edge: impl Receiver,
+pub async fn process<'a>(
     mut pin: impl InputPin,
     pressed_level: PressedLevel,
+    pin_edge: &'a Notification,
     debounce_duration: Option<Duration>,
-    mut pressed_sink: impl Sender<Data = ()>,
+    pressed_sink_msg: &'a str,
+    pressed_sink: &'a [&'a Notification],
 ) {
     loop {
-        wait_press(&mut pin_edge, &mut pin, pressed_level, debounce_duration).await;
+        wait_press(&mut pin, pressed_level, pin_edge, debounce_duration).await;
 
-        pressed_sink.send(()).await;
+        notify_all(pressed_sink);
     }
 }
 
-pub async fn wait_press(
-    mut pin_edge: impl Receiver,
+pub async fn wait_press<'a>(
     pin: &mut impl InputPin,
     pressed_level: PressedLevel,
+    pin_edge: &'a Notification,
     debounce_duration: Option<Duration>,
 ) {
     let mut debounce = false;
 
     loop {
-        let pin_edge = pin_edge.recv();
+        let pin_edge = pin_edge.wait();
 
         let timer = if debounce {
             if let Some(debounce_duration) = debounce_duration {

@@ -15,8 +15,7 @@ use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Pub
 use embedded_svc::mqtt::client::Details;
 
 use crate::battery::{self, BatteryState};
-use crate::channel::{LogSender, Receiver, Sender};
-use crate::notification::Notification;
+use crate::notification::{notify_all, Notification};
 use crate::valve::{ValveCommand, ValveState};
 use crate::wm::{WaterMeterCommand, WaterMeterState};
 use crate::{error, valve, wm};
@@ -78,22 +77,18 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
     let mut published_wm_state: Option<WaterMeterState> = None;
     let mut published_battery_state: Option<BatteryState> = None;
 
-    let mut valve_state_source = (&VALVE_STATE_NOTIF, &valve::STATE);
-    let mut wm_state_source = (&WM_STATE_NOTIF, &wm::STATE);
-    let mut battery_state_source = (&BATTERY_STATE_NOTIF, &battery::STATE);
-
     loop {
         let (conn_state, valve_state, wm_state, battery_state) = if connected {
             let conn = CONN_SIGNAL.wait();
-            let valve = valve_state_source.recv();
-            let wm = wm_state_source.recv();
-            let battery = battery_state_source.recv();
+            let valve = VALVE_STATE_NOTIF.wait();
+            let wm = WM_STATE_NOTIF.wait();
+            let battery = BATTERY_STATE_NOTIF.wait();
 
             match select4(conn, valve, wm, battery).await {
                 Either4::First(conn_state) => (Some(conn_state), None, None, None),
-                Either4::Second(valve_state) => (None, Some(valve_state), None, None),
-                Either4::Third(wm_state) => (None, None, Some(wm_state), None),
-                Either4::Fourth(battery_state) => (None, None, None, Some(battery_state)),
+                Either4::Second(_) => (None, Some(valve::STATE.get()), None, None),
+                Either4::Third(_) => (None, None, Some(wm::STATE.get()), None),
+                Either4::Fourth(_) => (None, None, None, Some(battery::STATE.get())),
             }
         } else {
             let conn_state = CONN_SIGNAL.wait().await;
@@ -271,12 +266,11 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
 async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS, payload: &[u8]) {
     if connected {
         if let Ok(msg_id) = error::check!(mqtt.publish(topic, qos, false, payload).await) {
+            // TODO
             info!("Published to {}", topic);
 
             if qos >= QoS::AtLeastOnce {
-                let mut notify = PUBLISH_NOTIFY;
-
-                notify.send(()).await;
+                notify_all(PUBLISH_NOTIFY);
             }
         }
     } else {
@@ -289,6 +283,8 @@ pub async fn receive(mut connection: impl Connection<Message = Option<MqttComman
         let message = connection.next().await;
 
         if let Some(message) = message {
+            info!("[MQTT/CONNECTION]: {:?}", message);
+
             if let Ok(Event::Received(Some(cmd))) = &message {
                 match cmd {
                     MqttCommand::Valve(open) => {
@@ -308,20 +304,12 @@ pub async fn receive(mut connection: impl Connection<Message = Option<MqttComman
                     _ => (),
                 }
             } else if matches!(&message, Ok(Event::Connected(_))) {
-                (LogSender::new("MQTT/CONNECTION"), &CONN_SIGNAL)
-                    .send(true)
-                    .await;
+                CONN_SIGNAL.signal(true);
             } else if matches!(&message, Ok(Event::Disconnected)) {
-                (LogSender::new("MQTT/CONNECTION"), &CONN_SIGNAL)
-                    .send(false)
-                    .await;
+                CONN_SIGNAL.signal(false);
             }
 
-            let mut notify = RECEIVE_NOTIFY;
-
-            notify
-                .send(()) // TODO
-                .await;
+            notify_all(RECEIVE_NOTIFY); // TODO
         } else {
             break;
         }

@@ -16,8 +16,8 @@ use embedded_svc::ws::{self, FrameType};
 use edge_frame::dto::Role;
 
 use crate::battery;
-use crate::channel::Receiver;
 use crate::notification::Notification;
+use crate::state::State;
 use crate::valve;
 use crate::wm;
 
@@ -209,19 +209,17 @@ where
 
     select4(
         receive(receiver, &sender, &role),
-        send_state(
-            &sender,
-            &role,
-            (valve_state_notif, &valve::STATE),
-            |state| WebEvent::ValveState(state),
-        ),
-        send_state(&sender, &role, (wm_state_notif, &wm::STATE), |state| {
+        send_state(&sender, &role, &valve::STATE, valve_state_notif, |state| {
+            WebEvent::ValveState(state)
+        }),
+        send_state(&sender, &role, &wm::STATE, wm_state_notif, |state| {
             WebEvent::WaterMeterState(state)
         }),
         send_state(
             &sender,
             &role,
-            (battery_state_notif, &battery::STATE),
+            &battery::STATE,
+            battery_state_notif,
             |state| WebEvent::BatteryState(state),
         ),
     )
@@ -298,18 +296,20 @@ where
 async fn send_state<S, T>(
     connection: &AsyncMutex<impl RawMutex, S>,
     role: &Mutex<impl RawMutex, Cell<Role>>,
-    mut state: impl Receiver<Data = T>,
+    state: &State<T>,
+    state_notif: &Notification,
     to_web_event: impl Fn(T) -> WebEvent,
 ) -> Result<(), WebError<S::Error>>
 where
     S: ws::asynch::Sender,
+    T: Clone,
 {
     loop {
-        let state = state.recv().await;
+        state_notif.wait().await;
 
         web_send_auth(
             &mut *connection.lock().await,
-            &to_web_event(state),
+            &to_web_event(state.get()),
             role.lock(|role| role.get()),
         )
         .await?;

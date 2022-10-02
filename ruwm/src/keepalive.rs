@@ -61,9 +61,7 @@ pub async fn process() {
                 .map(|quit_time| RemainingTime::Duration(quit_time - now))
                 .unwrap_or(RemainingTime::Indefinite);
 
-            STATE
-                .update_with("REMAINING TIME", |_state| remaining_time, STATE_NOTIFY)
-                .await;
+            STATE.update_with("REMAINING TIME", |_state| remaining_time, STATE_NOTIFY);
         }
     }
 }

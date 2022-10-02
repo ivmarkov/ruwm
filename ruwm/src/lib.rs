@@ -8,8 +8,6 @@
 pub mod battery;
 #[cfg(feature = "system")]
 pub mod button;
-#[cfg(feature = "system")]
-pub mod channel;
 pub mod dto;
 #[cfg(feature = "system")]
 pub mod emergency;

@@ -14,10 +14,10 @@ use valve::ValveState;
 use wm_stats::WaterMeterStatsState;
 
 use crate::button::{self, PressedLevel};
-use crate::channel::Receiver;
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::FlushableDrawTarget;
+use crate::wifi::WifiNotification;
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, web, wm_stats};
 use crate::{valve, wifi};
@@ -79,11 +79,11 @@ where
     Ok((executor, tasks))
 }
 
-pub fn mid_prio_executor<'a, EN, EW, D, E>(
+pub fn mid_prio_executor<'a, EN, EW, D>(
     display: D,
     wm_flash: impl FnMut(WaterMeterState) + 'a,
     wifi: impl WifiTrait + 'a,
-    wifi_notif: impl Receiver<Data = E> + 'a,
+    wifi_notif: impl WifiNotification + 'a,
     mqtt_conn: impl Connection<Message = Option<MqttCommand>> + 'a,
 ) -> Result<(Executor<'a, 8, EN, EW, Local>, heapless::Vec<Task<()>, 8>), SpawnError>
 where
@@ -92,7 +92,6 @@ where
     D: FlushableDrawTarget + 'a,
     D::Color: RgbColor,
     D::Error: Debug,
-    E: 'a,
 {
     let mut executor = Executor::<8, EN, EW, Local>::new();
     let mut tasks = heapless::Vec::<Task<()>, 8>::new();

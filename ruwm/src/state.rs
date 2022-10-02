@@ -6,7 +6,7 @@ use log::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
-use crate::channel::Sender;
+use crate::notification::{notify_all, Notification};
 
 pub struct State<T>(Mutex<CriticalSectionRawMutex, RefCell<T>>);
 
@@ -32,31 +32,22 @@ where
         })
     }
 
-    pub fn silent_update<F>(&self, updater: F) -> (T, T)
-    where
-        F: FnOnce(T) -> T,
-    {
-        let old = self.set(updater(self.get()));
-        let new = self.get();
-
-        (old, new)
-    }
-
-    pub async fn update_with(
+    pub fn update_with<'a>(
         &self,
         state_name: &'static str,
         updater: impl FnOnce(T) -> T,
-        mut notif: impl Sender<Data = ()>,
+        notifications: impl IntoIterator<Item = &'a &'a Notification>,
     ) -> bool
     where
         T: PartialEq + Debug,
     {
-        let (old, new) = self.silent_update(updater);
+        let old = self.set(updater(self.get()));
+        let new = self.get();
 
         if old != new {
             info!("[{} STATE]: {:?}", state_name, new);
 
-            notif.send(()).await;
+            notify_all(notifications);
 
             true
         } else {
@@ -64,15 +55,15 @@ where
         }
     }
 
-    pub async fn update(
+    pub fn update<'a>(
         &self,
         state_name: &'static str,
         data: T,
-        notif: impl Sender<Data = ()>,
+        notifications: impl IntoIterator<Item = &'a &'a Notification>,
     ) -> bool
     where
         T: PartialEq + Debug,
     {
-        self.update_with(state_name, move |_| data, notif).await
+        self.update_with(state_name, move |_| data, notifications)
     }
 }

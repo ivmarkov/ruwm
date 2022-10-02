@@ -8,7 +8,7 @@ use embassy_time::Duration;
 
 use crate::{
     button::{self, PressedLevel},
-    channel::Receiver,
+    notification::Notification,
 };
 
 pub trait PulseCounter {
@@ -51,44 +51,43 @@ where
     }
 }
 
-pub struct CpuPulseCounter<E, P> {
-    pin_edge: E,
+pub struct CpuPulseCounter<'a, P> {
     pin: P,
     pressed_level: PressedLevel,
+    pin_edge: &'a Notification,
     debounce_duration: Option<Duration>,
 }
 
-impl<E, P> CpuPulseCounter<E, P> {
+impl<'a, P> CpuPulseCounter<'a, P> {
     pub const fn new(
-        pin_edge: E,
         pin: P,
         pressed_level: PressedLevel,
+        pin_edge: &'a Notification,
         debounce_duration: Option<Duration>,
     ) -> Self {
         Self {
-            pin_edge,
             pin,
             pressed_level,
+            pin_edge,
             debounce_duration,
         }
     }
 }
 
-impl<E, P> PulseCounter for CpuPulseCounter<E, P>
+impl<'a, P> PulseCounter for CpuPulseCounter<'a, P>
 where
-    E: Receiver,
     P: InputPin,
 {
     type Error = Infallible;
 
-    type TakePulsesFuture<'a> = impl Future<Output = Result<u64, Self::Error>> where Self: 'a;
+    type TakePulsesFuture<'b> = impl Future<Output = Result<u64, Self::Error>> where Self: 'b;
 
     fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_> {
         async move {
             button::wait_press(
-                &mut self.pin_edge,
                 &mut self.pin,
                 self.pressed_level,
+                &mut self.pin_edge,
                 self.debounce_duration,
             )
             .await;
@@ -98,7 +97,7 @@ where
     }
 }
 
-impl<E, P> PulseWakeup for CpuPulseCounter<E, P> {
+impl<'a, P> PulseWakeup for CpuPulseCounter<'a, P> {
     type Error = Infallible;
 
     fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
