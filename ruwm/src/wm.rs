@@ -10,17 +10,18 @@ pub use crate::dto::water_meter::*;
 
 pub const FLASH_WRITE_CYCLE: usize = 20;
 
-pub static STATE_NOTIFY: &[&Notification] = &[
-    &crate::keepalive::NOTIF,
-    &crate::emergency::WM_STATE_NOTIF,
-    &crate::wm_stats::WM_STATE_NOTIF,
-    &crate::screen::WM_STATE_NOTIF,
-    &crate::mqtt::WM_STATE_NOTIF,
-    &STATE_PERSIST_NOTIFY,
-    &STATE_FLASH_NOTIFY,
-];
-
-pub static STATE: State<WaterMeterState> = State::new(WaterMeterState::new());
+pub static STATE: State<WaterMeterState, 7> = State::new(
+    WaterMeterState::new(),
+    [
+        &crate::keepalive::NOTIF,
+        &crate::emergency::WM_STATE_NOTIF,
+        &crate::wm_stats::WM_STATE_NOTIF,
+        &crate::screen::WM_STATE_NOTIF,
+        &crate::mqtt::WM_STATE_NOTIF,
+        &STATE_PERSIST_NOTIFY,
+        &STATE_FLASH_NOTIFY,
+    ],
+);
 
 static STATE_PERSIST_NOTIFY: Notification = Notification::new();
 static STATE_FLASH_NOTIFY: Notification = Notification::new();
@@ -40,15 +41,11 @@ async fn process_pulses(mut pulse_counter: impl PulseCounter) {
         let pulses = pulse_counter.take_pulses().await.unwrap();
 
         if pulses > 0 {
-            STATE.update_with(
-                "WM",
-                |state| WaterMeterState {
-                    edges_count: state.edges_count + pulses,
-                    armed: state.armed,
-                    leaking: state.armed,
-                },
-                STATE_NOTIFY,
-            );
+            STATE.update_with("WM", |state| WaterMeterState {
+                edges_count: state.edges_count + pulses,
+                armed: state.armed,
+                leaking: state.armed,
+            });
         }
     }
 }
@@ -59,15 +56,11 @@ async fn process_commands(mut pulse_wakeup: impl PulseWakeup) {
 
         pulse_wakeup.set_enabled(armed).unwrap();
 
-        STATE.update_with(
-            "WM",
-            |state| WaterMeterState {
-                edges_count: state.edges_count,
-                armed,
-                leaking: state.leaking,
-            },
-            STATE_NOTIFY,
-        );
+        STATE.update_with("WM", |state| WaterMeterState {
+            edges_count: state.edges_count,
+            armed,
+            leaking: state.leaking,
+        });
     }
 }
 

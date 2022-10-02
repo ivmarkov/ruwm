@@ -9,7 +9,6 @@ use embassy_sync::signal::Signal;
 
 use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
-use crate::notification::Notification;
 use crate::state::State;
 
 pub trait WifiNotification {
@@ -25,13 +24,14 @@ pub enum WifiCommand {
     SetConfiguration(Configuration),
 }
 
-pub static STATE_NOTIFY: &[&Notification] = &[
-    &crate::keepalive::NOTIF,
-    &crate::screen::WIFI_STATE_NOTIF,
-    &crate::mqtt::WIFI_STATE_NOTIF,
-];
-
-pub static STATE: State<Option<bool>> = State::new(None);
+pub static STATE: State<Option<bool>, 3> = State::new(
+    None,
+    [
+        &crate::keepalive::NOTIF,
+        &crate::screen::WIFI_STATE_NOTIF,
+        &crate::mqtt::WIFI_STATE_NOTIF,
+    ],
+);
 
 pub static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
 
@@ -39,7 +39,7 @@ pub async fn process(mut wifi: impl WifiTrait, mut state_changed_source: impl Wi
     loop {
         match select(state_changed_source.wait(), COMMAND.wait()).await {
             Either::First(_) => {
-                STATE.update("WIFI", Some(wifi.is_connected().unwrap()), STATE_NOTIFY);
+                STATE.update("WIFI", Some(wifi.is_connected().unwrap()));
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),

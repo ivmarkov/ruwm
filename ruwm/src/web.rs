@@ -293,10 +293,10 @@ where
     Ok(())
 }
 
-async fn send_state<S, T>(
+async fn send_state<'a, S, T, const N: usize>(
     connection: &AsyncMutex<impl RawMutex, S>,
     role: &Mutex<impl RawMutex, Cell<Role>>,
-    state: &State<T>,
+    state: &State<'a, T, N>,
     state_notif: &Notification,
     to_web_event: impl Fn(T) -> WebEvent,
 ) -> Result<(), WebError<S::Error>>

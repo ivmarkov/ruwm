@@ -58,9 +58,3 @@ impl Default for Notification {
         Self::new()
     }
 }
-
-pub fn notify_all<'a>(notifications: impl IntoIterator<Item = &'a &'a Notification>) {
-    for notification in notifications {
-        notification.notify();
-    }
-}

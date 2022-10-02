@@ -8,7 +8,7 @@ use embassy_futures::select::{select, Either};
 
 use embedded_hal::digital::v2::InputPin;
 
-use crate::notification::{notify_all, Notification};
+use crate::notification::Notification;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {
@@ -86,7 +86,9 @@ pub async fn process<'a>(
     loop {
         wait_press(&mut pin, pressed_level, pin_edge, debounce_duration).await;
 
-        notify_all(pressed_sink);
+        for notification in pressed_sink {
+            notification.notify();
+        }
     }
 }
 

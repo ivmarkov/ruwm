@@ -6,24 +6,30 @@ use log::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
-use crate::notification::{notify_all, Notification};
+use crate::notification::Notification;
 
-pub struct State<T>(Mutex<CriticalSectionRawMutex, RefCell<T>>);
+pub struct State<'a, T, const N: usize> {
+    state: Mutex<CriticalSectionRawMutex, RefCell<T>>,
+    notifications: [&'a Notification; N],
+}
 
-impl<T> State<T>
+impl<'a, T, const N: usize> State<'a, T, N>
 where
     T: Clone,
 {
-    pub const fn new(data: T) -> Self {
-        Self(Mutex::new(RefCell::new(data)))
+    pub const fn new(data: T, notifications: [&'a Notification; N]) -> Self {
+        Self {
+            state: Mutex::new(RefCell::new(data)),
+            notifications,
+        }
     }
 
     pub fn get(&self) -> T {
-        self.0.lock(|state| state.borrow().clone())
+        self.state.lock(|state| state.borrow().clone())
     }
 
     pub fn set(&self, data: T) -> T {
-        self.0.lock(|state| {
+        self.state.lock(|state| {
             let old = state.borrow().clone();
 
             *state.borrow_mut() = data;
@@ -32,12 +38,7 @@ where
         })
     }
 
-    pub fn update_with<'a>(
-        &self,
-        state_name: &'static str,
-        updater: impl FnOnce(T) -> T,
-        notifications: impl IntoIterator<Item = &'a &'a Notification>,
-    ) -> bool
+    pub fn update_with(&self, state_name: &'static str, updater: impl FnOnce(T) -> T) -> bool
     where
         T: PartialEq + Debug,
     {
@@ -47,7 +48,9 @@ where
         if old != new {
             info!("[{} STATE]: {:?}", state_name, new);
 
-            notify_all(notifications);
+            for notification in self.notifications {
+                notification.notify();
+            }
 
             true
         } else {
@@ -55,15 +58,10 @@ where
         }
     }
 
-    pub fn update<'a>(
-        &self,
-        state_name: &'static str,
-        data: T,
-        notifications: impl IntoIterator<Item = &'a &'a Notification>,
-    ) -> bool
+    pub fn update(&self, state_name: &'static str, data: T) -> bool
     where
         T: PartialEq + Debug,
     {
-        self.update_with(state_name, move |_| data, notifications)
+        self.update_with(state_name, move |_| data)
     }
 }

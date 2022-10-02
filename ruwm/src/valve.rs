@@ -19,15 +19,16 @@ pub use crate::dto::valve::*;
 
 pub const TURN_DELAY: Duration = Duration::from_secs(20);
 
-pub static STATE_NOTIFY: &[&Notification] = &[
-    &crate::keepalive::NOTIF,
-    &crate::emergency::VALVE_STATE_NOTIF,
-    &crate::screen::VALVE_STATE_NOTIF,
-    &crate::mqtt::VALVE_STATE_NOTIF,
-    &STATE_PERSIST_NOTIFY,
-];
-
-pub static STATE: State<Option<ValveState>> = State::new(None);
+pub static STATE: State<Option<ValveState>, 5> = State::new(
+    None,
+    [
+        &crate::keepalive::NOTIF,
+        &crate::emergency::VALVE_STATE_NOTIF,
+        &crate::screen::VALVE_STATE_NOTIF,
+        &crate::mqtt::VALVE_STATE_NOTIF,
+        &STATE_PERSIST_NOTIFY,
+    ],
+);
 
 pub static COMMAND: Signal<CriticalSectionRawMutex, ValveCommand> = Signal::new();
 
@@ -91,7 +92,7 @@ pub async fn process() {
             }
         };
 
-        STATE.update("VALVE", current_state, STATE_NOTIFY);
+        STATE.update("VALVE", current_state);
     }
 }
 

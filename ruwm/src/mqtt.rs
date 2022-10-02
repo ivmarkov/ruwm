@@ -15,7 +15,7 @@ use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Pub
 use embedded_svc::mqtt::client::Details;
 
 use crate::battery::{self, BatteryState};
-use crate::notification::{notify_all, Notification};
+use crate::notification::Notification;
 use crate::valve::{ValveCommand, ValveState};
 use crate::wm::{WaterMeterCommand, WaterMeterState};
 use crate::{error, valve, wm};
@@ -272,7 +272,9 @@ async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS
             info!("Published to {}", topic);
 
             if qos >= QoS::AtLeastOnce {
-                notify_all(PUBLISH_NOTIFY);
+                for notification in PUBLISH_NOTIFY {
+                    notification.notify();
+                }
             }
         }
     } else {
@@ -311,7 +313,9 @@ pub async fn receive(mut connection: impl Connection<Message = Option<MqttComman
                 CONN_SIGNAL.signal(false);
             }
 
-            notify_all(RECEIVE_NOTIFY); // TODO
+            for notification in RECEIVE_NOTIFY {
+                notification.notify();
+            }
         } else {
             break;
         }
