@@ -79,12 +79,14 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
 
     loop {
         let (conn_state, valve_state, wm_state, battery_state) = if connected {
-            let conn = CONN_SIGNAL.wait();
-            let valve = VALVE_STATE_NOTIF.wait();
-            let wm = WM_STATE_NOTIF.wait();
-            let battery = BATTERY_STATE_NOTIF.wait();
-
-            match select4(conn, valve, wm, battery).await {
+            match select4(
+                CONN_SIGNAL.wait(),
+                VALVE_STATE_NOTIF.wait(),
+                WM_STATE_NOTIF.wait(),
+                BATTERY_STATE_NOTIF.wait(),
+            )
+            .await
+            {
                 Either4::First(conn_state) => (Some(conn_state), None, None, None),
                 Either4::Second(_) => (None, Some(valve::STATE.get()), None, None),
                 Either4::Third(_) => (None, None, Some(wm::STATE.get()), None),
