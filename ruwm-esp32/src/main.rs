@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+#[cfg(feature = "nvs")]
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
@@ -149,6 +150,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // Storage
 
+    #[cfg(feature = "nvs")]
     let storage: &'static Mutex<_, _> = services::storage(nvs_default_partition)?;
 
     // High-prio executor
@@ -158,29 +160,23 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
             valve_power_pin,
             valve_open_pin,
             valve_close_pin,
-            Some(|state| unsafe {
+            |state| unsafe {
                 services::RTC_MEMORY.valve = state;
-            }),
+            },
             pulse_counter,
             pulse_wakeup,
-            Some(|state| unsafe {
+            |state| unsafe {
                 services::RTC_MEMORY.wm = state;
-            }),
-            Some(|state| unsafe {
+            },
+            |state| unsafe {
                 services::RTC_MEMORY.wm_stats = state;
-            }),
+            },
             AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
             AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
             PinDriver::input(peripherals.battery.power)?,
-            services::subscribe_pin(peripherals.buttons.button1, move || {
-                button::BUTTON1_PIN_EDGE.notify()
-            })?,
-            services::subscribe_pin(peripherals.buttons.button2, move || {
-                button::BUTTON2_PIN_EDGE.notify()
-            })?,
-            services::subscribe_pin(peripherals.buttons.button3, move || {
-                button::BUTTON3_PIN_EDGE.notify()
-            })?,
+            services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE)?,
+            services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE)?,
+            services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,
         )?;
 
     // Mid-prio executor
@@ -199,9 +195,12 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let mid_prio_execution = spawn::schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
         spawn::mid_prio_executor(
             services::display(display_peripherals).unwrap(),
-            Some(move |state| {
-                ruwm::log_err!(storage.lock(|storage| storage.borrow_mut().set("wm-state", &state)));
-            }),
+            move |_state| {
+                #[cfg(feature = "nvs")]
+                ruwm::log_err!(
+                    storage.lock(|storage| storage.borrow_mut().set("wm-state", &_state))
+                );
+            },
             wifi,
             wifi_notif,
             mqtt_conn,

@@ -26,11 +26,11 @@ pub fn high_prio_executor<'a, EN, EW, ADC, BP>(
     valve_power_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_open_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_close_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
-    valve_persister: Option<impl FnMut(Option<ValveState>) + 'a>,
+    valve_persister: impl FnMut(Option<ValveState>) + 'a,
     pulse_counter: impl PulseCounter + 'a,
     pulse_wakeup: impl PulseWakeup + 'a,
-    wm_persister: Option<impl FnMut(WaterMeterState) + 'a>,
-    wm_stats_persister: Option<impl FnMut(WaterMeterStatsState) + 'a>,
+    wm_persister: impl FnMut(WaterMeterState) + 'a,
+    wm_stats_persister: impl FnMut(WaterMeterStatsState) + 'a,
     battery_voltage: impl adc::OneShot<ADC, u16, BP> + 'a,
     battery_pin: BP,
     power_pin: impl InputPin + 'a,
@@ -81,7 +81,7 @@ where
 
 pub fn mid_prio_executor<'a, EN, EW, D, E>(
     display: D,
-    wm_flash: Option<impl Fn(WaterMeterState) + 'a>,
+    wm_flash: impl FnMut(WaterMeterState) + 'a,
     wifi: impl WifiTrait + 'a,
     wifi_notif: impl Receiver<Data = E> + 'a,
     mqtt_conn: impl Connection<Message = Option<MqttCommand>> + 'a,

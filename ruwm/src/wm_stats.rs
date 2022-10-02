@@ -46,12 +46,10 @@ pub async fn process() {
     }
 }
 
-pub async fn persist(mut persister: Option<impl FnMut(WaterMeterStatsState)>) {
+pub async fn persist(mut persister: impl FnMut(WaterMeterStatsState)) {
     loop {
         STATE_PERSIST_NOTIFY.wait().await;
 
-        if let Some(persister) = persister.as_mut() {
-            persister(STATE.get());
-        }
+        persister(STATE.get());
     }
 }

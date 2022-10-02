@@ -16,6 +16,8 @@ rust-version = "1.61"
 default = ["ili9342"]
 
 ulp = []
+rtc-mem = []
+nvs = []
 ttgo = []
 ili9342 = []
 st7789 = []

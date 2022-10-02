@@ -52,6 +52,7 @@ use edge_frame::assets;
 use ruwm::button::PressedLevel;
 use ruwm::channel::{Channel, Receiver};
 use ruwm::mqtt::{MessageParser, MqttCommand};
+use ruwm::notification::Notification;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
@@ -107,7 +108,7 @@ impl RtcMemory {
     }
 }
 
-#[link_section = ".rtc.data.rtc_memory"]
+#[cfg_attr(feature = "rtc-mem", link_section = ".rtc.data.rtc_memory")]
 pub static mut RTC_MEMORY: RtcMemory = RtcMemory::new();
 
 pub fn valve_pins(
@@ -184,6 +185,13 @@ pub fn pulse(
     //let (pulse_counter, pulse_wakeup) = pulse_counter.split();
 
     Ok((pulse_counter, ()))
+}
+
+pub fn button<'d, P: InputPin + OutputPin>(
+    pin: impl Peripheral<P = P> + 'd,
+    notification: &'static Notification,
+) -> Result<impl embedded_hal::digital::v2::InputPin + 'd, InitError> {
+    subscribe_pin(pin, move || notification.notify())
 }
 
 pub fn display(
@@ -334,7 +342,7 @@ pub fn mqtt() -> Result<
     Ok((client_id, mqtt_client, mqtt_conn))
 }
 
-pub fn subscribe_pin<'d, P: InputPin + OutputPin>(
+fn subscribe_pin<'d, P: InputPin + OutputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notify: impl Fn() + Send + 'static,
 ) -> Result<impl embedded_hal::digital::v2::InputPin + 'd, InitError> {
