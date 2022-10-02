@@ -37,12 +37,10 @@ pub async fn process<ADC, BP>(
 
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
-        STATE
-            .update_with(
-                "BATTERY",
-                |_state| BatteryState { voltage, powered },
-                STATE_NOTIFY,
-            )
-            .await;
+        STATE.update_with(
+            "BATTERY",
+            |_state| BatteryState { voltage, powered },
+            STATE_NOTIFY,
+        );
     }
 }

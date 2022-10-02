@@ -40,17 +40,15 @@ async fn process_pulses(mut pulse_counter: impl PulseCounter) {
         let pulses = pulse_counter.take_pulses().await.unwrap();
 
         if pulses > 0 {
-            STATE
-                .update_with(
-                    "WM",
-                    |state| WaterMeterState {
-                        edges_count: state.edges_count + pulses,
-                        armed: state.armed,
-                        leaking: state.armed,
-                    },
-                    STATE_NOTIFY,
-                )
-                .await;
+            STATE.update_with(
+                "WM",
+                |state| WaterMeterState {
+                    edges_count: state.edges_count + pulses,
+                    armed: state.armed,
+                    leaking: state.armed,
+                },
+                STATE_NOTIFY,
+            );
         }
     }
 }
@@ -61,17 +59,15 @@ async fn process_commands(mut pulse_wakeup: impl PulseWakeup) {
 
         pulse_wakeup.set_enabled(armed).unwrap();
 
-        STATE
-            .update_with(
-                "WM",
-                |state| WaterMeterState {
-                    edges_count: state.edges_count,
-                    armed,
-                    leaking: state.leaking,
-                },
-                STATE_NOTIFY,
-            )
-            .await;
+        STATE.update_with(
+            "WM",
+            |state| WaterMeterState {
+                edges_count: state.edges_count,
+                armed,
+                leaking: state.leaking,
+            },
+            STATE_NOTIFY,
+        );
     }
 }
 

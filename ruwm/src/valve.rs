@@ -12,7 +12,6 @@ use embassy_sync::signal::Signal;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 
-use crate::channel::{LogSender, Sender};
 use crate::notification::Notification;
 use crate::state::State;
 
@@ -55,20 +54,15 @@ pub fn emergency_close(
 }
 
 pub async fn process() {
-    let mut spin_command_sink = (LogSender::new("VALVE/SPIN COMMAND"), &SPIN_COMMAND);
-
     loop {
         let current_state = {
-            let command = COMMAND.wait();
-            let spin_notif = SPIN_FINISHED.wait();
-
-            match select(command, spin_notif).await {
+            match select(COMMAND.wait(), SPIN_FINISHED.wait()).await {
                 Either::First(command) => match command {
                     ValveCommand::Open => {
                         let state = STATE.get();
 
                         if !matches!(state, Some(ValveState::Open) | Some(ValveState::Opening)) {
-                            spin_command_sink.send(ValveCommand::Open).await;
+                            SPIN_COMMAND.signal(ValveCommand::Open);
                             Some(ValveState::Opening)
                         } else {
                             state
@@ -78,7 +72,7 @@ pub async fn process() {
                         let state = STATE.get();
 
                         if !matches!(state, Some(ValveState::Closed) | Some(ValveState::Closing)) {
-                            spin_command_sink.send(ValveCommand::Close).await;
+                            SPIN_COMMAND.signal(ValveCommand::Close);
                             Some(ValveState::Closing)
                         } else {
                             state
@@ -97,7 +91,7 @@ pub async fn process() {
             }
         };
 
-        STATE.update("VALVE", current_state, STATE_NOTIFY).await;
+        STATE.update("VALVE", current_state, STATE_NOTIFY);
     }
 }
 
@@ -130,9 +124,7 @@ pub async fn spin(
             }
             Either::Second(_) => {
                 current_command = None;
-                (LogSender::new("VALVE/SPIN FINISHED"), &SPIN_FINISHED)
-                    .send(())
-                    .await;
+                SPIN_FINISHED.notify();
             }
         }
     }

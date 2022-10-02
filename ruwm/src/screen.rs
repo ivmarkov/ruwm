@@ -16,7 +16,6 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_svc::executor::asynch::Unblocker;
 
 use crate::battery::{self, BatteryState};
-use crate::channel::{LogSender, Receiver, Sender};
 use crate::notification::Notification;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
@@ -130,25 +129,16 @@ static STATE: Mutex<CriticalSectionRawMutex, RefCell<ScreenState>> =
 
 #[allow(clippy::too_many_arguments)]
 pub async fn process() {
-    let mut valve_state_source = (&VALVE_STATE_NOTIF, &valve::STATE);
-    let mut wm_state_source = (&WM_STATE_NOTIF, &wm::STATE);
-    let mut battery_state_source = (&BATTERY_STATE_NOTIF, &battery::STATE);
-
-    let mut draw_request_sink = (LogSender::new("DRAW"), &DRAW_REQUEST_NOTIF);
-
     loop {
-        let button1_command = BUTTON1_PRESSED_NOTIF.wait();
-        let button2_command = BUTTON2_PRESSED_NOTIF.wait();
-        let button3_command = BUTTON3_PRESSED_NOTIF.wait();
-        let valve = valve_state_source.recv();
-        let wm = wm_state_source.recv();
-        let battery = battery_state_source.recv();
-
         let sr = select4(
-            select3(button1_command, button2_command, button3_command),
-            valve,
-            wm,
-            battery,
+            select3(
+                BUTTON1_PRESSED_NOTIF.wait(),
+                BUTTON2_PRESSED_NOTIF.wait(),
+                BUTTON3_PRESSED_NOTIF.wait(),
+            ),
+            VALVE_STATE_NOTIF.wait(),
+            WM_STATE_NOTIF.wait(),
+            BATTERY_STATE_NOTIF.wait(),
         )
         .await;
 
@@ -166,23 +156,23 @@ pub async fn process() {
                         screen_state.changeset.insert(DataSource::Page);
                     }
                     Either4::First(Either3::Third(_)) => {}
-                    Either4::Second(valve) => {
-                        screen_state.valve = valve;
+                    Either4::Second(_) => {
+                        screen_state.valve = valve::STATE.get();
                         screen_state.changeset.insert(DataSource::Valve);
                     }
-                    Either4::Third(wm) => {
-                        screen_state.wm = wm;
+                    Either4::Third(_) => {
+                        screen_state.wm = wm::STATE.get();
                         screen_state.changeset.insert(DataSource::WM);
                     }
-                    Either4::Fourth(battery) => {
-                        screen_state.battery = battery;
+                    Either4::Fourth(_) => {
+                        screen_state.battery = battery::STATE.get();
                         screen_state.changeset.insert(DataSource::Battery);
                     }
                 }
             });
         }
 
-        draw_request_sink.send(()).await;
+        DRAW_REQUEST_NOTIF.notify();
     }
 }
 

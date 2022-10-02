@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::future::Future;
 
 use serde::{Deserialize, Serialize};
 
@@ -8,9 +9,16 @@ use embassy_sync::signal::Signal;
 
 use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
-use crate::channel::Receiver;
 use crate::notification::Notification;
 use crate::state::State;
+
+pub trait WifiNotification {
+    type WaitFuture<'a>: Future<Output = ()>
+    where
+        Self: 'a;
+
+    fn wait(&mut self) -> Self::WaitFuture<'_>;
+}
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum WifiCommand {
@@ -27,19 +35,11 @@ pub static STATE: State<Option<bool>> = State::new(None);
 
 pub static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
 
-pub async fn process<E>(
-    mut wifi: impl WifiTrait,
-    mut state_changed_source: impl Receiver<Data = E>,
-) {
+pub async fn process(mut wifi: impl WifiTrait, mut state_changed_source: impl WifiNotification) {
     loop {
-        let receiver = state_changed_source.recv();
-        let command = COMMAND.wait();
-
-        match select(receiver, command).await {
+        match select(state_changed_source.wait(), COMMAND.wait()).await {
             Either::First(_) => {
-                STATE
-                    .update("WIFI", Some(wifi.is_connected().unwrap()), STATE_NOTIFY)
-                    .await;
+                STATE.update("WIFI", Some(wifi.is_connected().unwrap()), STATE_NOTIFY);
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),
