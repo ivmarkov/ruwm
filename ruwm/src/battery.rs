@@ -8,6 +8,7 @@ use crate::state::State;
 pub use crate::dto::battery::*;
 
 pub static STATE: State<BatteryState, 4> = State::new(
+    "BATTERY",
     BatteryState::new(),
     [
         &crate::keepalive::NOTIF,
@@ -37,6 +38,6 @@ pub async fn process<ADC, BP>(
 
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
-        STATE.update_with("BATTERY", |_state| BatteryState { voltage, powered });
+        STATE.update(BatteryState { voltage, powered });
     }
 }

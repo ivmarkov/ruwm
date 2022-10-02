@@ -11,6 +11,7 @@ pub use crate::dto::water_meter::*;
 pub const FLASH_WRITE_CYCLE: usize = 20;
 
 pub static STATE: State<WaterMeterState, 7> = State::new(
+    "WM",
     WaterMeterState::new(),
     [
         &crate::keepalive::NOTIF,
@@ -41,7 +42,7 @@ async fn process_pulses(mut pulse_counter: impl PulseCounter) {
         let pulses = pulse_counter.take_pulses().await.unwrap();
 
         if pulses > 0 {
-            STATE.update_with("WM", |state| WaterMeterState {
+            STATE.update_with(|state| WaterMeterState {
                 edges_count: state.edges_count + pulses,
                 armed: state.armed,
                 leaking: state.armed,
@@ -56,7 +57,7 @@ async fn process_commands(mut pulse_wakeup: impl PulseWakeup) {
 
         pulse_wakeup.set_enabled(armed).unwrap();
 
-        STATE.update_with("WM", |state| WaterMeterState {
+        STATE.update_with(|state| WaterMeterState {
             edges_count: state.edges_count,
             armed,
             leaking: state.leaking,

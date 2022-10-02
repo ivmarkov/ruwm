@@ -9,6 +9,7 @@ use embassy_sync::blocking_mutex::Mutex;
 use crate::notification::Notification;
 
 pub struct State<'a, T, const N: usize> {
+    name: &'a str,
     state: Mutex<CriticalSectionRawMutex, RefCell<T>>,
     notifications: [&'a Notification; N],
 }
@@ -17,8 +18,9 @@ impl<'a, T, const N: usize> State<'a, T, N>
 where
     T: Clone,
 {
-    pub const fn new(data: T, notifications: [&'a Notification; N]) -> Self {
+    pub const fn new(name: &'a str, data: T, notifications: [&'a Notification; N]) -> Self {
         Self {
+            name,
             state: Mutex::new(RefCell::new(data)),
             notifications,
         }
@@ -38,7 +40,7 @@ where
         })
     }
 
-    pub fn update_with(&self, state_name: &'static str, updater: impl FnOnce(T) -> T) -> bool
+    pub fn update_with(&self, updater: impl FnOnce(T) -> T) -> bool
     where
         T: PartialEq + Debug,
     {
@@ -46,7 +48,7 @@ where
         let new = self.get();
 
         if old != new {
-            info!("[{} STATE]: {:?}", state_name, new);
+            info!("[{} STATE]: {:?}", self.name, new);
 
             for notification in self.notifications {
                 notification.notify();
@@ -58,10 +60,10 @@ where
         }
     }
 
-    pub fn update(&self, state_name: &'static str, data: T) -> bool
+    pub fn update(&self, data: T) -> bool
     where
         T: PartialEq + Debug,
     {
-        self.update_with(state_name, move |_| data)
+        self.update_with(move |_| data)
     }
 }

@@ -8,6 +8,7 @@ use crate::{state::*, wm};
 pub use crate::dto::water_meter_stats::*;
 
 pub static STATE: State<WaterMeterStatsState, 3> = State::new(
+    "WM STATS",
     WaterMeterStatsState::new(),
     [
         &crate::keepalive::NOTIF,
@@ -32,7 +33,7 @@ pub async fn process() {
             Either::Second(_) => STATE.get().most_recent.edges_count,
         };
 
-        STATE.update_with("WM STATS", |mut state| {
+        STATE.update_with(|mut state| {
             state.update(edges_count, Instant::now().as_secs());
 
             state

@@ -25,6 +25,7 @@ pub enum WifiCommand {
 }
 
 pub static STATE: State<Option<bool>, 3> = State::new(
+    "WIFI",
     None,
     [
         &crate::keepalive::NOTIF,
@@ -39,7 +40,7 @@ pub async fn process(mut wifi: impl WifiTrait, mut state_changed_source: impl Wi
     loop {
         match select(state_changed_source.wait(), COMMAND.wait()).await {
             Either::First(_) => {
-                STATE.update("WIFI", Some(wifi.is_connected().unwrap()));
+                STATE.update(Some(wifi.is_connected().unwrap()));
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),

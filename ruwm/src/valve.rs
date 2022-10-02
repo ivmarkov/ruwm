@@ -20,6 +20,7 @@ pub use crate::dto::valve::*;
 pub const TURN_DELAY: Duration = Duration::from_secs(20);
 
 pub static STATE: State<Option<ValveState>, 5> = State::new(
+    "VALVE",
     None,
     [
         &crate::keepalive::NOTIF,
@@ -92,7 +93,7 @@ pub async fn process() {
             }
         };
 
-        STATE.update("VALVE", current_state);
+        STATE.update(current_state);
     }
 }
 

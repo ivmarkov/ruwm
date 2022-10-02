@@ -10,7 +10,8 @@ use crate::state::State;
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
 
-pub static STATE: State<RemainingTime, 0> = State::new(RemainingTime::Duration(TIMEOUT), []);
+pub static STATE: State<RemainingTime, 0> =
+    State::new("REMAINING TIME", RemainingTime::Duration(TIMEOUT), []);
 
 pub static NOTIF: Notification = Notification::new();
 
@@ -59,7 +60,7 @@ pub async fn process() {
                 .map(|quit_time| RemainingTime::Duration(quit_time - now))
                 .unwrap_or(RemainingTime::Indefinite);
 
-            STATE.update_with("REMAINING TIME", |_state| remaining_time);
+            STATE.update(remaining_time);
         }
     }
 }
