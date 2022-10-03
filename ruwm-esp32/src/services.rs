@@ -5,17 +5,12 @@ use core::mem;
 
 extern crate alloc;
 
-use ruwm::wifi::WifiNotification;
-use serde::{de::DeserializeOwned, Serialize};
-
 use edge_frame::assets::serve::AssetMetadata;
 
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
 use mipidsi::{Display, DisplayOptions};
-
-use static_cell::StaticCell;
 
 use embedded_graphics::prelude::RgbColor;
 
@@ -26,7 +21,6 @@ use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 use embedded_svc::event_bus::asynch::Receiver;
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
-use embedded_svc::storage::{SerDe, Storage, StorageImpl};
 use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::asynch::server::Acceptor;
@@ -45,7 +39,7 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
-use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::wifi::{EspWifi, WifiEvent, WifiWait};
 
 use esp_idf_sys::EspError;
@@ -60,6 +54,7 @@ use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::{self, ValveState};
 use ruwm::web;
+use ruwm::wifi::WifiNotification;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
 
@@ -70,28 +65,6 @@ const SSID: &str = env!("RUWM_WIFI_SSID");
 const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: assets::serve::Assets = edge_frame::assets!("RUWM_WEB");
-
-const POSTCARD_BUF_SIZE: usize = 500;
-
-struct PostcardSerDe;
-
-impl SerDe for PostcardSerDe {
-    type Error = postcard::Error;
-
-    fn serialize<'a, T>(&self, slice: &'a mut [u8], value: &T) -> Result<&'a [u8], Self::Error>
-    where
-        T: Serialize,
-    {
-        postcard::to_slice(value, slice).map(|r| &*r)
-    }
-
-    fn deserialize<T>(&self, slice: &[u8]) -> Result<T, Self::Error>
-    where
-        T: DeserializeOwned,
-    {
-        postcard::from_bytes(slice)
-    }
-}
 
 #[derive(Default)]
 pub struct RtcMemory {
@@ -139,20 +112,54 @@ pub fn valve_pins(
     Ok((power, open, close))
 }
 
+#[cfg(feature = "nvs")]
 pub fn storage(
     partition: EspDefaultNvsPartition,
-) -> Result<&'static Mutex<CriticalSectionRawMutex, RefCell<impl Storage>>, InitError> {
-    static STORAGE: StaticCell<
+) -> Result<
+    &'static Mutex<CriticalSectionRawMutex, RefCell<impl embedded_svc::storage::Storage>>,
+    InitError,
+> {
+    const POSTCARD_BUF_SIZE: usize = 500;
+
+    struct PostcardSerDe;
+
+    impl embedded_svc::storage::SerDe for PostcardSerDe {
+        type Error = postcard::Error;
+
+        fn serialize<'a, T>(&self, slice: &'a mut [u8], value: &T) -> Result<&'a [u8], Self::Error>
+        where
+            T: serde::Serialize,
+        {
+            postcard::to_slice(value, slice).map(|r| &*r)
+        }
+
+        fn deserialize<T>(&self, slice: &[u8]) -> Result<T, Self::Error>
+        where
+            T: serde::de::DeserializeOwned,
+        {
+            postcard::from_bytes(slice)
+        }
+    }
+
+    static STORAGE: static_cell::StaticCell<
         Mutex<
             CriticalSectionRawMutex,
-            RefCell<StorageImpl<{ POSTCARD_BUF_SIZE }, EspDefaultNvs, PostcardSerDe>>,
+            RefCell<
+                embedded_svc::storage::StorageImpl<
+                    { POSTCARD_BUF_SIZE },
+                    esp_idf_svc::nvs::EspDefaultNvs,
+                    PostcardSerDe,
+                >,
+            >,
         >,
-    > = StaticCell::new();
+    > = static_cell::StaticCell::new();
 
-    let storage = &*STORAGE.init(Mutex::new(RefCell::new(StorageImpl::new(
-        EspNvs::new(partition, "WM", true)?,
-        PostcardSerDe,
-    ))));
+    let storage = &*STORAGE.init(Mutex::new(RefCell::new(
+        embedded_svc::storage::StorageImpl::new(
+            esp_idf_svc::nvs::EspNvs::new(partition, "WM", true)?,
+            PostcardSerDe,
+        ),
+    )));
 
     Ok(storage)
 }

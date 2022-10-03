@@ -8,6 +8,7 @@ extern crate alloc;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
+#[cfg(feature = "nvs")]
 use embedded_svc::storage::Storage;
 
 use esp_idf_hal::adc::*;
@@ -23,6 +24,7 @@ use esp_idf_sys::esp;
 
 use ruwm::button;
 use ruwm::spawn;
+use ruwm::wm::WaterMeterState;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
@@ -111,13 +113,27 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // Storage
 
-    let storage = services::storage(nvs_default_partition.clone())?;
+    #[cfg(feature = "nvs")]
+    let (wm_state, storage) = {
+        let storage = services::storage(nvs_default_partition.clone())?;
+
+        if let Some(wm_state) = storage
+            .lock(|storage| storage.borrow().get::<WaterMeterState>("wm-state"))
+            .unwrap()
+        {
+            (wm_state, storage)
+        } else {
+            log::warn!("No WM edge count found in NVS, assuming new device");
+
+            (Default::default(), storage)
+        }
+    };
+
+    #[cfg(not(feature = "nvs"))]
+    let wm_state: WaterMeterState = Default::default();
 
     unsafe {
-        services::RTC_MEMORY.wm = storage
-            .lock(|storage| storage.borrow().get("wm-state"))
-            .unwrap()
-            .unwrap_or_default();
+        services::RTC_MEMORY.wm = wm_state;
 
         ruwm::valve::STATE.set(services::RTC_MEMORY.valve);
         ruwm::wm::STATE.set(services::RTC_MEMORY.wm);
