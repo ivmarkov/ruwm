@@ -86,6 +86,8 @@ pub async fn process<'a>(
     loop {
         wait_press(&mut pin, pressed_level, pin_edge, debounce_duration).await;
 
+        log::info!("[{}]", pressed_sink_msg);
+
         for notification in pressed_sink {
             notification.notify();
         }
