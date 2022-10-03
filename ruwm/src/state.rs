@@ -40,11 +40,22 @@ where
         })
     }
 
+    pub fn set_update(&self, updater: impl FnOnce(T) -> T) -> (T, T) {
+        self.state.lock(|state| {
+            let old = state.borrow().clone();
+            let new = updater(old.clone());
+
+            *state.borrow_mut() = new.clone();
+
+            (old, new)
+        })
+    }
+
     pub fn update_with(&self, updater: impl FnOnce(T) -> T) -> bool
     where
         T: PartialEq + Debug,
     {
-        let (old, new) = self.set(updater(self.get()));
+        let (old, new) = self.set_update(updater);
 
         if old != new {
             info!("[{} STATE]: {:?}", self.name, new);
