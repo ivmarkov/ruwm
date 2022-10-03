@@ -4,10 +4,11 @@ use embedded_hal::adc;
 use embedded_hal::digital::v2::InputPin;
 
 use crate::state::State;
+use crate::web;
 
 pub use crate::dto::battery::*;
 
-pub static STATE: State<BatteryState, 4> = State::new(
+pub static STATE: State<BatteryState, 4, { web::NOTIFY_SIZE }> = State::new(
     "BATTERY",
     BatteryState::new(),
     [
@@ -16,6 +17,7 @@ pub static STATE: State<BatteryState, 4> = State::new(
         &crate::screen::BATTERY_STATE_NOTIF,
         &crate::mqtt::BATTERY_STATE_NOTIF,
     ],
+    web::NOTIFY.battery.as_ref(),
 );
 
 pub async fn process<ADC, BP>(

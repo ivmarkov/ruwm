@@ -16,13 +16,13 @@ pub enum PressedLevel {
     High,
 }
 
-pub static BUTTON1_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON1_PRESSED_NOTIF];
-pub static BUTTON2_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON2_PRESSED_NOTIF];
-pub static BUTTON3_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON3_PRESSED_NOTIF];
-
 pub static BUTTON1_PIN_EDGE: Notification = Notification::new();
 pub static BUTTON2_PIN_EDGE: Notification = Notification::new();
 pub static BUTTON3_PIN_EDGE: Notification = Notification::new();
+
+static BUTTON1_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON1_PRESSED_NOTIF];
+static BUTTON2_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON2_PRESSED_NOTIF];
+static BUTTON3_NOTIFY: &[&Notification] = &[&crate::screen::BUTTON3_PRESSED_NOTIF];
 
 pub async fn button1_process(pin: impl InputPin, pressed_level: PressedLevel) {
     button_process(

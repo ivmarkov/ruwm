@@ -5,9 +5,9 @@ use crate::notification::Notification;
 use crate::valve::{self, ValveCommand, ValveState};
 use crate::wm;
 
-pub static VALVE_STATE_NOTIF: Notification = Notification::new();
-pub static WM_STATE_NOTIF: Notification = Notification::new();
-pub static BATTERY_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static VALVE_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WM_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static BATTERY_STATE_NOTIF: Notification = Notification::new();
 
 pub async fn process() {
     let mut valve_state = None;

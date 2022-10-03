@@ -14,12 +14,13 @@ use embedded_hal::digital::v2::OutputPin;
 
 use crate::notification::Notification;
 use crate::state::State;
+use crate::web;
 
 pub use crate::dto::valve::*;
 
 pub const TURN_DELAY: Duration = Duration::from_secs(20);
 
-pub static STATE: State<Option<ValveState>, 5> = State::new(
+pub static STATE: State<Option<ValveState>, 5, { web::NOTIFY_SIZE }> = State::new(
     "VALVE",
     None,
     [
@@ -29,6 +30,7 @@ pub static STATE: State<Option<ValveState>, 5> = State::new(
         &crate::mqtt::VALVE_STATE_NOTIF,
         &STATE_PERSIST_NOTIFY,
     ],
+    web::NOTIFY.valve.as_ref(),
 );
 
 pub static COMMAND: Signal<CriticalSectionRawMutex, ValveCommand> = Signal::new();

@@ -39,15 +39,16 @@ pub enum MqttCommand {
 
 pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
 
-pub static PUBLISH_NOTIFY: &[&Notification] =
+// TODO: Web: connected info at least
+static PUBLISH_NOTIFY: &[&Notification] =
     &[&crate::keepalive::NOTIF, &crate::screen::MQTT_STATE_NOTIF];
-pub static RECEIVE_NOTIFY: &[&Notification] =
+static RECEIVE_NOTIFY: &[&Notification] =
     &[&crate::keepalive::NOTIF, &crate::screen::MQTT_STATE_NOTIF];
 
-pub static VALVE_STATE_NOTIF: Notification = Notification::new();
-pub static WM_STATE_NOTIF: Notification = Notification::new();
-pub static BATTERY_STATE_NOTIF: Notification = Notification::new();
-pub static WIFI_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static VALVE_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WM_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static BATTERY_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WIFI_STATE_NOTIF: Notification = Notification::new();
 
 static CONN_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();
 

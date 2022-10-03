@@ -123,16 +123,16 @@ impl ScreenState {
     }
 }
 
-pub static BUTTON1_PRESSED_NOTIF: Notification = Notification::new();
-pub static BUTTON2_PRESSED_NOTIF: Notification = Notification::new();
-pub static BUTTON3_PRESSED_NOTIF: Notification = Notification::new();
-pub static VALVE_STATE_NOTIF: Notification = Notification::new();
-pub static WM_STATE_NOTIF: Notification = Notification::new();
-pub static WM_STATS_STATE_NOTIF: Notification = Notification::new();
-pub static BATTERY_STATE_NOTIF: Notification = Notification::new();
-pub static MQTT_STATE_NOTIF: Notification = Notification::new();
-pub static WIFI_STATE_NOTIF: Notification = Notification::new();
-pub static REMAINIMG_TIME_NOTIF: Notification = Notification::new();
+pub(crate) static BUTTON1_PRESSED_NOTIF: Notification = Notification::new();
+pub(crate) static BUTTON2_PRESSED_NOTIF: Notification = Notification::new();
+pub(crate) static BUTTON3_PRESSED_NOTIF: Notification = Notification::new();
+pub(crate) static VALVE_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WM_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WM_STATS_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static BATTERY_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static MQTT_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static WIFI_STATE_NOTIF: Notification = Notification::new();
+pub(crate) static REMAINING_TIME_NOTIF: Notification = Notification::new();
 
 static DRAW_REQUEST_NOTIF: Notification = Notification::new();
 
@@ -149,7 +149,7 @@ pub async fn process() {
             VALVE_STATE_NOTIF.wait(),
             WM_STATE_NOTIF.wait(),
             BATTERY_STATE_NOTIF.wait(),
-            REMAINIMG_TIME_NOTIF.wait(),
+            REMAINING_TIME_NOTIF.wait(),
         ])
         .await;
 

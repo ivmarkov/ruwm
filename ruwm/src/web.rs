@@ -89,12 +89,8 @@ impl<const N: usize> StateNotifs<N> {
 }
 
 impl<const N: usize> StateNotifs<N> {
-    pub fn as_ref(&self) -> [&Notification; N] {
-        self.0
-            .iter()
-            .collect::<heapless::Vec<_, N>>()
-            .into_array::<N>()
-            .unwrap_or_else(|_| unreachable!())
+    pub const fn as_ref(&self) -> &[Notification; N] {
+        &self.0
     }
 }
 
@@ -103,6 +99,9 @@ pub struct StateWebNotifs<const N: usize> {
     pub wm: StateNotifs<N>,
     pub wm_stats: StateNotifs<N>,
     pub battery: StateNotifs<N>,
+    pub remaining_time: StateNotifs<N>,
+    pub mqtt: StateNotifs<N>,
+    pub wifi: StateNotifs<N>,
 }
 
 impl<const N: usize> StateWebNotifs<N> {
@@ -112,11 +111,15 @@ impl<const N: usize> StateWebNotifs<N> {
             wm: StateNotifs::new(),
             wm_stats: StateNotifs::new(),
             battery: StateNotifs::new(),
+            remaining_time: StateNotifs::new(),
+            mqtt: StateNotifs::new(),
+            wifi: StateNotifs::new(),
         }
     }
 }
 
-pub static NOTIFY: StateWebNotifs<{ WS_MAX_CONNECTIONS }> = StateWebNotifs::new();
+pub(crate) const NOTIFY_SIZE: usize = WS_MAX_CONNECTIONS;
+pub(crate) static NOTIFY: StateWebNotifs<{ NOTIFY_SIZE }> = StateWebNotifs::new();
 
 pub async fn process<A: Acceptor, const W: usize>(acceptor: A) {
     info!(
@@ -293,10 +296,10 @@ where
     Ok(())
 }
 
-async fn send_state<'a, S, T, const N: usize>(
+async fn send_state<'a, S, T, const N1: usize, const N2: usize>(
     connection: &AsyncMutex<impl RawMutex, S>,
     role: &Mutex<impl RawMutex, Cell<Role>>,
-    state: &State<'a, T, N>,
+    state: &State<'a, T, N1, N2>,
     state_notif: &Notification,
     to_web_event: impl Fn(T) -> WebEvent,
 ) -> Result<(), WebError<S::Error>>
