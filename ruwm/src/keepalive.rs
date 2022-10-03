@@ -10,8 +10,11 @@ use crate::state::State;
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
 
-pub static STATE: State<RemainingTime, 0> =
-    State::new("REMAINING TIME", RemainingTime::Duration(TIMEOUT), []);
+pub static STATE: State<RemainingTime, 1> = State::new(
+    "REMAINING TIME",
+    RemainingTime::Duration(TIMEOUT),
+    [&crate::screen::REMAINIMG_TIME_NOTIF],
+);
 
 pub static NOTIF: Notification = Notification::new();
 
@@ -26,10 +29,12 @@ pub async fn process() {
     let mut quit_time_sent = None;
 
     loop {
-        let event = NOTIF.wait();
-        let tick = Timer::after(Duration::from_secs(2) /*Duration::from_millis(500)*/);
+        let result = select(
+            NOTIF.wait(),
+            Timer::after(Duration::from_secs(2) /*Duration::from_millis(500)*/),
+        )
+        .await;
 
-        let result = select(event, tick).await;
         let now = Instant::now();
 
         if let Either::First(_) = result {

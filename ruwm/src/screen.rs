@@ -7,7 +7,7 @@ use log::info;
 
 use enumset::{enum_set, EnumSet, EnumSetType};
 
-use embassy_futures::select::{select3, select4, Either3, Either4};
+use embassy_futures::select::select_array;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
@@ -16,6 +16,7 @@ use embedded_graphics::prelude::RgbColor;
 use embedded_svc::executor::asynch::Unblocker;
 
 use crate::battery::{self, BatteryState};
+use crate::keepalive::{self, RemainingTime};
 use crate::notification::Notification;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
@@ -67,6 +68,7 @@ pub enum DataSource {
     WM,
     WMStats,
     Battery,
+    RemainingTime,
 }
 
 #[derive(Default, Clone, Debug, Eq, PartialEq)]
@@ -76,6 +78,7 @@ pub struct ScreenState {
     valve: Option<ValveState>,
     wm: WaterMeterState,
     battery: BatteryState,
+    remaining_time: Option<RemainingTime>,
 }
 
 impl ScreenState {
@@ -87,11 +90,13 @@ impl ScreenState {
                     | DataSource::WM
                     | DataSource::WMStats
                     | DataSource::Battery
+                    | DataSource::RemainingTime
             ),
             active_page: Page::new(),
             valve: None,
             wm: WaterMeterState::new(),
             battery: BatteryState::new(),
+            remaining_time: None,
         }
     }
 
@@ -110,6 +115,12 @@ impl ScreenState {
             .contains(DataSource::Battery)
             .then(|| &self.battery)
     }
+
+    pub fn remaining_time(&self) -> Option<&Option<RemainingTime>> {
+        self.changeset
+            .contains(DataSource::RemainingTime)
+            .then(|| &self.remaining_time)
+    }
 }
 
 pub static BUTTON1_PRESSED_NOTIF: Notification = Notification::new();
@@ -121,6 +132,7 @@ pub static WM_STATS_STATE_NOTIF: Notification = Notification::new();
 pub static BATTERY_STATE_NOTIF: Notification = Notification::new();
 pub static MQTT_STATE_NOTIF: Notification = Notification::new();
 pub static WIFI_STATE_NOTIF: Notification = Notification::new();
+pub static REMAINIMG_TIME_NOTIF: Notification = Notification::new();
 
 static DRAW_REQUEST_NOTIF: Notification = Notification::new();
 
@@ -130,44 +142,48 @@ static STATE: Mutex<CriticalSectionRawMutex, RefCell<ScreenState>> =
 #[allow(clippy::too_many_arguments)]
 pub async fn process() {
     loop {
-        let sr = select4(
-            select3(
-                BUTTON1_PRESSED_NOTIF.wait(),
-                BUTTON2_PRESSED_NOTIF.wait(),
-                BUTTON3_PRESSED_NOTIF.wait(),
-            ),
+        let (_future, index) = select_array([
+            BUTTON1_PRESSED_NOTIF.wait(),
+            BUTTON2_PRESSED_NOTIF.wait(),
+            BUTTON3_PRESSED_NOTIF.wait(),
             VALVE_STATE_NOTIF.wait(),
             WM_STATE_NOTIF.wait(),
             BATTERY_STATE_NOTIF.wait(),
-        )
+            REMAINIMG_TIME_NOTIF.wait(),
+        ])
         .await;
 
         {
             STATE.lock(|screen_state| {
                 let mut screen_state = screen_state.borrow_mut();
 
-                match sr {
-                    Either4::First(Either3::First(_)) => {
+                match index {
+                    0 => {
                         screen_state.active_page = screen_state.active_page.prev();
                         screen_state.changeset.insert(DataSource::Page);
                     }
-                    Either4::First(Either3::Second(_)) => {
+                    1 => {
                         screen_state.active_page = screen_state.active_page.next();
                         screen_state.changeset.insert(DataSource::Page);
                     }
-                    Either4::First(Either3::Third(_)) => {}
-                    Either4::Second(_) => {
+                    2 => {}
+                    3 => {
                         screen_state.valve = valve::STATE.get();
                         screen_state.changeset.insert(DataSource::Valve);
                     }
-                    Either4::Third(_) => {
+                    4 => {
                         screen_state.wm = wm::STATE.get();
                         screen_state.changeset.insert(DataSource::WM);
                     }
-                    Either4::Fourth(_) => {
+                    5 => {
                         screen_state.battery = battery::STATE.get();
                         screen_state.changeset.insert(DataSource::Battery);
                     }
+                    6 => {
+                        screen_state.remaining_time = Some(keepalive::STATE.get());
+                        screen_state.changeset.insert(DataSource::RemainingTime);
+                    }
+                    _ => unreachable!(),
                 }
             });
         }
