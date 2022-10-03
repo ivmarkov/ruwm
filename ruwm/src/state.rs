@@ -30,13 +30,13 @@ where
         self.state.lock(|state| state.borrow().clone())
     }
 
-    pub fn set(&self, data: T) -> T {
+    pub fn set(&self, data: T) -> (T, T) {
         self.state.lock(|state| {
             let old = state.borrow().clone();
 
-            *state.borrow_mut() = data;
+            *state.borrow_mut() = data.clone();
 
-            old
+            (old, data)
         })
     }
 
@@ -44,8 +44,7 @@ where
     where
         T: PartialEq + Debug,
     {
-        let old = self.set(updater(self.get()));
-        let new = self.get();
+        let (old, new) = self.set(updater(self.get()));
 
         if old != new {
             info!("[{} STATE]: {:?}", self.name, new);
