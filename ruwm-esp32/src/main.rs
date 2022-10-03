@@ -41,6 +41,10 @@ compile_error!("Feature `ulp` is supported only on esp32, esp32s2 and esp32s3");
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 const MQTT_MAX_TOPIC_LEN: usize = 64;
 
+// Make sure that the firmware will contain
+// up-to-date build time and package info coming from the binary crate
+esp_idf_sys::esp_app_desc!();
+
 fn main() -> Result<(), InitError> {
     esp_idf_hal::cs::critical_section::link();
     //esp_idf_hal::timer::embassy_time::queue::link();
@@ -164,11 +168,6 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
 
-    // Storage
-
-    #[cfg(feature = "nvs")]
-    let storage: &'static Mutex<_, _> = services::storage(nvs_default_partition)?;
-
     // High-prio executor
 
     let (mut high_prio_executor, high_prio_tasks) =
@@ -211,11 +210,9 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let mid_prio_execution = spawn::schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
         spawn::mid_prio_executor(
             services::display(display_peripherals).unwrap(),
-            move |_state| {
+            move |_new_state| {
                 #[cfg(feature = "nvs")]
-                ruwm::log_err!(
-                    storage.lock(|storage| storage.borrow_mut().set("wm-state", &_state))
-                );
+                flash_wm_state(storage, _new_state);
             },
             wifi,
             wifi_notif,
@@ -258,6 +255,26 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     log::info!("Finished execution");
 
     Ok(())
+}
+
+#[cfg(feature = "nvs")]
+fn flash_wm_state<S>(
+    storage: &'static Mutex<
+        impl embassy_sync::blocking_mutex::raw::RawMutex,
+        core::cell::RefCell<S>,
+    >,
+    new_state: WaterMeterState,
+) where
+    S: Storage,
+{
+    ruwm::log_err!(storage.lock(|storage| {
+        let old_state = storage.borrow().get("wm-state")?;
+        if old_state != Some(new_state) {
+            storage.borrow_mut().set("wm-state", &new_state)?;
+        }
+
+        Ok::<_, S::Error>(())
+    }));
 }
 
 fn mark_wakeup_pins(

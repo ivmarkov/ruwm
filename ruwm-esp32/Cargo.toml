@@ -31,7 +31,7 @@ serde = { version = "1", default-features = false }
 postcard = "0.7"
 embedded-hal = { version = "0.2" }
 embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
-esp-idf-sys = { version = "0.31.9", features = ["binstart"] }
+esp-idf-sys = { version = "0.31.10", features = ["binstart"] }
 esp-idf-svc = { version = "0.43", features = ["nightly", "experimental", "embassy-time-driver", "embassy-time-isr-queue"] }
 esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-sync", "critical-section"] } # "embassy-time-isr-queue-timer00", 
 embassy-futures = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }

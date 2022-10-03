@@ -116,7 +116,10 @@ pub fn valve_pins(
 pub fn storage(
     partition: EspDefaultNvsPartition,
 ) -> Result<
-    &'static Mutex<CriticalSectionRawMutex, RefCell<impl embedded_svc::storage::Storage>>,
+    &'static Mutex<
+        impl embassy_sync::blocking_mutex::raw::RawMutex,
+        RefCell<impl embedded_svc::storage::Storage>,
+    >,
     InitError,
 > {
     const POSTCARD_BUF_SIZE: usize = 500;
