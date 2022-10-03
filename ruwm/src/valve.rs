@@ -33,9 +33,9 @@ pub static STATE: State<Option<ValveState>, 5, { web::NOTIFY_SIZE }> = State::ne
     web::NOTIFY.valve.as_ref(),
 );
 
-pub static COMMAND: Signal<CriticalSectionRawMutex, ValveCommand> = Signal::new();
-
 static STATE_PERSIST_NOTIFY: Notification = Notification::new();
+
+pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, ValveCommand> = Signal::new();
 
 static SPIN_COMMAND: Signal<CriticalSectionRawMutex, ValveCommand> = Signal::new();
 static SPIN_FINISHED: Notification = Notification::new();

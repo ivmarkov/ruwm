@@ -29,7 +29,7 @@ pub static STATE: State<WaterMeterState, 7, { web::NOTIFY_SIZE }> = State::new(
 static STATE_PERSIST_NOTIFY: Notification = Notification::new();
 static STATE_FLASH_NOTIFY: Notification = Notification::new();
 
-pub static COMMAND: Signal<CriticalSectionRawMutex, WaterMeterCommand> = Signal::new();
+pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, WaterMeterCommand> = Signal::new();
 
 pub async fn process(pulse_counter: impl PulseCounter, pulse_wakeup: impl PulseWakeup) {
     select(
@@ -81,12 +81,14 @@ pub async fn flash(mut flasher: impl FnMut(WaterMeterState)) {
     loop {
         STATE_FLASH_NOTIFY.wait().await;
 
+        if cycle == 0 {
+            flasher(STATE.get());
+        }
+
         cycle += 1;
 
         if cycle >= FLASH_WRITE_CYCLE {
             cycle = 0;
-
-            flasher(STATE.get());
         }
     }
 }

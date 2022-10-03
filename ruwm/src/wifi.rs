@@ -35,7 +35,7 @@ pub static STATE: State<Option<bool>, 3, { web::NOTIFY_SIZE }> = State::new(
     web::NOTIFY.wifi.as_ref(),
 );
 
-pub static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
+pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
 
 pub async fn process(mut wifi: impl WifiTrait, mut state_changed_source: impl WifiNotification) {
     loop {
