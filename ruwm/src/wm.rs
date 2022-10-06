@@ -5,25 +5,24 @@ use embassy_sync::signal::Signal;
 use crate::notification::Notification;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::state::State;
-use crate::web;
 
 pub use crate::dto::water_meter::*;
 
 pub const FLASH_WRITE_CYCLE: usize = 20;
 
-pub static STATE: State<WaterMeterState, 7, { web::NOTIFY_SIZE }> = State::new(
+pub static STATE: State<WaterMeterState> = State::new(
     "WM",
     WaterMeterState::new(),
-    [
+    &[
         &crate::keepalive::NOTIF,
         &crate::emergency::WM_STATE_NOTIF,
         &crate::wm_stats::WM_STATE_NOTIF,
         &crate::screen::WM_STATE_NOTIF,
         &crate::mqtt::WM_STATE_NOTIF,
+        &crate::web::WM_STATE_NOTIF,
         &STATE_PERSIST_NOTIFY,
         &STATE_FLASH_NOTIFY,
     ],
-    web::NOTIFY.wm.as_ref(),
 );
 
 static STATE_PERSIST_NOTIFY: Notification = Notification::new();

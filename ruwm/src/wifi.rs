@@ -9,7 +9,7 @@ use embassy_sync::signal::Signal;
 
 use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
 
-use crate::{state::State, web};
+use crate::state::State;
 
 pub trait WifiNotification {
     type WaitFuture<'a>: Future<Output = ()>
@@ -24,15 +24,15 @@ pub enum WifiCommand {
     SetConfiguration(Configuration),
 }
 
-pub static STATE: State<Option<bool>, 3, { web::NOTIFY_SIZE }> = State::new(
+pub static STATE: State<Option<bool>> = State::new(
     "WIFI",
     None,
-    [
+    &[
         &crate::keepalive::NOTIF,
         &crate::screen::WIFI_STATE_NOTIF,
         &crate::mqtt::WIFI_STATE_NOTIF,
+        &crate::web::WIFI_STATE_NOTIF,
     ],
-    web::NOTIFY.wifi.as_ref(),
 );
 
 pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();

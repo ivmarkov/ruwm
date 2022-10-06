@@ -3,19 +3,19 @@ use embassy_time::{Duration, Instant, Timer};
 use embassy_futures::select::{select, Either};
 
 use crate::notification::Notification;
-use crate::{state::*, web, wm};
+use crate::{state::*, wm};
 
 pub use crate::dto::water_meter_stats::*;
 
-pub static STATE: State<WaterMeterStatsState, 3, { web::NOTIFY_SIZE }> = State::new(
+pub static STATE: State<WaterMeterStatsState> = State::new(
     "WM STATS",
     WaterMeterStatsState::new(),
-    [
+    &[
         &crate::keepalive::NOTIF,
         &crate::screen::WM_STATS_STATE_NOTIF,
+        &crate::web::WM_STATS_STATE_NOTIF,
         &STATE_PERSIST_NOTIFY,
     ],
-    web::NOTIFY.wm_stats.as_ref(),
 );
 
 pub(crate) static WM_STATE_NOTIF: Notification = Notification::new();

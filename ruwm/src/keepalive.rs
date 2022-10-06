@@ -6,16 +6,17 @@ use embassy_time::{Duration, Instant, Timer};
 use crate::notification::Notification;
 use crate::quit;
 use crate::state::State;
-use crate::web;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
 
-pub static STATE: State<RemainingTime, 1, { web::NOTIFY_SIZE }> = State::new(
+pub static STATE: State<RemainingTime> = State::new(
     "REMAINING TIME",
     RemainingTime::Duration(TIMEOUT),
-    [&crate::screen::REMAINING_TIME_NOTIF],
-    web::NOTIFY.remaining_time.as_ref(),
+    &[
+        &crate::screen::REMAINING_TIME_NOTIF,
+        &crate::web::REMAINING_TIME_STATE_NOTIF,
+    ],
 );
 
 pub(crate) static NOTIF: Notification = Notification::new();

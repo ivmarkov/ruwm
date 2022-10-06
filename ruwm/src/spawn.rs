@@ -19,7 +19,7 @@ use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::FlushableDrawTarget;
 use crate::wifi::WifiNotification;
 use crate::wm::{self, WaterMeterState};
-use crate::{battery, emergency, keepalive, mqtt, screen, web, wm_stats};
+use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
 use crate::{valve, wifi};
 
 pub fn high_prio_executor<'a, EN, EW, ADC, BP>(
@@ -121,7 +121,7 @@ where
 
     executor
         .spawn_local_collect(mqtt::send::<L>(mqtt_topic_prefix, mqtt_client), &mut tasks)?
-        .spawn_local_collect(web::process::<_, 1>(ws_acceptor), &mut tasks)?;
+        .spawn_local_collect(ws::process::<_, 1>(ws_acceptor), &mut tasks)?;
 
     Ok((executor, tasks))
 }

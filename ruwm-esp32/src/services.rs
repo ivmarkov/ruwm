@@ -53,10 +53,10 @@ use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::{self, ValveState};
-use ruwm::web;
 use ruwm::wifi::WifiNotification;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
+use ruwm::ws;
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
@@ -312,7 +312,7 @@ pub fn wifi<'d>(
 
 pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
     let (ws_processor, ws_acceptor) =
-        EspHttpWsProcessor::<{ web::WS_MAX_CONNECTIONS }, { web::WS_MAX_FRAME_LEN }>::new(());
+        EspHttpWsProcessor::<{ ws::WS_MAX_CONNECTIONS }, { ws::WS_MAX_FRAME_LEN }>::new(());
 
     let ws_processor = Mutex::<CriticalSectionRawMutex, _>::new(RefCell::new(ws_processor));
 

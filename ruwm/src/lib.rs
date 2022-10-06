@@ -39,3 +39,5 @@ pub mod wifi;
 pub mod wm;
 #[cfg(feature = "system")]
 pub mod wm_stats;
+#[cfg(feature = "system")]
+pub mod ws;

@@ -14,23 +14,22 @@ use embedded_hal::digital::v2::OutputPin;
 
 use crate::notification::Notification;
 use crate::state::State;
-use crate::web;
 
 pub use crate::dto::valve::*;
 
 pub const TURN_DELAY: Duration = Duration::from_secs(20);
 
-pub static STATE: State<Option<ValveState>, 5, { web::NOTIFY_SIZE }> = State::new(
+pub static STATE: State<Option<ValveState>> = State::new(
     "VALVE",
     None,
-    [
+    &[
         &crate::keepalive::NOTIF,
         &crate::emergency::VALVE_STATE_NOTIF,
         &crate::screen::VALVE_STATE_NOTIF,
         &crate::mqtt::VALVE_STATE_NOTIF,
+        &crate::web::VALVE_STATE_NOTIF,
         &STATE_PERSIST_NOTIFY,
     ],
-    web::NOTIFY.valve.as_ref(),
 );
 
 static STATE_PERSIST_NOTIFY: Notification = Notification::new();
