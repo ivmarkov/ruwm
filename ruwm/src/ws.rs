@@ -59,7 +59,7 @@ impl<E> From<postcard::Error> for WsError<E> {
     }
 }
 
-struct WsReceiver<R>(R);
+pub struct WsReceiver<R>(R);
 
 impl<R> WebReceiver for WsReceiver<R>
 where
@@ -97,7 +97,7 @@ where
     }
 }
 
-struct WsSender<S>(S);
+pub struct WsSender<S>(S);
 
 impl<S> WebSender for WsSender<S>
 where

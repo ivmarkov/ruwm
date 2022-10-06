@@ -12,7 +12,7 @@ use embassy_time::Duration;
 use embedded_svc::storage::Storage;
 
 use esp_idf_hal::adc::*;
-use esp_idf_hal::executor::{CurrentTaskWait, TaskHandle};
+use esp_idf_hal::executor::EspExecutor;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::reset::WakeupReason;
 use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
@@ -170,29 +170,33 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // High-prio executor
 
-    let (mut high_prio_executor, high_prio_tasks) =
-        spawn::high_prio_executor::<TaskHandle, CurrentTaskWait, _, _>(
-            valve_power_pin,
-            valve_open_pin,
-            valve_close_pin,
-            |state| unsafe {
-                services::RTC_MEMORY.valve = state;
-            },
-            pulse_counter,
-            pulse_wakeup,
-            |state| unsafe {
-                services::RTC_MEMORY.wm = state;
-            },
-            |state| unsafe {
-                services::RTC_MEMORY.wm_stats = state;
-            },
-            AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
-            AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
-            PinDriver::input(peripherals.battery.power)?,
-            services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE)?,
-            services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE)?,
-            services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,
-        )?;
+    let mut high_prio_executor = EspExecutor::<16, _>::new();
+    let mut high_prio_tasks = heapless::Vec::<_, 16>::new();
+
+    spawn::high_prio(
+        &mut high_prio_executor,
+        &mut high_prio_tasks,
+        valve_power_pin,
+        valve_open_pin,
+        valve_close_pin,
+        |state| unsafe {
+            services::RTC_MEMORY.valve = state;
+        },
+        pulse_counter,
+        pulse_wakeup,
+        |state| unsafe {
+            services::RTC_MEMORY.wm = state;
+        },
+        |state| unsafe {
+            services::RTC_MEMORY.wm_stats = state;
+        },
+        AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
+        AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
+        PinDriver::input(peripherals.battery.power)?,
+        services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE)?,
+        services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE)?,
+        services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,
+    )?;
 
     // Mid-prio executor
 
@@ -207,8 +211,13 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = spawn::schedule::<8, TaskHandle, CurrentTaskWait>(50000, move || {
-        spawn::mid_prio_executor(
+    let mid_prio_execution = spawn::schedule::<8, _, _>(50000, move || {
+        let mut executor = EspExecutor::new();
+        let mut tasks = heapless::Vec::new();
+
+        spawn::mid_prio(
+            &mut executor,
+            &mut tasks,
             services::display(display_peripherals).unwrap(),
             move |_new_state| {
                 #[cfg(feature = "nvs")]
@@ -217,7 +226,9 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
             wifi,
             wifi_notif,
             mqtt_conn,
-        )
+        )?;
+
+        Ok((executor, tasks))
     });
 
     // Low-prio executor
@@ -231,12 +242,20 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = spawn::schedule::<4, TaskHandle, CurrentTaskWait>(50000, move || {
-        spawn::low_prio_executor::<MQTT_MAX_TOPIC_LEN, _, _>(
+    let low_prio_execution = spawn::schedule::<4, _, _>(50000, move || {
+        let mut executor = EspExecutor::new();
+        let mut tasks = heapless::Vec::new();
+
+        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _, _>(
+            &mut executor,
+            &mut tasks,
             mqtt_topic_prefix,
             mqtt_client,
-            ws_acceptor,
-        )
+        )?;
+
+        spawn::ws(&mut executor, &mut tasks, ws_acceptor)?;
+
+        Ok((executor, tasks))
     });
 
     // Start main execution

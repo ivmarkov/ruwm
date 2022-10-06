@@ -17,12 +17,15 @@ use crate::button::{self, PressedLevel};
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::FlushableDrawTarget;
+use crate::web::{self, WebReceiver, WebSender};
 use crate::wifi::WifiNotification;
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
 use crate::{valve, wifi};
 
-pub fn high_prio_executor<'a, EN, EW, ADC, BP>(
+pub fn high_prio<'a, ADC, BP, const ET: usize, EN, EW>(
+    executor: &mut Executor<'a, ET, EN, EW, Local>,
+    tasks: &mut heapless::Vec<Task<()>, ET>,
     valve_power_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_open_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_close_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
@@ -37,55 +40,54 @@ pub fn high_prio_executor<'a, EN, EW, ADC, BP>(
     button1_pin: impl InputPin + 'a,
     button2_pin: impl InputPin + 'a,
     button3_pin: impl InputPin + 'a,
-) -> Result<(Executor<'a, 16, EN, EW, Local>, heapless::Vec<Task<()>, 16>), SpawnError>
+) -> Result<(), SpawnError>
 where
     EN: NotifyFactory + RunContextFactory + Default,
     EW: Default,
     ADC: 'a,
     BP: adc::Channel<ADC> + 'a,
 {
-    let mut executor = Executor::<16, EN, EW, Local>::new();
-    let mut tasks = heapless::Vec::<Task<()>, 16>::new();
-
     executor
-        .spawn_local_collect(valve::process(), &mut tasks)?
+        .spawn_local_collect(valve::process(), tasks)?
         .spawn_local_collect(
             valve::spin(valve_power_pin, valve_open_pin, valve_close_pin),
-            &mut tasks,
+            tasks,
         )?
-        .spawn_local_collect(valve::persist(valve_persister), &mut tasks)?
-        .spawn_local_collect(wm::process(pulse_counter, pulse_wakeup), &mut tasks)?
-        .spawn_local_collect(wm::persist(wm_persister), &mut tasks)?
-        .spawn_local_collect(wm_stats::persist(wm_stats_persister), &mut tasks)?
+        .spawn_local_collect(valve::persist(valve_persister), tasks)?
+        .spawn_local_collect(wm::process(pulse_counter, pulse_wakeup), tasks)?
+        .spawn_local_collect(wm::persist(wm_persister), tasks)?
+        .spawn_local_collect(wm_stats::persist(wm_stats_persister), tasks)?
         .spawn_local_collect(
             battery::process(battery_voltage, battery_pin, power_pin),
-            &mut tasks,
+            tasks,
         )?
         .spawn_local_collect(
             button::button1_process(button1_pin, PressedLevel::Low),
-            &mut tasks,
+            tasks,
         )?
         .spawn_local_collect(
             button::button2_process(button2_pin, PressedLevel::Low),
-            &mut tasks,
+            tasks,
         )?
         .spawn_local_collect(
             button::button3_process(button3_pin, PressedLevel::Low),
-            &mut tasks,
+            tasks,
         )?
-        .spawn_local_collect(emergency::process(), &mut tasks)?
-        .spawn_local_collect(keepalive::process(), &mut tasks)?;
+        .spawn_local_collect(emergency::process(), tasks)?
+        .spawn_local_collect(keepalive::process(), tasks)?;
 
-    Ok((executor, tasks))
+    Ok(())
 }
 
-pub fn mid_prio_executor<'a, EN, EW, D>(
+pub fn mid_prio<'a, const ET: usize, EN, EW, D>(
+    executor: &mut Executor<'a, ET, EN, EW, Local>,
+    tasks: &mut heapless::Vec<Task<()>, ET>,
     display: D,
     wm_flash: impl FnMut(WaterMeterState) + 'a,
     wifi: impl WifiTrait + 'a,
     wifi_notif: impl WifiNotification + 'a,
     mqtt_conn: impl Connection<Message = Option<MqttCommand>> + 'a,
-) -> Result<(Executor<'a, 8, EN, EW, Local>, heapless::Vec<Task<()>, 8>), SpawnError>
+) -> Result<(), SpawnError>
 where
     EN: NotifyFactory + RunContextFactory + Default,
     EW: Default,
@@ -93,37 +95,61 @@ where
     D::Color: RgbColor,
     D::Error: Debug,
 {
-    let mut executor = Executor::<8, EN, EW, Local>::new();
-    let mut tasks = heapless::Vec::<Task<()>, 8>::new();
-
     executor
-        .spawn_local_collect(wm_stats::process(), &mut tasks)?
-        .spawn_local_collect(screen::process(), &mut tasks)?
-        .spawn_local_collect(screen::run_draw(display), &mut tasks)?
-        .spawn_local_collect(wifi::process(wifi, wifi_notif), &mut tasks)?
-        .spawn_local_collect(mqtt::receive(mqtt_conn), &mut tasks)?
-        .spawn_local_collect(wm::flash(wm_flash), &mut tasks)?;
+        .spawn_local_collect(wm_stats::process(), tasks)?
+        .spawn_local_collect(screen::process(), tasks)?
+        .spawn_local_collect(screen::run_draw(display), tasks)?
+        .spawn_local_collect(wifi::process(wifi, wifi_notif), tasks)?
+        .spawn_local_collect(mqtt::receive(mqtt_conn), tasks)?
+        .spawn_local_collect(wm::flash(wm_flash), tasks)?;
 
-    Ok((executor, tasks))
+    Ok(())
 }
 
-pub fn low_prio_executor<'a, const L: usize, EN, EW>(
+pub fn mqtt_send<'a, const L: usize, const ET: usize, EN, EW>(
+    executor: &mut Executor<'a, ET, EN, EW, Local>,
+    tasks: &mut heapless::Vec<Task<()>, ET>,
     mqtt_topic_prefix: &'a str,
     mqtt_client: impl Client + Publish + 'a,
-    ws_acceptor: impl Acceptor + 'a,
-) -> Result<(Executor<'a, 4, EN, EW, Local>, heapless::Vec<Task<()>, 4>), SpawnError>
+) -> Result<(), SpawnError>
 where
     EN: NotifyFactory + RunContextFactory + Default,
     EW: Default,
 {
-    let mut executor = Executor::<4, EN, EW, Local>::new();
-    let mut tasks = heapless::Vec::<Task<()>, 4>::new();
+    executor.spawn_local_collect(mqtt::send::<L>(mqtt_topic_prefix, mqtt_client), tasks)?;
 
-    executor
-        .spawn_local_collect(mqtt::send::<L>(mqtt_topic_prefix, mqtt_client), &mut tasks)?
-        .spawn_local_collect(ws::process::<_, 1>(ws_acceptor), &mut tasks)?;
+    Ok(())
+}
 
-    Ok((executor, tasks))
+pub fn web<'a, const L: usize, const ET: usize, EN, EW, WS, WR>(
+    executor: &mut Executor<'a, ET, EN, EW, Local>,
+    tasks: &mut heapless::Vec<Task<()>, ET>,
+    web_sender: WS,
+    web_receiver: WR,
+) -> Result<(), SpawnError>
+where
+    EN: NotifyFactory + RunContextFactory + Default,
+    EW: Default,
+    WS: WebSender + 'a,
+    WR: WebReceiver<Error = WS::Error> + 'a,
+{
+    executor.spawn_local_collect(web::process(web_sender, web_receiver), tasks)?;
+
+    Ok(())
+}
+
+pub fn ws<'a, const ET: usize, EN, EW>(
+    executor: &mut Executor<'a, ET, EN, EW, Local>,
+    tasks: &mut heapless::Vec<Task<()>, ET>,
+    ws_acceptor: impl Acceptor + 'a,
+) -> Result<(), SpawnError>
+where
+    EN: NotifyFactory + RunContextFactory + Default,
+    EW: Default,
+{
+    executor.spawn_local_collect(ws::process::<_, 1>(ws_acceptor), tasks)?;
+
+    Ok(())
 }
 
 pub fn run<const C: usize, EN, EW>(

@@ -73,7 +73,7 @@ pub(crate) static REMAINING_TIME_STATE_NOTIF: Notification = Notification::new()
 pub(crate) static MQTT_STATE_NOTIF: Notification = Notification::new();
 pub(crate) static WIFI_STATE_NOTIF: Notification = Notification::new();
 
-pub async fn process<WS, WR>(sender: WS, receiver: WR) -> Result<(), WR::Error>
+pub async fn process<WS, WR>(sender: WS, receiver: WR)
 where
     WR: WebReceiver,
     WS: WebSender<Error = WR::Error>,
@@ -86,6 +86,7 @@ where
         &BATTERY_STATE_NOTIF,
     )
     .await
+    .unwrap();
 }
 
 pub async fn handle<WS, WR>(
