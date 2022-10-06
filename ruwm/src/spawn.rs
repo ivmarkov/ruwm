@@ -121,7 +121,7 @@ where
     Ok(())
 }
 
-pub fn web<'a, const L: usize, const ET: usize, EN, EW, WS, WR>(
+pub fn web<'a, const ET: usize, EN, EW, WS, WR>(
     executor: &mut Executor<'a, ET, EN, EW, Local>,
     tasks: &mut heapless::Vec<Task<()>, ET>,
     web_sender: WS,
