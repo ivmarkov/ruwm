@@ -19,29 +19,6 @@ use crate::wm;
 
 pub use crate::dto::web::*;
 
-pub trait WebReceiver {
-    type Error: Debug;
-
-    type RecvFuture<'a>: Future<Output = Result<Option<WebRequest>, Self::Error>>
-    where
-        Self: 'a;
-
-    fn recv(&mut self) -> Self::RecvFuture<'_>;
-}
-
-impl<'t, T> WebReceiver for &'t mut T
-where
-    T: WebReceiver + 't,
-{
-    type Error = T::Error;
-
-    type RecvFuture<'a> = impl Future<Output = Result<Option<WebRequest>, Self::Error>> where Self: 'a;
-
-    fn recv(&mut self) -> Self::RecvFuture<'_> {
-        async move { (*self).recv().await }
-    }
-}
-
 pub trait WebSender {
     type Error: Debug;
 
@@ -62,6 +39,29 @@ where
 
     fn send<'a>(&'a mut self, event: &'a WebEvent) -> Self::SendFuture<'a> {
         async move { (*self).send(event).await }
+    }
+}
+
+pub trait WebReceiver {
+    type Error: Debug;
+
+    type RecvFuture<'a>: Future<Output = Result<Option<WebRequest>, Self::Error>>
+    where
+        Self: 'a;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_>;
+}
+
+impl<'t, T> WebReceiver for &'t mut T
+where
+    T: WebReceiver + 't,
+{
+    type Error = T::Error;
+
+    type RecvFuture<'a> = impl Future<Output = Result<Option<WebRequest>, Self::Error>> where Self: 'a;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move { (*self).recv().await }
     }
 }
 
