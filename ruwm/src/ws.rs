@@ -59,7 +59,33 @@ impl<E> From<postcard::Error> for WsError<E> {
     }
 }
 
-pub struct WsReceiver<R>(R);
+struct WsSender<S>(S);
+
+impl<S> WebSender for WsSender<S>
+where
+    S: ws::asynch::Sender,
+{
+    type Error = WsError<S::Error>;
+
+    type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+
+    fn send<'a>(&'a mut self, event: &'a WebEvent) -> Self::SendFuture<'a> {
+        async move {
+            let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
+
+            let frame_data = postcard::to_slice(event, &mut frame_buf)?;
+
+            self.0
+                .send(FrameType::Binary(false), frame_data)
+                .await
+                .map_err(WsError::IoError)?;
+
+            Ok(())
+        }
+    }
+}
+
+struct WsReceiver<R>(R);
 
 impl<R> WebReceiver for WsReceiver<R>
 where
@@ -93,32 +119,6 @@ where
                 FrameType::Close | FrameType::SocketClose => Ok(None),
                 _ => unreachable!(),
             }
-        }
-    }
-}
-
-pub struct WsSender<S>(S);
-
-impl<S> WebSender for WsSender<S>
-where
-    S: ws::asynch::Sender,
-{
-    type Error = WsError<S::Error>;
-
-    type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
-
-    fn send<'a>(&'a mut self, event: &'a WebEvent) -> Self::SendFuture<'a> {
-        async move {
-            let mut frame_buf = [0_u8; WS_MAX_FRAME_LEN];
-
-            let frame_data = postcard::to_slice(event, &mut frame_buf)?;
-
-            self.0
-                .send(FrameType::Binary(false), frame_data)
-                .await
-                .map_err(WsError::IoError)?;
-
-            Ok(())
         }
     }
 }
