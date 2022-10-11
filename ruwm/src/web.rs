@@ -145,51 +145,47 @@ where
         info!("[WEB RECEIVE] {:?}", request);
 
         if let Some(request) = request {
-            let response = request.response(role.lock(|role| role.get()));
-
-            let web_event = if response.is_accepted() {
-                match request.payload() {
-                    WebRequestPayload::ValveCommand(command) => {
-                        valve::COMMAND.signal(*command);
-                        WebEvent::Response(response)
+            let web_event = if request.role() >= role.lock(|role| role.get()) {
+                match request {
+                    WebRequest::ValveCommand(command) => {
+                        valve::COMMAND.signal(command);
+                        None
                     }
-                    WebRequestPayload::WaterMeterCommand(command) => {
-                        wm::COMMAND.signal(*command);
-                        WebEvent::Response(response)
+                    WebRequest::WaterMeterCommand(command) => {
+                        wm::COMMAND.signal(command);
+                        None
                     }
-                    WebRequestPayload::Authenticate(username, password) => {
-                        if let Some(new_role) = authenticate(username, password) {
+                    WebRequest::Authenticate(username, password) => {
+                        if let Some(new_role) = authenticate(&username, &password) {
                             info!("[WS] Authenticated; role: {}", new_role);
 
                             role.lock(|role| role.set(new_role));
-                            WebEvent::RoleState(new_role)
+                            Some(WebEvent::RoleState(new_role))
                         } else {
                             info!("[WS] Authentication failed");
 
                             role.lock(|role| role.set(Role::None));
-                            WebEvent::AuthenticationFailed
+                            Some(WebEvent::AuthenticationFailed)
                         }
                     }
-                    WebRequestPayload::Logout => {
+                    WebRequest::Logout => {
                         role.lock(|role| role.set(Role::None));
-                        WebEvent::RoleState(Role::None)
+                        Some(WebEvent::RoleState(Role::None))
                     }
-                    WebRequestPayload::ValveStateRequest => {
-                        WebEvent::ValveState(valve::STATE.get())
+                    WebRequest::ValveStateRequest => Some(WebEvent::ValveState(valve::STATE.get())),
+                    WebRequest::WaterMeterStateRequest => {
+                        Some(WebEvent::WaterMeterState(wm::STATE.get()))
                     }
-                    WebRequestPayload::WaterMeterStateRequest => {
-                        WebEvent::WaterMeterState(wm::STATE.get())
+                    WebRequest::BatteryStateRequest => {
+                        Some(WebEvent::BatteryState(battery::STATE.get()))
                     }
-                    WebRequestPayload::BatteryStateRequest => {
-                        WebEvent::BatteryState(battery::STATE.get())
-                    }
-                    WebRequestPayload::WifiStatusRequest => todo!(),
+                    WebRequest::WifiStatusRequest => todo!(),
                 }
             } else {
-                WebEvent::Response(response)
+                Some(WebEvent::NoPermissions)
             };
 
-            {
+            if let Some(web_event) = web_event {
                 let sender = &mut *sender.lock().await;
 
                 info!("[WS SEND] {:?}", web_event);

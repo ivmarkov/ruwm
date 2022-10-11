@@ -24,23 +24,28 @@ edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
 lto = true
 opt-level = 'z'
 
+[features]
+default = ["middleware-ws"]
+middleware-ws = ["edge-frame/middleware-ws"]
+middleware-local = ["edge-frame/middleware-local", "embassy-sync"]
+
 [dependencies]
 anyhow = "1"
 log = "0.4"
 futures = "0.3"
 derive_more = "0.99"
 wasm-logger = "0.2"
-wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.19", default-features = false }
 yew-router = { version = "0.16" }
-gloo-net = "0.1"
 strum = { version = "0.23" }
 serde = "1"
-postcard = { version = "0.7", features = [ "alloc" ] }
 embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
 edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame" }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false }
+
+# middleware-local
+embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", optional = true }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

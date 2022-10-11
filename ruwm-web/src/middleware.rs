@@ -1,110 +1,16 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use log::{info, Level};
-
-use yew::prelude::*;
-
-use wasm_bindgen_futures::spawn_local;
-
 use edge_frame::redust::*;
 use edge_frame::role::Credentials;
 use edge_frame::role::RoleAction;
 use edge_frame::role::RoleStateValue;
 
-use ruwm::dto::web::RequestId;
 use ruwm::dto::web::WebEvent;
 use ruwm::dto::web::WebRequest;
-use ruwm::dto::web::WebRequestPayload;
 
 use crate::battery::BatteryAction;
-use crate::error;
 use crate::state::*;
 use crate::valve::*;
-use crate::ws::*;
 
-pub fn apply_middleware(
-    store: UseStoreHandle<AppState>,
-) -> error::Result<UseStoreHandle<AppState>> {
-    let ws = use_ref(|| {
-        let (sender, receiver) = open(&format!(
-            "ws://{}/ws",
-            web_sys::window().unwrap().location().host().unwrap()
-        ))
-        .unwrap();
-
-        (
-            Rc::new(RefCell::new(sender)),
-            Rc::new(RefCell::new(receiver)),
-        )
-    });
-
-    let request_id_gen = use_mut_ref(|| 0_usize);
-
-    let store = store.apply(log(Level::Info));
-
-    receive(ws.1.clone(), store.clone());
-
-    let store = store.apply(send(ws.0.clone(), request_id_gen));
-
-    Ok(store)
-}
-
-fn send(
-    sender: Rc<RefCell<WebSender>>,
-    request_id_gen: Rc<RefCell<RequestId>>,
-) -> impl Fn(StoreProvider<AppState>, AppAction, Rc<dyn Fn(StoreProvider<AppState>, AppAction)>) {
-    move |store, action, dispatcher| {
-        if let Some(request) = to_request(&action, &mut request_id_gen.borrow_mut()) {
-            info!("Sending request: {:?}", request);
-
-            let sender = sender.clone();
-
-            spawn_local(async move {
-                sender.borrow_mut().send(&request).await.unwrap();
-            });
-        }
-
-        dispatcher(store.clone(), action);
-    }
-}
-
-fn receive(receiver: Rc<RefCell<WebReceiver>>, store: UseStoreHandle<AppState>) {
-    let store_ref = use_mut_ref(|| None);
-
-    *store_ref.borrow_mut() = Some(store);
-
-    use_effect_with_deps(
-        move |_| {
-            spawn_local(async move {
-                receive_async(&mut receiver.borrow_mut(), store_ref)
-                    .await
-                    .unwrap();
-            });
-
-            || ()
-        },
-        1, // Will only ever be called once
-    );
-}
-
-async fn receive_async(
-    receiver: &mut WebReceiver,
-    store_ref: Rc<RefCell<Option<UseStoreHandle<AppState>>>>,
-) -> error::Result<()> {
-    loop {
-        let event = receiver.recv().await?;
-
-        info!("Received event: {:?}", event);
-
-        let store = store_ref.borrow().as_ref().unwrap().clone();
-        if let Some(action) = to_action(&event, &store) {
-            store.dispatch(action);
-        }
-    }
-}
-
-fn to_action(event: &WebEvent, store: &UseStoreHandle<AppState>) -> Option<AppAction> {
+pub fn from_event(store: &UseStoreHandle<AppState>, event: &WebEvent) -> Option<AppAction> {
     match event {
         //WebEvent::Response(_) => todo!(),
         WebEvent::AuthenticationFailed => {
@@ -125,19 +31,19 @@ fn to_action(event: &WebEvent, store: &UseStoreHandle<AppState>) -> Option<AppAc
     }
 }
 
-fn to_request(action: &AppAction, request_id_gen: &mut RequestId) -> Option<WebRequest> {
-    let payload = match action {
+pub fn to_request(action: &AppAction) -> Option<WebRequest> {
+    match action {
         AppAction::Role(RoleAction::Update(RoleStateValue::Authenticating(Credentials {
             username,
             password,
-        }))) => Some(WebRequestPayload::Authenticate(
+        }))) => Some(WebRequest::Authenticate(
             username.as_str().into(),
             password.as_str().into(),
         )),
         AppAction::Role(RoleAction::Update(RoleStateValue::LoggingOut(_))) => {
-            Some(WebRequestPayload::Logout)
+            Some(WebRequest::Logout)
         }
-        AppAction::Valve(ValveAction::Update(value)) => Some(WebRequestPayload::ValveCommand(
+        AppAction::Valve(ValveAction::Update(value)) => Some(WebRequest::ValveCommand(
             matches!(
                 value,
                 Some(ruwm::dto::valve::ValveState::Open)
@@ -147,12 +53,5 @@ fn to_request(action: &AppAction, request_id_gen: &mut RequestId) -> Option<WebR
             .unwrap_or(ruwm::dto::valve::ValveCommand::Close),
         )),
         _ => None,
-    };
-
-    payload.map(|payload| {
-        let request_id = *request_id_gen;
-        *request_id_gen += 1;
-
-        WebRequest::new(request_id, payload)
-    })
+    }
 }
