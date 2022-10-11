@@ -80,7 +80,7 @@ impl ws_channel::AcceptorHandler for WebHandler {
 }
 
 pub async fn process<A: Acceptor>(acceptor: A) {
-    ws_channel::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler);
+    ws_channel::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler).await;
 }
 
 pub async fn broadcast() {
