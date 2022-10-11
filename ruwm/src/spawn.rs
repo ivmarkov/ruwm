@@ -10,6 +10,8 @@ use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use edge_executor::*;
+use edge_net::asynch::channel::*;
+
 use valve::ValveState;
 use wm_stats::WaterMeterStatsState;
 
@@ -17,7 +19,7 @@ use crate::button::{self, PressedLevel};
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::FlushableDrawTarget;
-use crate::web::{self, WebReceiver, WebSender};
+use crate::web::{self, WebEvent, WebRequest};
 use crate::wifi::WifiNotification;
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
@@ -121,19 +123,19 @@ where
     Ok(())
 }
 
-pub fn web<'a, const ET: usize, EN, EW, WS, WR>(
+pub fn web<'a, const ET: usize, EN, EW, S, R>(
     executor: &mut Executor<'a, ET, EN, EW, Local>,
     tasks: &mut heapless::Vec<Task<()>, ET>,
-    web_sender: WS,
-    web_receiver: WR,
+    sender: S,
+    receiver: R,
 ) -> Result<(), SpawnError>
 where
     EN: NotifyFactory + RunContextFactory + Default,
     EW: Default,
-    WS: WebSender + 'a,
-    WR: WebReceiver<Error = WS::Error> + 'a,
+    S: Sender<Data = WebEvent> + 'a,
+    R: Receiver<Data = Option<WebRequest>, Error = S::Error> + 'a,
 {
-    executor.spawn_local_collect(web::process(web_sender, web_receiver), tasks)?;
+    executor.spawn_local_collect(web::process(sender, receiver), tasks)?;
 
     Ok(())
 }
@@ -141,13 +143,13 @@ where
 pub fn ws<'a, const ET: usize, EN, EW>(
     executor: &mut Executor<'a, ET, EN, EW, Local>,
     tasks: &mut heapless::Vec<Task<()>, ET>,
-    ws_acceptor: impl Acceptor + 'a,
+    acceptor: impl Acceptor + 'a,
 ) -> Result<(), SpawnError>
 where
     EN: NotifyFactory + RunContextFactory + Default,
     EW: Default,
 {
-    executor.spawn_local_collect(ws::process::<_, 1>(ws_acceptor), tasks)?;
+    executor.spawn_local_collect(ws::process(acceptor), tasks)?;
 
     Ok(())
 }
