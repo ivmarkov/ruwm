@@ -10,7 +10,8 @@ use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use edge_executor::*;
-use edge_net::asynch::channel::*;
+
+use channel_bridge::asynch::*;
 
 use valve::ValveState;
 use wm_stats::WaterMeterStatsState;

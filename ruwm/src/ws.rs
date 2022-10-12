@@ -4,8 +4,7 @@ use embassy_futures::select::select_array;
 
 use embedded_svc::ws::asynch::server::Acceptor;
 
-use edge_net::asynch::channel::*;
-use edge_net::asynch::ws_channel;
+use channel_bridge::asynch::{ws, *};
 
 use crate::notification::Notification;
 use crate::web::{self, *};
@@ -43,7 +42,7 @@ static HANDLERS_WIFI_STATE_NOTIF: [Notification; WS_MAX_CONNECTIONS] = [NOTIF; W
 
 struct WebHandler;
 
-impl ws_channel::AcceptorHandler for WebHandler {
+impl ws::AcceptorHandler for WebHandler {
     type SendData = WebEvent;
 
     type ReceiveData = WebRequest;
@@ -80,7 +79,7 @@ impl ws_channel::AcceptorHandler for WebHandler {
 }
 
 pub async fn process<A: Acceptor>(acceptor: A) {
-    ws_channel::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler).await;
+    ws::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler).await;
 }
 
 pub async fn broadcast() {

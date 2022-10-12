@@ -8,7 +8,8 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
 
 use edge_frame::dto::Role;
-use edge_net::asynch::channel::*;
+
+use channel_bridge::asynch::*;
 
 use crate::battery;
 use crate::notification::Notification;
