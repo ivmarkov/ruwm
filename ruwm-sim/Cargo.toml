@@ -1,0 +1,55 @@
+#cargo-features = ["per-package-target"]
+
+[package]
+name = "ruwm-sim"
+version = "0.1.0"
+authors = ["Ivan Markov <ivan.markov@gmail.com>"]
+edition = "2021"
+categories = ["embedded", "hardware-support", "ui"]
+keywords = ["embedded", "hardware-support", "ui"]
+description = "An all-in-one Web simulator for the Rust Water Meter."
+repository = "https://github.com/ivmarkov/ruwm"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+#forced-target = "wasm32-unknown-unknown"
+
+[patch.crates-io]
+#embedded-svc = { path = "../../embedded-svc" }
+#edge-frame = { path = "../../edge-frame/edge-frame" }
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+edge-executor = { path = "../../edge-executor" }
+
+[patch.'https://github.com/ivmarkov/edge-frame']
+edge-frame = { path = "../../edge-frame/edge-frame" }
+
+[profile.release]
+lto = true
+opt-level = 'z'
+
+#[profile.dev]
+#opt-level = 0
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+heapless = "0.7"
+futures = "0.3"
+derive_more = "0.99"
+wasm-logger = "0.2"
+web-sys = { version = "0.3", features = ["console"] }
+yew = { version = "0.19", default-features = false }
+strum = { version = "0.23" }
+serde = "1"
+embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
+embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["wasm", "generic-queue"] }
+embedded-hal = { version = "0.2", features = ["unproven"] }
+embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
+edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame", default-features = false, features = ["middleware-local"] }
+ruwm = { version = "0.2", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
+ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
+hal-sim = { version = "0.1", path = "../../hal-sim", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
+embedded-graphics-core = "0.3"
+edge-executor = { version = "0.2", features = ["wasm"] }
+channel-bridge = { version = "0.1", git = "https://github.com/ivmarkov/channel-bridge", features = ["nightly"]}
+static_cell = "1"
+critical-section = { version = "1.1.1", features = ["std"] }
