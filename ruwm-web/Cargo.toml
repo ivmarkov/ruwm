@@ -8,7 +8,7 @@ edition = "2018"
 resolver = "2"
 categories = ["embedded", "hardware-support", "ui"]
 keywords = ["embedded", "hardware-support", "ui"]
-description = "A library of subsystems for a water meter controller."
+description = "Web frontend for the Rust Water Meter."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -41,7 +41,7 @@ yew-router = { version = "0.16" }
 strum = { version = "0.23" }
 serde = "1"
 embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
-edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame" }
+edge-frame = { version = "0.3", default-features = false, git = "https://github.com/ivmarkov/edge-frame" }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false }
 
 # middleware-local

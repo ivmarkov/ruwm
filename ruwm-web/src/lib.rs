@@ -43,10 +43,12 @@ pub fn app() -> Html {
     let channel = channel("ws");
 
     #[cfg(feature = "middleware-local")]
-    let channel = channel(
-        comm::REQUEST_QUEUE.sender().into(),
-        comm::EVENT_QUEUE.receiver().into(),
-    );
+    let channel = channel(move || {
+        (
+            comm::REQUEST_QUEUE.sender().into(),
+            comm::EVENT_QUEUE.receiver().into(),
+        )
+    });
 
     let store = apply_middleware(
         use_store(|| Rc::new(AppState::new())),
@@ -120,10 +122,11 @@ pub mod comm {
     pub(crate) static EVENT_QUEUE: channel::Channel<CriticalSectionRawMutex, WebEvent, 1> =
         channel::Channel::new();
 
-    pub fn channel() -> (
-        channel::DynamicSender<'static, WebEvent>,
-        channel::DynamicReceiver<'static, WebRequest>,
-    ) {
-        (EVENT_QUEUE.sender().into(), REQUEST_QUEUE.receiver().into())
+    pub fn sender() -> channel::DynamicSender<'static, WebEvent> {
+        EVENT_QUEUE.sender().into()
+    }
+
+    pub fn receiver() -> channel::DynamicReceiver<'static, WebRequest> {
+        REQUEST_QUEUE.receiver().into()
     }
 }
