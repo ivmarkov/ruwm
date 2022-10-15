@@ -168,7 +168,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
 
-    // High-prio executor
+    // High-prio tasks
 
     let mut high_prio_executor = EspExecutor::<16, _>::new();
     let mut high_prio_tasks = heapless::Vec::<_, 16>::new();
@@ -198,7 +198,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,
     )?;
 
-    // Mid-prio executor
+    // Mid-prio tasks
 
     log::info!("Starting mid-prio executor");
 
@@ -211,7 +211,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = spawn::schedule::<8, _, _>(50000, move || {
+    let mid_prio_execution = spawn::schedule::<8, _>(50000, move || {
         let mut executor = EspExecutor::new();
         let mut tasks = heapless::Vec::new();
 
@@ -231,7 +231,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         Ok((executor, tasks))
     });
 
-    // Low-prio executor
+    // Low-prio tasks
 
     log::info!("Starting low-prio executor");
 
@@ -242,11 +242,11 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = spawn::schedule::<4, _, _>(50000, move || {
+    let low_prio_execution = spawn::schedule::<4, _>(50000, move || {
         let mut executor = EspExecutor::new();
         let mut tasks = heapless::Vec::new();
 
-        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _, _>(
+        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _>(
             &mut executor,
             &mut tasks,
             mqtt_topic_prefix,

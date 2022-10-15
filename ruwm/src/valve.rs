@@ -1,8 +1,6 @@
 use core::fmt::Debug;
 use core::future::pending;
 
-use log::info;
-
 use embassy_time::{Duration, Timer};
 
 use embassy_futures::select::{select, Either};
@@ -139,8 +137,6 @@ fn start_spin(
     open_pin: &mut impl OutputPin<Error = impl Debug>,
     close_pin: &mut impl OutputPin<Error = impl Debug>,
 ) {
-    info!("============ VALVE COMMAND: {:?}", command);
-
     match command {
         Some(ValveCommand::Open) => {
             close_pin.set_low().unwrap();

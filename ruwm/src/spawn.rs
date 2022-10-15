@@ -26,9 +26,9 @@ use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
 use crate::{valve, wifi};
 
-pub fn high_prio<'a, ADC, BP, const ET: usize, EN, EW>(
-    executor: &mut Executor<'a, ET, EN, EW, Local>,
-    tasks: &mut heapless::Vec<Task<()>, ET>,
+pub fn high_prio<'a, ADC, BP, const C: usize, M>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
     valve_power_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_open_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
     valve_close_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
@@ -45,18 +45,18 @@ pub fn high_prio<'a, ADC, BP, const ET: usize, EN, EW>(
     button3_pin: impl InputPin + 'a,
 ) -> Result<(), SpawnError>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Default,
+    M: Monitor + Default,
     ADC: 'a,
     BP: adc::Channel<ADC> + 'a,
 {
     executor
         .spawn_local_collect(valve::process(), tasks)?
-        .spawn_local_collect(
-            valve::spin(valve_power_pin, valve_open_pin, valve_close_pin),
-            tasks,
-        )?
-        .spawn_local_collect(valve::persist(valve_persister), tasks)?
+        // TODO XXX FIXME: Not working with hal-sim yet
+        // .spawn_local_collect(
+        //     valve::spin(valve_power_pin, valve_open_pin, valve_close_pin),
+        //     tasks,
+        // )?
+        // .spawn_local_collect(valve::persist(valve_persister), tasks)?
         .spawn_local_collect(wm::process(pulse_counter, pulse_wakeup), tasks)?
         .spawn_local_collect(wm::persist(wm_persister), tasks)?
         .spawn_local_collect(wm_stats::persist(wm_stats_persister), tasks)?
@@ -82,18 +82,14 @@ where
     Ok(())
 }
 
-pub fn mid_prio<'a, const ET: usize, EN, EW, D>(
-    executor: &mut Executor<'a, ET, EN, EW, Local>,
-    tasks: &mut heapless::Vec<Task<()>, ET>,
+pub fn mid_prio<'a, const C: usize, M, D>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
     display: D,
     wm_flash: impl FnMut(WaterMeterState) + 'a,
-    wifi: impl WifiTrait + 'a,
-    wifi_notif: impl WifiNotification + 'a,
-    mqtt_conn: impl Connection<Message = Option<MqttCommand>> + 'a,
 ) -> Result<(), SpawnError>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Default,
+    M: Monitor + Default,
     D: FlushableDrawTarget + 'a,
     D::Color: RgbColor,
     D::Error: Debug,
@@ -102,37 +98,60 @@ where
         .spawn_local_collect(wm_stats::process(), tasks)?
         .spawn_local_collect(screen::process(), tasks)?
         .spawn_local_collect(screen::run_draw(display), tasks)?
-        .spawn_local_collect(wifi::process(wifi, wifi_notif), tasks)?
-        .spawn_local_collect(mqtt::receive(mqtt_conn), tasks)?
         .spawn_local_collect(wm::flash(wm_flash), tasks)?;
 
     Ok(())
 }
 
-pub fn mqtt_send<'a, const L: usize, const ET: usize, EN, EW>(
-    executor: &mut Executor<'a, ET, EN, EW, Local>,
-    tasks: &mut heapless::Vec<Task<()>, ET>,
+pub fn wifi<'a, const C: usize, M>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
+    wifi: impl WifiTrait + 'a,
+    wifi_notif: impl WifiNotification + 'a,
+) -> Result<(), SpawnError>
+where
+    M: Monitor + Default,
+{
+    executor.spawn_local_collect(wifi::process(wifi, wifi_notif), tasks)?;
+
+    Ok(())
+}
+
+pub fn mqtt_send<'a, const L: usize, const C: usize, M>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
     mqtt_topic_prefix: &'a str,
     mqtt_client: impl Client + Publish + 'a,
 ) -> Result<(), SpawnError>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Default,
+    M: Monitor + Default,
 {
     executor.spawn_local_collect(mqtt::send::<L>(mqtt_topic_prefix, mqtt_client), tasks)?;
 
     Ok(())
 }
 
-pub fn web<'a, const ET: usize, EN, EW, S, R>(
-    executor: &mut Executor<'a, ET, EN, EW, Local>,
-    tasks: &mut heapless::Vec<Task<()>, ET>,
+pub fn mqtt_receive<'a, const C: usize, M>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
+    mqtt_conn: impl Connection<Message = Option<MqttCommand>> + 'a,
+) -> Result<(), SpawnError>
+where
+    M: Monitor + Default,
+{
+    executor.spawn_local_collect(mqtt::receive(mqtt_conn), tasks)?;
+
+    Ok(())
+}
+
+pub fn web<'a, const C: usize, M, S, R>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
     sender: S,
     receiver: R,
 ) -> Result<(), SpawnError>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Default,
+    M: Monitor + Default,
     S: Sender<Data = WebEvent> + 'a,
     R: Receiver<Data = Option<WebRequest>, Error = S::Error> + 'a,
 {
@@ -141,44 +160,48 @@ where
     Ok(())
 }
 
-pub fn ws<'a, const ET: usize, EN, EW>(
-    executor: &mut Executor<'a, ET, EN, EW, Local>,
-    tasks: &mut heapless::Vec<Task<()>, ET>,
+pub fn ws<'a, const C: usize, M>(
+    executor: &mut Executor<'a, C, M, Local>,
+    tasks: &mut heapless::Vec<Task<()>, C>,
     acceptor: impl Acceptor + 'a,
 ) -> Result<(), SpawnError>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Default,
+    M: Monitor + Default,
 {
     executor.spawn_local_collect(ws::process(acceptor), tasks)?;
 
     Ok(())
 }
 
-pub fn run<const C: usize, EN, EW>(
-    executor: &mut Executor<C, EN, EW, Local>,
+pub fn run<const C: usize, M>(
+    executor: &mut Executor<C, M, Local>,
     tasks: heapless::Vec<Task<()>, C>,
 ) where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Wait + Default,
+    M: Monitor + Wait + Default,
 {
-    use crate::quit;
+    executor.run_tasks(move || !crate::quit::QUIT.is_triggered(), tasks);
+}
 
-    executor.with_context(|exec, ctx| {
-        exec.run_tasks(ctx, move || !quit::QUIT.is_triggered(), tasks);
-    });
+pub fn start<const C: usize, M>(
+    executor: &'static mut Executor<C, M, Local>,
+    tasks: heapless::Vec<Task<()>, C>,
+) where
+    M: Monitor + Start + Default,
+{
+    executor.start(move || !crate::quit::QUIT.is_triggered(), move || {});
+
+    core::mem::forget(tasks);
 }
 
 #[cfg(feature = "std")]
-pub fn schedule<'a, const C: usize, EN, EW>(
+pub fn schedule<'a, const C: usize, M>(
     stack_size: usize,
-    spawner: impl FnOnce() -> Result<(Executor<'a, C, EN, EW, Local>, heapless::Vec<Task<()>, C>), SpawnError>
+    spawner: impl FnOnce() -> Result<(Executor<'a, C, M, Local>, heapless::Vec<Task<()>, C>), SpawnError>
         + Send
         + 'static,
 ) -> std::thread::JoinHandle<()>
 where
-    EN: NotifyFactory + RunContextFactory + Default,
-    EW: Wait + Default,
+    M: Monitor + Wait + Default,
 {
     std::thread::Builder::new()
         .stack_size(stack_size)

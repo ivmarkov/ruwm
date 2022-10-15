@@ -59,7 +59,7 @@ where
     let event = WebEvent::RoleState(role);
 
     info!("[WEB SEND] {:?}", event);
-    sender.send(&event).await?;
+    sender.send(event).await?;
 
     let role = Mutex::<NoopRawMutex, _>::new(Cell::new(role));
     let sender = AsyncMutex::<NoopRawMutex, _>::new(sender);
@@ -143,7 +143,7 @@ where
                 let sender = &mut *sender.lock().await;
 
                 info!("[WS SEND] {:?}", web_event);
-                sender.send(&web_event).await?;
+                sender.send(web_event).await?;
             }
         } else {
             break;
@@ -169,7 +169,7 @@ where
 
         web_send_auth(
             &mut *connection.lock().await,
-            &to_web_event(state.get()),
+            to_web_event(state.get()),
             role.lock(|role| role.get()),
         )
         .await?;
@@ -180,7 +180,7 @@ fn authenticate(_username: &str, _password: &str) -> Option<Role> {
     Some(Role::Admin) // TODO
 }
 
-async fn web_send_auth<S>(mut ws_sender: S, event: &WebEvent, role: Role) -> Result<(), S::Error>
+async fn web_send_auth<S>(mut ws_sender: S, event: WebEvent, role: Role) -> Result<(), S::Error>
 where
     S: Sender<Data = WebEvent>,
 {
