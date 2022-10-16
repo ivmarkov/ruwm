@@ -20,10 +20,9 @@ mod services;
 #[function_component(App)]
 pub fn app() -> Html {
     html! {
-        <>
-            <hal_sim::ui::App/>
+        <hal_sim::ui::Hal>
             <ruwm_web::App/>
-        </>
+        </hal_sim::ui::Hal>
     }
 }
 
@@ -153,14 +152,14 @@ fn start() -> Result<(), SpawnError> {
     )?;
 
     // Hal Simulator Web
-    // executor.spawn_local_collect(
-    //     hal_sim::web::process(
-    //         hal_sim::ui::comm::sender(),
-    //         Mapper::new(hal_sim::ui::comm::receiver(), |data| Some(Some(data))),
-    //         peripherals.shared,
-    //     ),
-    //     &mut tasks,
-    // )?;
+    executor.spawn_local_collect(
+        hal_sim::web::process(
+            hal_sim::ui::comm::sender(),
+            Mapper::new(hal_sim::ui::comm::receiver(), |data| Some(Some(data))),
+            peripherals.shared,
+        ),
+        &mut tasks,
+    )?;
 
     // Start execution
 
