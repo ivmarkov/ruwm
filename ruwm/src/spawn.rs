@@ -51,12 +51,11 @@ where
 {
     executor
         .spawn_local_collect(valve::process(), tasks)?
-        // TODO XXX FIXME: Not working with hal-sim yet
-        // .spawn_local_collect(
-        //     valve::spin(valve_power_pin, valve_open_pin, valve_close_pin),
-        //     tasks,
-        // )?
-        // .spawn_local_collect(valve::persist(valve_persister), tasks)?
+        .spawn_local_collect(
+            valve::spin(valve_power_pin, valve_open_pin, valve_close_pin),
+            tasks,
+        )?
+        .spawn_local_collect(valve::persist(valve_persister), tasks)?
         .spawn_local_collect(wm::process(pulse_counter, pulse_wakeup), tasks)?
         .spawn_local_collect(wm::persist(wm_persister), tasks)?
         .spawn_local_collect(wm_stats::persist(wm_stats_persister), tasks)?

@@ -111,7 +111,7 @@ pub async fn spin(
             &mut close_pin,
         );
 
-        let command = COMMAND.wait();
+        let command = SPIN_COMMAND.wait();
 
         let timer = if current_command.is_some() {
             futures::future::Either::Left(Timer::after(TURN_DELAY))

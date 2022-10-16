@@ -268,7 +268,7 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
 
 async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS, payload: &[u8]) {
     if connected {
-        if let Ok(msg_id) = error::check!(mqtt.publish(topic, qos, false, payload).await) {
+        if let Ok(_msg_id) = error::check!(mqtt.publish(topic, qos, false, payload).await) {
             // TODO
             info!("Published to {}", topic);
 
