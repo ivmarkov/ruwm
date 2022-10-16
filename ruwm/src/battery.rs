@@ -31,11 +31,10 @@ pub async fn process<ADC, BP>(
     loop {
         Timer::after(Duration::from_secs(2)).await;
 
-        let voltage = Some(100);
-        // let voltage = one_shot
-        //     .read(&mut battery_pin)
-        //     .ok()
-        //     .map(|voltage| voltage / ROUND_UP * ROUND_UP);
+        let voltage = one_shot
+            .read(&mut battery_pin)
+            .ok()
+            .map(|voltage| voltage / ROUND_UP * ROUND_UP);
 
         let powered = Some(power_pin.is_high().unwrap_or(false));
 
