@@ -181,15 +181,23 @@ pub fn run<const C: usize, M>(
     executor.run_tasks(move || !crate::quit::QUIT.is_triggered(), tasks);
 }
 
-pub fn start<const C: usize, M>(
+pub fn start<const C: usize, M, F>(
     executor: &'static mut Executor<C, M, Local>,
     tasks: heapless::Vec<Task<()>, C>,
+    finished: F,
 ) where
     M: Monitor + Start + Default,
+    F: FnOnce() + 'static,
 {
-    executor.start(move || !crate::quit::QUIT.is_triggered(), move || {});
+    executor.start(move || !crate::quit::QUIT.is_triggered(), {
+        let executor = &*executor;
 
-    core::mem::forget(tasks);
+        move || {
+            executor.drop_tasks(tasks);
+
+            finished();
+        }
+    });
 }
 
 #[cfg(feature = "std")]

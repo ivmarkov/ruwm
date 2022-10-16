@@ -165,7 +165,13 @@ fn start() -> Result<(), SpawnError> {
 
     log::info!("Starting executor");
 
-    spawn::start(executor, tasks);
+    spawn::start(
+        executor, 
+        tasks,
+        move || {
+            log::info!("Execution finished");
+        },
+    );
 
     log::info!("All started");
 
