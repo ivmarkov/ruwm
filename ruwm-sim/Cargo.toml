@@ -13,12 +13,18 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
+[patch.crates-io]
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+
 #[patch.'https://github.com/ivmarkov/edge-frame']
 #edge-frame = { path = "../../edge-frame/edge-frame" }
 
 [profile.release]
 lto = true
 opt-level = 'z'
+
+#[profile.dev]
+#opt-level = 0
 
 [dependencies]
 anyhow = "1"
