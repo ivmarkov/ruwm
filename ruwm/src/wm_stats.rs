@@ -2,7 +2,8 @@ use embassy_time::{Duration, Instant, Timer};
 
 use embassy_futures::select::{select, Either};
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
+
 use crate::{state::*, wm};
 
 pub use crate::dto::water_meter_stats::*;

@@ -6,7 +6,7 @@ members = [
     "ruwm-esp32",
 ]
 
-exclude = [ "ruwm-web" ]
+exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
 #socket2 = { git = "https://github.com/esp-rs-compat/socket2" }

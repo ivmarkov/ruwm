@@ -3,7 +3,8 @@ use core::fmt::Debug;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Timer};
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
+
 use crate::state::State;
 use crate::{battery, quit};
 

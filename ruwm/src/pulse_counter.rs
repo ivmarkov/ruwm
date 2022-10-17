@@ -6,10 +6,9 @@ use embedded_hal::digital::v2::InputPin;
 
 use embassy_time::Duration;
 
-use crate::{
-    button::{self, PressedLevel},
-    notification::Notification,
-};
+use channel_bridge::notification::Notification;
+
+use crate::button::{self, PressedLevel};
 
 pub trait PulseCounter {
     type Error: Debug;

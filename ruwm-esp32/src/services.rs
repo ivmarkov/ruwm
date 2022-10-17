@@ -1,6 +1,5 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
-use core::future::Future;
 use core::mem;
 
 extern crate alloc;
@@ -18,7 +17,6 @@ use display_interface_spi::SPIInterfaceNoCS;
 
 use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 
-use embedded_svc::event_bus::asynch::Receiver;
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::utils::asyncify::Asyncify;
@@ -46,14 +44,16 @@ use esp_idf_sys::EspError;
 
 use edge_frame::assets;
 
+use edge_executor::*;
+
+use channel_bridge::{asynch::pubsub, asynch::*, notification::Notification};
+
 use ruwm::button::PressedLevel;
 use ruwm::mqtt::{MessageParser, MqttCommand};
-use ruwm::notification::Notification;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::{self, ValveState};
-use ruwm::wifi::WifiNotification;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
 use ruwm::ws;
@@ -171,7 +171,7 @@ pub fn storage(
 pub fn pulse(
     peripherals: PulseCounterPeripherals<impl RTCPin + InputPin + OutputPin>,
 ) -> Result<(impl PulseCounter, impl PulseWakeup), InitError> {
-    static PULSE_SIGNAL: ruwm::notification::Notification = ruwm::notification::Notification::new();
+    static PULSE_SIGNAL: Notification = Notification::new();
 
     let pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
         subscribe_pin(peripherals.pulse, || PULSE_SIGNAL.notify())?,
@@ -265,20 +265,7 @@ pub fn wifi<'d>(
     modem: impl Peripheral<P = impl WifiModemPeripheral + 'd> + 'd,
     mut sysloop: EspSystemEventLoop,
     partition: Option<EspDefaultNvsPartition>,
-) -> Result<(impl Wifi + 'd, impl WifiNotification), InitError> {
-    struct EventBusWifiNotification<E>(E);
-
-    impl<E: Receiver<Data = WifiEvent>> WifiNotification for EventBusWifiNotification<E> {
-        type WaitFuture<'a>
-        = impl Future<Output = ()> where Self: 'a;
-
-        fn wait(&mut self) -> Self::WaitFuture<'_> {
-            async move {
-                self.0.recv().await;
-            }
-        }
-    }
-
+) -> Result<(impl Wifi + 'd, impl Receiver<Data = WifiEvent>), InitError> {
     let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
 
     if PASS.is_empty() {
@@ -295,8 +282,6 @@ pub fn wifi<'d>(
         }))?;
     }
 
-    let wifi_state_changed_source = EventBusWifiNotification(sysloop.as_async().subscribe()?);
-
     let wait = WifiWait::new(&sysloop)?;
 
     wifi.start()?;
@@ -305,9 +290,14 @@ pub fn wifi<'d>(
 
     wifi.connect()?;
 
-    //wait.wait(|| wifi.is_connected().unwrap());
+    // if !PASS.is_empty() {
+    //     wait.wait(|| wifi.is_connected().unwrap());
+    // }
 
-    Ok((wifi, wifi_state_changed_source))
+    Ok((
+        wifi,
+        pubsub::SvcReceiver::new(sysloop.as_async().subscribe()?),
+    ))
 }
 
 pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
@@ -401,7 +391,7 @@ where
             //     "TODO"
             // );
 
-            run(&mut executor, tasks);
+            ruwm::spawn::run(&mut executor, tasks);
         })
         .unwrap()
 }

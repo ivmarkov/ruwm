@@ -6,7 +6,7 @@ use log::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
 
 pub struct State<'a, T> {
     name: &'a str,

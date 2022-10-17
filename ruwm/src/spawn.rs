@@ -21,7 +21,6 @@ use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::FlushableDrawTarget;
 use crate::web::{self, WebEvent, WebRequest};
-use crate::wifi::WifiNotification;
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
 use crate::{valve, wifi};
@@ -102,14 +101,15 @@ where
     Ok(())
 }
 
-pub fn wifi<'a, const C: usize, M>(
+pub fn wifi<'a, const C: usize, M, D>(
     executor: &mut Executor<'a, C, M, Local>,
     tasks: &mut heapless::Vec<Task<()>, C>,
     wifi: impl WifiTrait + 'a,
-    wifi_notif: impl WifiNotification + 'a,
+    wifi_notif: impl Receiver<Data = D> + 'a,
 ) -> Result<(), SpawnError>
 where
     M: Monitor + Default,
+    D: 'a,
 {
     executor.spawn_local_collect(wifi::process(wifi, wifi_notif), tasks)?;
 
@@ -178,7 +178,7 @@ pub fn run<const C: usize, M>(
 ) where
     M: Monitor + Wait + Default,
 {
-    executor.run_tasks(move || !crate::quit::QUIT.is_triggered(), tasks);
+    executor.run_tasks(move || !crate::quit::QUIT.triggered(), tasks);
 }
 
 pub fn start<const C: usize, M, F>(
@@ -189,7 +189,7 @@ pub fn start<const C: usize, M, F>(
     M: Monitor + Start + Default,
     F: FnOnce() + 'static,
 {
-    executor.start(move || !crate::quit::QUIT.is_triggered(), {
+    executor.start(move || !crate::quit::QUIT.triggered(), {
         let executor = &*executor;
 
         move || {

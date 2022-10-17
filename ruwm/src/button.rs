@@ -8,7 +8,7 @@ use embassy_futures::select::{select, Either};
 
 use embedded_hal::digital::v2::InputPin;
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PressedLevel {

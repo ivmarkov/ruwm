@@ -12,9 +12,9 @@ use embassy_time::Duration;
 use embedded_svc::storage::Storage;
 
 use esp_idf_hal::adc::*;
-use esp_idf_hal::executor::EspExecutor;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::reset::WakeupReason;
+use esp_idf_hal::task::executor::EspExecutor;
 use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;

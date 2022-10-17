@@ -39,11 +39,12 @@ embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", f
 embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
 static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
 edge-frame = { version = "0.3", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }
-edge-executor = { version = "0.2" }
+edge-executor = { version = "0.3" }
 embedded-graphics = "0.7"
 display-interface = "0.4"
 display-interface-spi = "0.4"
 mipidsi = "0.3"
+channel-bridge = { version = "0.1", git = "https://github.com/ivmarkov/channel-bridge", default-features = false, features = ["notification", "nightly", "embedded-svc"] }
 ruwm = { version = "0.2", path = "../ruwm", features = ["edge-executor"] }
 
 [build-dependencies]

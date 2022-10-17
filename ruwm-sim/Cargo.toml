@@ -13,21 +13,12 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
-[patch.crates-io]
-#embedded-svc = { path = "../../embedded-svc" }
+#[patch.'https://github.com/ivmarkov/edge-frame']
 #edge-frame = { path = "../../edge-frame/edge-frame" }
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
-edge-executor = { path = "../../edge-executor" }
-
-[patch.'https://github.com/ivmarkov/edge-frame']
-edge-frame = { path = "../../edge-frame/edge-frame" }
 
 [profile.release]
 lto = true
 opt-level = 'z'
-
-#[profile.dev]
-#opt-level = 0
 
 [dependencies]
 anyhow = "1"
@@ -49,7 +40,7 @@ ruwm = { version = "0.2", path = "../ruwm", default-features = false, features =
 ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
 hal-sim = { version = "0.1", path = "../../hal-sim", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
 embedded-graphics-core = "0.3"
-edge-executor = { version = "0.2", features = ["wasm"] }
+edge-executor = { version = "0.3", features = ["wasm"] }
 channel-bridge = { version = "0.1", git = "https://github.com/ivmarkov/channel-bridge", features = ["nightly"]}
 static_cell = "1"
 critical-section = { version = "1.1.1", features = ["std"] }

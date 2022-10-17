@@ -10,9 +10,9 @@ use embassy_sync::mutex::Mutex as AsyncMutex;
 use edge_frame::dto::Role;
 
 use channel_bridge::asynch::*;
+use channel_bridge::notification::Notification;
 
 use crate::battery;
-use crate::notification::Notification;
 use crate::state::State;
 use crate::valve;
 use crate::wm;

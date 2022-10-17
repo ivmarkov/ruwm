@@ -14,8 +14,9 @@ use embassy_sync::signal::Signal;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Publish, QoS};
 use embedded_svc::mqtt::client::Details;
 
+use channel_bridge::notification::Notification;
+
 use crate::battery::{self, BatteryState};
-use crate::notification::Notification;
 use crate::valve::{ValveCommand, ValveState};
 use crate::wm::{WaterMeterCommand, WaterMeterState};
 use crate::{error, valve, wm};

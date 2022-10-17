@@ -10,7 +10,8 @@ use embassy_sync::signal::Signal;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
+
 use crate::state::State;
 
 pub use crate::dto::valve::*;

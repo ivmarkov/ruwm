@@ -1,7 +1,8 @@
 use embassy_futures::select::{select3, Either3};
 
+use channel_bridge::notification::Notification;
+
 use crate::battery::{self, BatteryState};
-use crate::notification::Notification;
 use crate::valve::{self, ValveCommand, ValveState};
 use crate::wm;
 

@@ -15,9 +15,10 @@ use embedded_graphics::prelude::RgbColor;
 
 use embedded_svc::executor::asynch::Unblocker;
 
+use channel_bridge::notification::Notification;
+
 use crate::battery::{self, BatteryState};
 use crate::keepalive::{self, RemainingTime};
-use crate::notification::Notification;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
 

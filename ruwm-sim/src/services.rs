@@ -7,11 +7,12 @@ use embedded_graphics_core::prelude::RgbColor;
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
+use channel_bridge::notification::Notification;
+
 use hal_sim::display::Display;
 use hal_sim::gpio::{Input, Pin};
 
 use ruwm::button::PressedLevel;
-use ruwm::notification::Notification;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
@@ -110,7 +111,7 @@ pub fn storage(
 }
 
 pub fn pulse(pulse: Pin<Input>) -> (impl PulseCounter, impl PulseWakeup) {
-    static PULSE_SIGNAL: ruwm::notification::Notification = ruwm::notification::Notification::new();
+    static PULSE_SIGNAL: Notification = Notification::new();
 
     let pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
         subscribe_pin(pulse, || PULSE_SIGNAL.notify()),

@@ -5,8 +5,8 @@ use embassy_futures::select::select_array;
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use channel_bridge::asynch::{ws, *};
+use channel_bridge::notification::Notification;
 
-use crate::notification::Notification;
 use crate::web::{self, *};
 
 #[cfg(any(

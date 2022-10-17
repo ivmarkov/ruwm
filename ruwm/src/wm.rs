@@ -2,7 +2,8 @@ use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 
-use crate::notification::Notification;
+use channel_bridge::notification::Notification;
+
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::state::State;
 

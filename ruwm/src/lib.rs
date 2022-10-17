@@ -18,8 +18,6 @@ pub mod keepalive;
 #[cfg(feature = "system")]
 pub mod mqtt;
 #[cfg(feature = "system")]
-pub mod notification;
-#[cfg(feature = "system")]
 pub mod pulse_counter;
 #[cfg(feature = "system")]
 pub mod quit;
