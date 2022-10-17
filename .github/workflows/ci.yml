@@ -40,7 +40,7 @@ jobs:
 #      - name: Build Web | Compile
 #        run: cd ruwm-web; trunk build --release
       - name: Build Simulator | Fmt Check
-        run: cd ruwm-simulator; cargo fmt -- --check
+        run: cd ruwm-sim; cargo fmt -- --check
 #      - name: Build Simulator | Clippy
 #        run: cd ruwm-sim; cargo clippy --no-deps -- -Dwarnings
       - name: Build Simulator | Compile
