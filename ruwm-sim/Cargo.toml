@@ -19,6 +19,9 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 #[patch.'https://github.com/ivmarkov/edge-frame']
 #edge-frame = { path = "../../edge-frame/edge-frame" }
 
+#[patch.'https://github.com/ivmarkov/hal-sim']
+#hal-sim = { path = "../../hal-sim" }
+
 [profile.release]
 lto = true
 opt-level = 'z'
@@ -44,7 +47,7 @@ embedded-svc = { version = "0.23", default-features = false, features = ["std"] 
 edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame", default-features = false, features = ["middleware-local"] }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
 ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
-hal-sim = { version = "0.1", path = "../../hal-sim", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
+hal-sim = { version = "0.1", git = "https://github.com/ivmarkov/hal-sim", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
 embedded-graphics-core = "0.3"
 edge-executor = { version = "0.3", features = ["wasm"] }
 channel-bridge = { version = "0.1", git = "https://github.com/ivmarkov/channel-bridge", features = ["nightly"]}
