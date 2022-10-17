@@ -381,3 +381,27 @@ fn subscribe_pin<'d, P: InputPin + OutputPin>(
 
     Ok(pin)
 }
+
+pub fn schedule<'a, const C: usize, M>(
+    stack_size: usize,
+    spawner: impl FnOnce() -> Result<(Executor<'a, C, M, Local>, heapless::Vec<Task<()>, C>), SpawnError>
+        + Send
+        + 'static,
+) -> std::thread::JoinHandle<()>
+where
+    M: Monitor + Wait + Default,
+{
+    std::thread::Builder::new()
+        .stack_size(stack_size)
+        .spawn(move || {
+            let (mut executor, tasks) = spawner().unwrap();
+
+            // info!(
+            //     "Tasks on thread {:?} scheduled, about to run the executor now",
+            //     "TODO"
+            // );
+
+            run(&mut executor, tasks);
+        })
+        .unwrap()
+}

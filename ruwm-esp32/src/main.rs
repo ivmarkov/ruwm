@@ -211,7 +211,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = spawn::schedule::<8, _>(50000, move || {
+    let mid_prio_execution = services::schedule::<8, _>(50000, move || {
         let mut executor = EspExecutor::new();
         let mut tasks = heapless::Vec::new();
 
@@ -223,10 +223,11 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
                 #[cfg(feature = "nvs")]
                 flash_wm_state(storage, _new_state);
             },
-            wifi,
-            wifi_notif,
-            mqtt_conn,
         )?;
+
+        spawn::wifi(&mut executor, &mut tasks, wifi, wifi_notif)?;
+
+        spawn::mqtt_receive(&mut executor, &mut tasks, mqtt_conn)?;
 
         Ok((executor, tasks))
     });
@@ -242,7 +243,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = spawn::schedule::<4, _>(50000, move || {
+    let low_prio_execution = services::schedule::<4, _>(50000, move || {
         let mut executor = EspExecutor::new();
         let mut tasks = heapless::Vec::new();
 
