@@ -22,7 +22,9 @@ impl SystemPeripherals {
 
         SystemPeripherals {
             shared: peripherals.shared(),
-            pulse: peripherals.pins.input("Pulse", "Pulse Counter", false),
+            pulse: peripherals
+                .pins
+                .input_click("Pulse", "Pulse Counter", false),
             valve: ValvePeripherals {
                 power: peripherals.pins.output("Power", "Valve", false),
                 open: peripherals.pins.output("Open", "Valve", false),
@@ -34,9 +36,9 @@ impl SystemPeripherals {
                 adc: peripherals.adc0,
             },
             buttons: ButtonsPeripherals {
-                button1: peripherals.pins.input("Button 1", "Buttons", false),
-                button2: peripherals.pins.input("Button 2", "Buttons", false),
-                button3: peripherals.pins.input("Button 3", "Buttons", false),
+                button1: peripherals.pins.input_click("Button 1", "Buttons", false),
+                button2: peripherals.pins.input_click("Button 2", "Buttons", false),
+                button3: peripherals.pins.input_click("Button 3", "Buttons", false),
             },
             display: peripherals
                 .displays
