@@ -23,7 +23,6 @@ use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi};
 use embedded_svc::ws::asynch::server::Acceptor;
 
-use esp_idf_hal::cs::embassy_sync::CriticalSectionRawMutex;
 use esp_idf_hal::delay;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::*;
@@ -32,6 +31,7 @@ use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::reset::WakeupReason;
 use esp_idf_hal::spi::*;
+use esp_idf_hal::task::embassy_sync::CriticalSectionRawMutex;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;

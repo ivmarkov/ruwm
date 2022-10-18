@@ -46,9 +46,7 @@ const MQTT_MAX_TOPIC_LEN: usize = 64;
 esp_idf_sys::esp_app_desc!();
 
 fn main() -> Result<(), InitError> {
-    esp_idf_hal::cs::critical_section::link();
-    //esp_idf_hal::timer::embassy_time::queue::link();
-    esp_idf_svc::timer::embassy_time::driver::link();
+    esp_idf_hal::task::critical_section::link();
     esp_idf_svc::timer::embassy_time::queue::link();
 
     let wakeup_reason = WakeupReason::get();
