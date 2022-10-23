@@ -16,11 +16,11 @@ readme = "README.md"
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 
-#[patch.'https://github.com/ivmarkov/edge-frame']
-#edge-frame = { path = "../../edge-frame/edge-frame" }
+[patch.'https://github.com/ivmarkov/edge-frame']
+edge-frame = { path = "../../edge-frame/edge-frame" }
 
-#[patch.'https://github.com/ivmarkov/hal-sim']
-#hal-sim = { path = "../../hal-sim" }
+[patch.'https://github.com/ivmarkov/hal-sim']
+hal-sim = { path = "../../hal-sim" }
 
 [profile.release]
 lto = true

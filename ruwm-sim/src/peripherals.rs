@@ -42,9 +42,7 @@ impl SystemPeripherals {
             },
             display: peripherals
                 .displays
-                .display("Display".into(), 320, 240, |color: Rgb888| {
-                    color.into_storage()
-                }),
+                .display("Display", 320, 240, |color: Rgb888| color.into_storage()),
         }
     }
 }

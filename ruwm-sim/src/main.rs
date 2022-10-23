@@ -120,12 +120,12 @@ fn start() -> Result<(), SpawnError> {
 
     // Mid-prio tasks
 
-    let display_peripherals = peripherals.display;
+    let display = peripherals.display;
 
     spawn::mid_prio(
         executor,
         &mut tasks,
-        services::display(display_peripherals),
+        services::display(display),
         move |_new_state| {
             #[cfg(feature = "nvs")]
             flash_wm_state(storage, _new_state);
