@@ -28,7 +28,8 @@ pub fn app() -> Html {
 
 fn main() -> Result<(), SpawnError> {
     wasm_logger::init(wasm_logger::Config::default());
-
+    hal_sim::ui::init_middleware();
+    
     yew::start_app::<App>();
 
     start()?;

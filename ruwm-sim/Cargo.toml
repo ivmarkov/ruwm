@@ -15,12 +15,16 @@ readme = "README.md"
 
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+yewdux = { git = "https://github.com/ivmarkov/yewdux", branch = "release/v0.8.2" }
 
 [patch.'https://github.com/ivmarkov/edge-frame']
 edge-frame = { path = "../../edge-frame/edge-frame" }
 
 [patch.'https://github.com/ivmarkov/hal-sim']
 hal-sim = { path = "../../hal-sim" }
+
+[patch.'https://github.com/ivmarkov/yewdux-middleware']
+yewdux-middleware = { path = "../../yewdux-middleware" }
 
 [profile.release]
 lto = true
