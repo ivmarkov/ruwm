@@ -79,7 +79,7 @@ where
 {
     type Error = Infallible;
 
-    type TakePulsesFuture<'b> = impl Future<Output = Result<u64, Self::Error>> where Self: 'b;
+    type TakePulsesFuture<'b> = impl Future<Output = Result<u64, Self::Error>> + 'b where Self: 'b;
 
     fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_> {
         async move {

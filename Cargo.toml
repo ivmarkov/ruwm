@@ -21,6 +21,7 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
 edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+embedded-io = { git = "https://github.com/embassy-rs/embedded-io" }
 
 #[patch.'https://github.com/esp-rs/embedded-svc']
 #embedded-svc = { path = "../embedded-svc" }

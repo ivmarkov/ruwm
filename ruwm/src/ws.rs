@@ -47,7 +47,7 @@ impl ws::AcceptorHandler for WebHandler {
 
     type ReceiveData = WebRequest;
 
-    type HandleFuture<'a, S, R> = impl Future<Output = Result<(), S::Error>>
+    type HandleFuture<'a, S, R> = impl Future<Output = Result<(), S::Error>> + 'a
     where
         Self: 'a,
         S: Sender<Data = Self::SendData> + 'a,
