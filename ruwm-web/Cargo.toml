@@ -47,7 +47,7 @@ edge-frame = { version = "0.4", default-features = false, git = "https://github.
 ruwm = { version = "0.2", path = "../ruwm", default-features = false }
 
 # middleware-local
-embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", optional = true }
+embassy-sync = { version = "0.1", optional = true }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

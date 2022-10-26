@@ -34,10 +34,10 @@ embedded-svc = { version = "0.23", features = ["nightly", "experimental"] }
 esp-idf-sys = { version = "0.31.10", features = ["binstart"] }
 esp-idf-svc = { version = "0.43", features = ["nightly", "experimental", "embassy-time-isr-queue"] }
 esp-idf-hal = { version = "0.39", features = ["edge-executor", "embassy-sync", "critical-section"] }
-embassy-futures = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
-embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["std"] }
-embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
-static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
+embassy-futures = { version = "0.1" }
+embassy-sync = { version = "0.1", features = ["std"] }
+embassy-time = { version = "0.1" }
+static_cell = { version = "1" }
 edge-frame = { version = "0.4", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }
 edge-executor = { version = "0.3" }
 embedded-graphics = "0.7"
@@ -50,4 +50,4 @@ ruwm = { version = "0.2", path = "../ruwm", features = ["edge-executor"] }
 [build-dependencies]
 anyhow = "1"
 embuild = { version = "0.30.3", features = ["espidf", "elf"] }
-edge-frame = { version = "0.3", default-features = false, features = ["assets-prepare"], git = "https://github.com/ivmarkov/edge-frame" }
+edge-frame = { version = "0.4", default-features = false, features = ["assets-prepare"], git = "https://github.com/ivmarkov/edge-frame" }
