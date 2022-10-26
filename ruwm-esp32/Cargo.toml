@@ -38,7 +38,7 @@ embassy-futures = { version = "0.1", git = "https://github.com/ivmarkov/embassy"
 embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["std"] }
 embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
 static_cell = { version = "1", git = "https://github.com/embassy-rs/static-cell" }
-edge-frame = { version = "0.3", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }
+edge-frame = { version = "0.4", default-features = false, features = ["assets-serve"], git = "https://github.com/ivmarkov/edge-frame" }
 edge-executor = { version = "0.3" }
 embedded-graphics = "0.7"
 display-interface = "0.4"

@@ -1,24 +1,26 @@
 #![recursion_limit = "1024"]
 
+use core::fmt::Debug;
+
 use std::rc::Rc;
 
+use edge_frame::middleware;
+use log::Level;
+use ruwm::dto::web::WebEvent;
+use ruwm::dto::web::WebRequest;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux_middleware::*;
 
 use edge_frame::frame::*;
 use edge_frame::middleware::*;
-use edge_frame::redust::*;
 use edge_frame::role::*;
 use edge_frame::wifi::*;
 
 use crate::battery::*;
-use crate::middleware::*;
-use crate::state::*;
 use crate::valve::*;
 
 mod battery;
-mod middleware;
-mod state;
 mod valve;
 
 #[cfg(all(feature = "middleware-ws", feature = "middleware-local"))]
@@ -37,33 +39,29 @@ enum Routes {
     Home,
 }
 
+#[derive(Default, Properties, Clone, PartialEq)]
+pub struct AppProps {
+    #[prop_or("/ws".to_owned())]
+    pub endpoint: String,
+}
+
 #[function_component(App)]
-pub fn app() -> Html {
-    #[cfg(feature = "middleware-ws")]
-    let channel = channel("ws");
+pub fn app(props: &AppProps) -> Html {
+    let endpoint = props.endpoint.clone();
 
-    #[cfg(feature = "middleware-local")]
-    let channel = channel(move || {
-        (
-            comm::REQUEST_QUEUE.sender().into(),
-            comm::EVENT_QUEUE.receiver().into(),
-        )
-    });
+    use_effect_with_deps(
+        move |_| {
+            init_middleware(endpoint);
 
-    let store = apply_middleware(
-        use_store(|| Rc::new(AppState::new())),
-        to_request,
-        from_event,
-        channel,
-    )
-    .unwrap();
+            move || ()
+        },
+        (),
+    );
 
     html! {
-        <ContextProvider<UseStoreHandle<AppState>> context={store.clone()}>
-            <BrowserRouter>
-                <Switch<Routes> render={Switch::render(render)}/>
-            </BrowserRouter>
-        </ContextProvider<UseStoreHandle<AppState>>>
+        <BrowserRouter>
+            <Switch<Routes> render={Switch::render(render)}/>
+        </BrowserRouter>
     }
 }
 
@@ -73,42 +71,108 @@ fn render(route: &Routes) -> Html {
             app_title="RUWM"
             app_url="https://github.com/ivmarkov/ruwm">
             <Nav>
-                // <Role<AppState> role={RoleDto::User} projection={AppState::role()}>
-                //     <RouteNavItem<Routes> text="Home" route={Routes::Home}/>
-                // </Role<AppState>>
-                <Role<AppState> role={RoleDto::Admin} projection={AppState::role()}>
+                // <Role role={RoleDto::User}>
+                //     <RouteNavItem text="Home" route={Routes::Home}/>
+                // </Role>
+                <Role role={RoleDto::Admin}>
                     <RouteNavItem<Routes> text="Home" icon="fa-solid fa-droplet" route={Routes::Home}/>
                     <WifiNavItem<Routes> route={Routes::Wifi}/>
-                </Role<AppState>>
+                </Role>
             </Nav>
             <Status>
-                <Role<AppState> role={RoleDto::User} projection={AppState::role()}>
-                    <WifiStatusItem<Routes, AppState> route={Routes::Wifi} projection={AppState::wifi()}/>
-                    <RoleLogoutStatusItem<Routes, AppState> auth_status_route={Routes::AuthState} projection={AppState::role()}/>
-                </Role<AppState>>
+                <Role role={RoleDto::User}>
+                    <WifiStatusItem<Routes> route={Routes::Wifi}/>
+                    <RoleLogoutStatusItem<Routes> auth_status_route={Routes::AuthState}/>
+                </Role>
             </Status>
             <Content>
                 {
                     match route {
                         Routes::Home => html! {
-                            <Role<AppState> role={RoleDto::User} projection={AppState::role()} auth=true>
-                                <Valve<AppState> projection={AppState::valve()}/>
-                                <Battery<AppState> projection={AppState::battery()}/>
-                            </Role<AppState>>
+                            <Role role={RoleDto::User} auth=true>
+                                <Valve/>
+                                <Battery/>
+                            </Role>
                         },
                         Routes::AuthState => html! {
-                            <RoleAuthState<Routes, AppState> home={Some(Routes::Home)} projection={AppState::role()}/>
+                            <RoleAuthState<Routes> home={Some(Routes::Home)}/>
                         },
                         Routes::Wifi => html! {
-                            <Role<AppState> role={RoleDto::Admin} projection={AppState::role()} auth=true>
-                                <Wifi<AppState> projection={AppState::wifi()}/>
-                            </Role<AppState>>
+                            <Role role={RoleDto::Admin} auth=true>
+                                <Wifi/>
+                            </Role>
                         },
                     }
                 }
             </Content>
         </Frame>
     }
+}
+
+fn init_middleware(_endpoint: String) {
+    #[cfg(feature = "middleware-ws")]
+    let (sender, receiver) =
+        middleware::open(&_endpoint).unwrap_or_else(|_| panic!("Failed to open websocket"));
+
+    #[cfg(feature = "middleware-local")]
+    let (sender, receiver) = (comm::REQUEST_QUEUE.sender(), comm::EVENT_QUEUE.receiver());
+
+    // Dispatch WebRequest messages => send to backend
+    dispatch::register(middleware::send::<WebRequest>(sender));
+
+    // Dispatch WebEvent messages => redispatch as BatteryMsg, ValveMsg, RoleState or WifiConf messages
+    dispatch::register::<WebEvent, _>(|event| {
+        match event {
+            WebEvent::NoPermissions => unreachable!(),
+            WebEvent::AuthenticationFailed => {
+                dispatch::invoke(RoleState::AuthenticationFailed(Credentials {
+                    username: "".into(),
+                    password: "".into(),
+                }))
+            } // TODO
+            WebEvent::RoleState(role) => dispatch::invoke(RoleState::Role(role)),
+            WebEvent::ValveState(valve) => dispatch::invoke(ValveMsg(valve)),
+            WebEvent::BatteryState(battery) => dispatch::invoke(BatteryMsg(battery)),
+            WebEvent::WaterMeterState(_) => (), // TODO
+        }
+    });
+
+    dispatch::register(log::<RoleStore, RoleState>(
+        dispatch::store.fuse(role_as_request),
+    ));
+    dispatch::register(log::<WifiConfStore, WifiConfState>(dispatch::store));
+    dispatch::register(log::<BatteryStore, BatteryMsg>(dispatch::store));
+    dispatch::register(log::<ValveStore, ValveMsg>(dispatch::store));
+
+    // Receive from backend => dispatch WebEvent messages
+    middleware::receive::<WebEvent>(receiver);
+}
+
+fn log<S, M>(dispatch: impl Dispatch<M> + Clone) -> impl Dispatch<M>
+where
+    S: Store + Debug,
+    M: Reducer<S> + Debug + 'static,
+{
+    dispatch
+        .fuse(Rc::new(log_store(Level::Trace)))
+        .fuse(Rc::new(log_msg(Level::Trace)))
+}
+
+fn role_as_request(msg: RoleState, dispatch: impl Dispatch<RoleState>) {
+    let request = match &msg {
+        RoleState::Authenticating(credentials) => Some(WebRequest::Authenticate(
+            credentials.username.as_str().into(),
+            credentials.password.as_str().into(),
+        )),
+        RoleState::LoggingOut(_) => Some(WebRequest::Logout),
+        _ => None,
+    };
+
+    if let Some(request) = request {
+        dispatch::invoke(request);
+    }
+
+    dispatch.invoke(msg);
 }
 
 #[cfg(feature = "middleware-local")]

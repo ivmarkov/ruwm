@@ -1,22 +1,31 @@
-use ruwm::dto::battery::BatteryState as BatteryValue;
+use std::rc::Rc;
 
 use yew::prelude::*;
+use yewdux_middleware::*;
 
-use edge_frame::redust::*;
+use ruwm::dto::battery::BatteryState;
 
-pub type BatteryState = ValueState<BatteryValue>;
-pub type BatteryAction = ValueAction<BatteryValue>;
+#[derive(Default, Clone, Debug, Eq, PartialEq, Store)]
+pub struct BatteryStore(pub BatteryState);
 
-#[derive(Properties, Clone, PartialEq)]
-pub struct BatteryProps<R: Reducible2> {
-    pub projection: Projection<R, BatteryState, BatteryAction>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatteryMsg(pub BatteryState);
+
+impl Reducer<BatteryStore> for BatteryMsg {
+    fn apply(&self, mut store: Rc<BatteryStore>) -> Rc<BatteryStore> {
+        let state = Rc::make_mut(&mut store);
+
+        state.0 = self.0.clone();
+
+        store
+    }
 }
 
 #[function_component(Battery)]
-pub fn battery<R: Reducible2>(props: &BatteryProps<R>) -> Html {
-    let battery_store = use_projection(props.projection.clone());
+pub fn battery() -> Html {
+    let battery_store = use_store::<BatteryStore>();
 
     html! {
-        {format!("Battery Powered: {}, mV: {:?}", battery_store.powered.unwrap_or(false), battery_store.voltage)}
+        {format!("Battery Powered: {}, mV: {:?}", battery_store.0.powered.unwrap_or(false), battery_store.0.voltage)}
     }
 }

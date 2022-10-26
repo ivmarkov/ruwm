@@ -49,7 +49,7 @@ embassy-sync = { version = "0.1", git = "https://github.com/ivmarkov/embassy" }
 embassy-time = { version = "0.1", git = "https://github.com/ivmarkov/embassy", features = ["wasm", "generic-queue"] }
 embedded-hal = { version = "0.2", features = ["unproven"] }
 embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
-edge-frame = { version = "0.3", git = "https://github.com/ivmarkov/edge-frame", default-features = false, features = ["middleware-local"] }
+edge-frame = { version = "0.4", git = "https://github.com/ivmarkov/edge-frame", default-features = false, features = ["middleware-local"] }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
 ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
 hal-sim = { version = "0.1", git = "https://github.com/ivmarkov/hal-sim", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }

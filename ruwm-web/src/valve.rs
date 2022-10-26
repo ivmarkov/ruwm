@@ -1,24 +1,31 @@
-use std::ops::Deref;
+use std::rc::Rc;
 
 use yew::prelude::*;
+use yewdux_middleware::*;
 
-use edge_frame::redust::*;
+use ruwm::dto::valve::ValveState;
 
-pub type ValveValue = Option<ruwm::dto::valve::ValveState>;
+#[derive(Default, Clone, Debug, Eq, PartialEq, Store)]
+pub struct ValveStore(pub Option<ValveState>);
 
-pub type ValveState = ValueState<ValveValue>;
-pub type ValveAction = ValueAction<ValveValue>;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValveMsg(pub Option<ValveState>);
 
-#[derive(Properties, Clone, PartialEq)]
-pub struct ValveProps<R: Reducible2> {
-    pub projection: Projection<R, ValveState, ValveAction>,
+impl Reducer<ValveStore> for ValveMsg {
+    fn apply(&self, mut store: Rc<ValveStore>) -> Rc<ValveStore> {
+        let state = Rc::make_mut(&mut store);
+
+        state.0 = self.0.clone();
+
+        store
+    }
 }
 
 #[function_component(Valve)]
-pub fn valve<R: Reducible2>(props: &ValveProps<R>) -> Html {
-    let valve_store = use_projection(props.projection.clone());
+pub fn valve() -> Html {
+    let valve_store = use_store::<ValveStore>();
 
     html! {
-        {format!("Valve State: {:?}", valve_store.deref())}
+        {format!("Valve State: {:?}", valve_store.0.as_ref())}
     }
 }
