@@ -1,4 +1,7 @@
-use core::fmt::Debug;
+use core::{
+    cmp::{max, min},
+    fmt::Debug,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -17,5 +20,17 @@ impl BatteryState {
             voltage: None,
             powered: None,
         }
+    }
+
+    pub fn percentage(&self) -> Option<u8> {
+        self.voltage.map(|voltage| {
+            let voltage = max(
+                BatteryState::LOW_VOLTAGE,
+                min(BatteryState::MAX_VOLTAGE, voltage),
+            );
+
+            ((voltage - BatteryState::LOW_VOLTAGE) * 100
+                / (BatteryState::MAX_VOLTAGE - BatteryState::LOW_VOLTAGE)) as u8
+        })
     }
 }

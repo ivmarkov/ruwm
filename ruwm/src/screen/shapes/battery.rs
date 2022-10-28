@@ -2,10 +2,12 @@ use core::str;
 
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
 use embedded_graphics::mono_font::*;
-use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, RgbColor, Size};
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
-use embedded_graphics::Drawable;
+use embedded_graphics::prelude::{OriginDimensions, Point, Size};
+use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::text::{Alignment, Baseline, TextStyleBuilder};
+
+use super::util::{clear, fill, text, to_str};
+use super::Color;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BatteryChargedText {
@@ -48,13 +50,10 @@ impl Battery {
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         // Clear the area
-        Rectangle::new(Point::new(0, 0), Self::SIZE)
-            .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
-            .draw(target)?;
+        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
             Point::new(Self::PADDING as _, Self::PADDING as _),
@@ -64,8 +63,7 @@ impl Battery {
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget + OriginDimensions,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color> + OriginDimensions,
     {
         let Size { width, height } = target.size();
 
@@ -79,116 +77,136 @@ impl Battery {
 
         let charged_color = if let Some(percentage) = self.percentage {
             if percentage < Self::PERCENTAGE_THRESHOLD {
-                D::Color::RED
+                Color::Red
             } else {
-                D::Color::GREEN
+                Color::Green
             }
         } else {
-            D::Color::YELLOW
+            Color::Yellow
         };
 
         let outline_color = if self.outline && self.percentage.is_some() {
-            D::Color::WHITE
+            Color::White
         } else {
             charged_color
         };
 
         // Draw charging level fill
-        Rectangle::new(
-            Point::new(0, fill_line as _),
-            Size::new(width, height - fill_line),
-        )
-        .into_styled(PrimitiveStyle::with_fill(charged_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new(0, fill_line as _),
+                Size::new(width, height - fill_line),
+            ),
+            charged_color,
+            target,
+        )?;
 
         // Left outline
-        Rectangle::new(
-            Point::new(0, Self::CATHODE_HEIGHT as _),
-            Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new(0, Self::CATHODE_HEIGHT as _),
+                Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
+            ),
+            outline_color,
+            target,
+        )?;
 
         // Right outline
-        Rectangle::new(
-            Point::new(
-                width as i32 - Self::OUTLINE as i32,
-                Self::CATHODE_HEIGHT as _,
+        fill(
+            &Rectangle::new(
+                Point::new(
+                    width as i32 - Self::OUTLINE as i32,
+                    Self::CATHODE_HEIGHT as _,
+                ),
+                Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
             ),
-            Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+            outline_color,
+            target,
+        )?;
 
         // Bottom outline
-        Rectangle::new(
-            Point::new(0, height as i32 - Self::OUTLINE as i32),
-            Size::new(width, Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new(0, height as i32 - Self::OUTLINE as i32),
+                Size::new(width, Self::OUTLINE),
+            ),
+            outline_color,
+            target,
+        )?;
 
         // Top outline
-        Rectangle::new(
-            Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
-            Size::new(Self::CATHODE_WIDTH, Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
+                Size::new(Self::CATHODE_WIDTH, Self::OUTLINE),
+            ),
+            outline_color,
+            target,
+        )?;
 
         // Top left horizontal outline
-        Rectangle::new(
-            Point::new(0, Self::CATHODE_HEIGHT as _),
-            Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new(0, Self::CATHODE_HEIGHT as _),
+                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
+            ),
+            outline_color,
+            target,
+        )?;
 
         // Top right horizontal outline
-        Rectangle::new(
-            Point::new(
-                (width as i32 + Self::CATHODE_WIDTH as i32) / 2,
-                Self::CATHODE_HEIGHT as _,
+        fill(
+            &Rectangle::new(
+                Point::new(
+                    (width as i32 + Self::CATHODE_WIDTH as i32) / 2,
+                    Self::CATHODE_HEIGHT as _,
+                ),
+                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
             ),
-            Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+            outline_color,
+            target,
+        )?;
 
         // Top left vertical outline
-        Rectangle::new(
-            Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
-            Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+        fill(
+            &Rectangle::new(
+                Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
+                Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
+            ),
+            outline_color,
+            target,
+        )?;
 
         // Top right vertical outline
-        Rectangle::new(
-            Point::new(
-                (width as i32 + Self::CATHODE_WIDTH as i32) / 2 - Self::OUTLINE as i32,
-                0,
+        fill(
+            &Rectangle::new(
+                Point::new(
+                    (width as i32 + Self::CATHODE_WIDTH as i32) / 2 - Self::OUTLINE as i32,
+                    0,
+                ),
+                Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
             ),
-            Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
-        )
-        .into_styled(PrimitiveStyle::with_fill(outline_color))
-        .draw(target)?;
+            outline_color,
+            target,
+        )?;
 
         // Remove charge fill from the top left corner
-        Rectangle::new(
-            Point::new(0, 0),
-            Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
-        )
-        .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
-        .draw(target)?;
+        clear(
+            &Rectangle::new(
+                Point::new(0, 0),
+                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
+            ),
+            target,
+        )?;
 
         // Remove charge fill from the top right corner
-        Rectangle::new(
-            Point::new((width as i32 + Self::CATHODE_WIDTH as i32) / 2, 0),
-            Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
-        )
-        .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
-        .draw(target)?;
+        clear(
+            &Rectangle::new(
+                Point::new((width as i32 + Self::CATHODE_WIDTH as i32) / 2, 0),
+                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
+            ),
+            target,
+        )?;
 
         let light_color = if percentage < Self::PERCENTAGE_THRESHOLD {
             charged_color
@@ -209,7 +227,7 @@ impl Battery {
                 Point::new(0, fill_line as i32),
                 Size::new(width, height - fill_line),
             ));
-            self.draw_percentage(&mut bonw, position, D::Color::BLACK)?;
+            self.draw_percentage(&mut bonw, position, Color::Black)?;
         } else if self.text_rendering == BatteryChargedText::Outline {
             self.draw_percentage(target, position, light_color)?;
         }
@@ -221,72 +239,34 @@ impl Battery {
         &self,
         target: &mut D,
         position: Point,
-        color: D::Color,
+        color: Color,
     ) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
+        let text_style = Some(
+            TextStyleBuilder::new()
+                .baseline(Baseline::Middle)
+                .alignment(Alignment::Center)
+                .build(),
+        );
+
         if let Some(percentage) = self.percentage {
             let mut charged_text = [0_u8; 4];
             charged_text[3] = b'%';
 
             let offset = to_str(percentage as _, &mut charged_text[..3]);
 
-            self.draw_text(
+            text(
+                &Self::FONT,
                 target,
                 position,
                 str::from_utf8(&charged_text[offset..]).unwrap(),
                 color,
+                text_style,
             )
         } else {
-            self.draw_text(target, position, "?", color)
+            text(&Self::FONT, target, position, "?", color, text_style)
         }
     }
-
-    fn draw_text<D>(
-        &self,
-        target: &mut D,
-        position: Point,
-        text: &str,
-        color: D::Color,
-    ) -> Result<(), D::Error>
-    where
-        D: DrawTarget,
-        D::Color: RgbColor,
-    {
-        let character_style = MonoTextStyleBuilder::new()
-            .font(&Self::FONT)
-            .text_color(color)
-            .build();
-
-        let text_style = TextStyleBuilder::new()
-            .baseline(Baseline::Middle)
-            .alignment(Alignment::Center)
-            .build();
-
-        Text::with_text_style(text, position, character_style, text_style).draw(target)?;
-
-        Ok(())
-    }
-}
-
-fn to_str(mut num: u32, buf: &mut [u8]) -> usize {
-    let mut len = buf.len();
-
-    if num == 0 {
-        len -= 1;
-
-        buf[len] = b'0';
-    }
-
-    while num > 0 {
-        len -= 1;
-
-        buf[len] = b'0' + (num % 10) as u8;
-
-        num /= 10;
-    }
-
-    len
 }

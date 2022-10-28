@@ -1,7 +1,5 @@
 use core::fmt::Debug;
 
-use embedded_graphics::prelude::RgbColor;
-
 use embedded_hal::adc;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
@@ -19,7 +17,7 @@ use wm_stats::WaterMeterStatsState;
 use crate::button::{self, PressedLevel};
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
-use crate::screen::FlushableDrawTarget;
+use crate::screen::{Color, FlushableDrawTarget};
 use crate::web::{self, WebEvent, WebRequest};
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
@@ -88,8 +86,7 @@ pub fn mid_prio<'a, const C: usize, M, D>(
 ) -> Result<(), SpawnError>
 where
     M: Monitor + Default,
-    D: FlushableDrawTarget + 'a,
-    D::Color: RgbColor,
+    D: FlushableDrawTarget<Color = Color> + 'a,
     D::Error: Debug,
 {
     executor

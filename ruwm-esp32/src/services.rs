@@ -9,9 +9,8 @@ use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
+use embedded_graphics::pixelcolor::Rgb565;
 use mipidsi::{Display, DisplayOptions};
-
-use embedded_graphics::prelude::RgbColor;
 
 use display_interface_spi::SPIInterfaceNoCS;
 
@@ -52,7 +51,7 @@ use ruwm::button::PressedLevel;
 use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
+use ruwm::screen::{Color, ColorAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
@@ -208,8 +207,7 @@ pub fn button<'d, P: InputPin + OutputPin>(
 
 pub fn display(
     peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
-) -> Result<impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'static, InitError>
-{
+) -> Result<impl FlushableDrawTarget<Color = Color, Error = impl Debug> + 'static, InitError> {
     if let Some(backlight) = peripherals.control.backlight {
         let mut backlight = PinDriver::output(backlight)?;
 
@@ -256,7 +254,8 @@ pub fn display(
         display,
     );
 
-    let display = FlushableAdaptor::noop(display);
+    // TODO: Double-buffer
+    let display = FlushableAdaptor::noop(ColorAdaptor::new(Color::into_rgb::<Rgb565>, display));
 
     Ok(display)
 }

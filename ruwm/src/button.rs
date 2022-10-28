@@ -50,7 +50,7 @@ pub async fn button3_process(pin: impl InputPin, pressed_level: PressedLevel) {
     button_process(
         pin,
         pressed_level,
-        &BUTTON1_PIN_EDGE,
+        &BUTTON3_PIN_EDGE,
         "BUTTON3 STATE",
         BUTTON3_NOTIFY,
     )

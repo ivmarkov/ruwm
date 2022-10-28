@@ -1,4 +1,3 @@
-use core::cmp::{max, min};
 use core::convert::Infallible;
 use core::marker::PhantomData;
 
@@ -8,6 +7,7 @@ use embedded_graphics::prelude::{
 };
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::Pixel;
+use log::info;
 
 pub struct DrawTargetRef<'a, D>(&'a mut D);
 
@@ -57,166 +57,189 @@ where
     }
 }
 
-pub struct Diff<const N: usize>([Option<Rectangle>; N]);
+pub struct BufferingAdaptor<'a, D>
+where
+    D: DrawTarget,
+{
+    draw_target: PackedBuffer<'a, D::Color>,
+    reference: PackedBuffer<'a, D::Color>,
+    display: D,
+}
 
-impl<const N: usize> Diff<N> {
-    pub fn empty() -> Self {
-        Self([None; N])
-    }
+impl<'a, D> BufferingAdaptor<'a, D>
+where
+    D: DrawTarget + Dimensions,
+    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+{
+    pub fn new(draw_buf: &'a mut [u8], reference_buf: &'a mut [u8], display: D) -> Self {
+        let bbox = display.bounding_box();
 
-    pub fn diff<'a, const WIDTH: usize, COLOR>(
-        buf1: &PackedBuffer<'a, WIDTH, COLOR>,
-        buf2: &PackedBuffer<'a, WIDTH, COLOR>,
-    ) -> Self
-    where
-        COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
-    {
-        let mut list = Self::empty();
-
-        let mut add = |diff_start, y_offset, x| {
-            if let Some(diff_start) = diff_start {
-                list.add(Rectangle::new(
-                    Point::new(
-                        diff_start as i32,
-                        (y_offset / PackedBuffer::<'a, WIDTH, COLOR>::BYTES_PER_ROW) as i32,
-                    ),
-                    Size::new(x as u32 - diff_start as u32, 1),
-                ));
-            }
-        };
-
-        for y_offset in 0..PackedBuffer::<'a, WIDTH, COLOR>::y_offset(buf1.height()) {
-            let mut diff_start = None;
-
-            for x in 0..WIDTH {
-                let byte_offset = y_offset + PackedBuffer::<'a, WIDTH, COLOR>::x_offset(x);
-                let bits_offset = PackedBuffer::<'a, WIDTH, COLOR>::x_bits_offset(x);
-
-                let color1 = buf1.get(byte_offset, bits_offset);
-                let color2 = buf2.get(byte_offset, bits_offset);
-
-                let diff = color1 != color2;
-
-                if diff_start.is_some() != diff {
-                    add(diff_start, y_offset, x);
-                    diff_start = if diff { Some(x) } else { None };
-                }
-            }
-
-            add(diff_start, y_offset, WIDTH);
+        Self {
+            draw_target: PackedBuffer::<D::Color>::new(
+                draw_buf,
+                bbox.size.width as _,
+                bbox.size.height as _,
+            ),
+            reference: PackedBuffer::<D::Color>::new(
+                reference_buf,
+                bbox.size.width as _,
+                bbox.size.height as _,
+            ),
+            display,
         }
-
-        list
-    }
-
-    pub fn add(&mut self, area: Rectangle) {
-        let face = Self::face(&area);
-
-        let closest = self
-            .0
-            .iter()
-            .enumerate()
-            .filter_map(|(index, area)| area.map(|area| (index, area)))
-            .map(|(index, carea)| {
-                let unioned = Self::unioned(&area, &carea);
-                let ratio = (face + Self::face(&carea)) * 100 / Self::face(&unioned);
-
-                (index, unioned, ratio)
-            })
-            .min_by(|(_, _, ratio1), (_, _, ratio2)| ratio1.cmp(ratio2));
-
-        let placeholder =
-            self.0
-                .iter_mut()
-                .find_map(|area| if area.is_some() { None } else { Some(area) });
-
-        if let Some((index, unioned, ratio)) = closest {
-            if ratio > 80 || placeholder.is_none() {
-                self.0[index] = None;
-                return self.add(unioned);
-            }
-        }
-
-        *placeholder.unwrap() = Some(area);
-    }
-
-    #[inline(always)]
-    pub fn iter(&self) -> impl Iterator<Item = &Rectangle> {
-        self.0.iter().filter_map(|area| area.as_ref())
-    }
-
-    #[inline(always)]
-    fn unioned(area1: &Rectangle, area2: &Rectangle) -> Rectangle {
-        let x1 = min(area1.top_left.x, area2.top_left.x);
-        let y1 = min(area1.top_left.y, area2.top_left.y);
-        let x2 = max(
-            area1.top_left.x + area1.size.width as i32,
-            area2.top_left.x + area2.size.width as i32,
-        );
-        let y2 = max(
-            area1.top_left.y + area1.size.height as i32,
-            area2.top_left.y + area2.size.height as i32,
-        );
-
-        Rectangle::new(
-            Point::new(x1, y1),
-            Size::new((x2 - x1) as u32, (y2 - y1) as u32),
-        )
-    }
-
-    #[inline(always)]
-    fn face(area: &Rectangle) -> u32 {
-        area.size.width * area.size.height
     }
 }
 
-pub struct PackedBuffer<'a, const WIDTH: usize, COLOR>(&'a mut [u8], PhantomData<COLOR>);
-
-impl<'a, const WIDTH: usize, COLOR> PackedBuffer<'a, WIDTH, COLOR>
+impl<'a, D> Dimensions for BufferingAdaptor<'a, D>
 where
-    COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    D: DrawTarget,
+    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
-    const BITS_PER_PIXEL: usize = if COLOR::Raw::BITS_PER_PIXEL > 4 {
-        8
-    } else if COLOR::Raw::BITS_PER_PIXEL > 2 {
-        4
-    } else if COLOR::Raw::BITS_PER_PIXEL > 1 {
-        2
-    } else {
-        1
-    };
-    const PIXEL_MASK: u8 = ((1 << Self::BITS_PER_PIXEL) - 1) as u8;
-    const PIXELS_PER_BYTE: usize = 8 / Self::BITS_PER_PIXEL;
-    const PIXELS_PER_BYTE_SHIFT: usize = 8 / Self::BITS_PER_PIXEL;
-    const BYTES_PER_ROW: usize = WIDTH / Self::PIXELS_PER_BYTE;
-
-    pub fn new(buffer: &'a mut [u8]) -> Self {
-        Self(buffer, PhantomData)
+    fn bounding_box(&self) -> Rectangle {
+        self.draw_target.bounding_box()
     }
+}
 
-    pub fn apply<D>(
-        &self,
-        diffs: impl Iterator<Item = Rectangle>,
-        to: &mut D,
-    ) -> Result<(), D::Error>
+impl<'a, D> DrawTarget for BufferingAdaptor<'a, D>
+where
+    D: DrawTarget,
+    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+{
+    type Error = D::Error;
+
+    type Color = D::Color;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        D: DrawTarget<Color = COLOR>,
+        I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        for area in diffs {
-            to.fill_contiguous(
-                &area,
-                Self::offsets(area)
-                    .map(|(byte_offset, bits_offset)| self.get(byte_offset, bits_offset)),
-            )?;
-        }
+        self.draw_target.draw_iter(pixels).unwrap();
 
         Ok(())
     }
 
-    fn offsets(area: Rectangle) -> impl Iterator<Item = (usize, usize)> {
-        (Self::y_offset(area.top_left.y as usize)
-            ..Self::y_offset(area.top_left.y as usize + area.size.height as usize))
-            .step_by(Self::BYTES_PER_ROW)
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        self.draw_target.fill_contiguous(area, colors).unwrap();
+
+        Ok(())
+    }
+
+    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        self.draw_target.fill_solid(area, color).unwrap();
+
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.draw_target.clear(color).unwrap();
+
+        Ok(())
+    }
+}
+
+impl<'a, D> FlushableDrawTarget for BufferingAdaptor<'a, D>
+where
+    D: FlushableDrawTarget,
+    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+{
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.reference
+            .apply(&mut self.draw_target, &mut self.display)?;
+
+        self.display.flush()
+    }
+}
+
+pub struct PackedBuffer<'a, COLOR> {
+    buf: &'a mut [u8],
+    width: usize,
+    height: usize,
+    _color: PhantomData<COLOR>,
+}
+
+impl<'a, COLOR> PackedBuffer<'a, COLOR>
+where
+    COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+{
+    const BITS_PER_PIXEL: usize = Self::bits_per_pixel();
+    const PIXEL_MASK: u8 = ((1 << Self::BITS_PER_PIXEL) - 1) as u8;
+    const PIXELS_PER_BYTE: usize = 8 / Self::BITS_PER_PIXEL;
+    const PIXELS_PER_BYTE_SHIFT: usize = if Self::BITS_PER_PIXEL == 8 {
+        0
+    } else {
+        Self::BITS_PER_PIXEL
+    };
+
+    pub fn new(buf: &'a mut [u8], width: usize, height: usize) -> Self {
+        Self {
+            buf,
+            width,
+            height,
+            _color: PhantomData,
+        }
+    }
+
+    pub const fn buffer_size(width: usize, height: usize) -> usize {
+        width * height / Self::bits_per_pixel()
+    }
+
+    const fn bits_per_pixel() -> usize {
+        if COLOR::Raw::BITS_PER_PIXEL > 4 {
+            8
+        } else if COLOR::Raw::BITS_PER_PIXEL > 2 {
+            4
+        } else if COLOR::Raw::BITS_PER_PIXEL > 1 {
+            2
+        } else {
+            1
+        }
+    }
+
+    pub fn apply<D>(&mut self, new: &Self, to: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = COLOR>,
+    {
+        let width = self.width();
+        let height = self.height();
+
+        let mut changes = 0_usize;
+
+        let pixels = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .filter_map(|(x, y)| {
+                let bytes_offset = self.y_offset(y as usize) + Self::x_offset(x as usize);
+                let bits_offset = Self::x_bits_offset(x as usize);
+
+                let color = new.get(bytes_offset, bits_offset);
+                if self.get(bytes_offset, bits_offset) != color {
+                    self.set(bytes_offset, bits_offset, color);
+
+                    changes += 1;
+
+                    Some(Pixel(Point::new(x as _, y as _), color))
+                } else {
+                    None
+                }
+            });
+
+        let res = to.draw_iter(pixels);
+
+        info!(
+            "Display updated ({}/{} changed pixels)",
+            changes,
+            width * height
+        );
+
+        res
+    }
+
+    fn offsets(&self, area: Rectangle) -> impl Iterator<Item = (usize, usize)> {
+        (self.y_offset(area.top_left.y as usize)
+            ..self.y_offset(area.top_left.y as usize + area.size.height as usize))
+            .step_by(self.bytes_per_row())
             .flat_map(move |y_offset| {
                 (area.top_left.x as usize..area.top_left.x as usize + area.size.width as usize)
                     .map(move |x| (y_offset + Self::x_offset(x), Self::x_bits_offset(x)))
@@ -224,8 +247,13 @@ where
     }
 
     #[inline(always)]
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    #[inline(always)]
     fn height(&self) -> usize {
-        self.0.len() / Self::BYTES_PER_ROW
+        self.height
     }
 
     #[inline(always)]
@@ -239,43 +267,51 @@ where
     }
 
     #[inline(always)]
-    fn y_offset(y: usize) -> usize {
-        y * Self::BYTES_PER_ROW
+    fn y_offset(&self, y: usize) -> usize {
+        y * self.bytes_per_row()
     }
 
     #[inline(always)]
     fn x_offset(x: usize) -> usize {
-        x >> Self::PIXELS_PER_BYTE_SHIFT
+        x / Self::PIXELS_PER_BYTE
     }
 
     #[inline(always)]
     fn x_bits_offset(x: usize) -> usize {
-        x - (Self::x_offset(x) << Self::PIXELS_PER_BYTE_SHIFT)
+        Self::PIXELS_PER_BYTE_SHIFT * (x % Self::PIXELS_PER_BYTE)
+    }
+
+    #[inline(always)]
+    fn bytes_per_row(&self) -> usize {
+        self.width() / Self::PIXELS_PER_BYTE
     }
 
     #[inline(always)]
     fn get(&self, byte_offset: usize, bits_offset: usize) -> COLOR {
-        Self::from_bits((self.0[byte_offset] >> bits_offset) & Self::PIXEL_MASK)
+        Self::from_bits((self.buf[byte_offset] >> bits_offset) & Self::PIXEL_MASK)
     }
 
     #[inline(always)]
     fn set(&mut self, byte_offset: usize, bits_offset: usize, color: COLOR) {
-        let byte = &mut self.0[byte_offset];
+        let byte = &mut self.buf[byte_offset];
         *byte &= !(Self::PIXEL_MASK << bits_offset);
         *byte |= Self::to_bits(color) << bits_offset;
     }
 }
 
-impl<'a, const W: usize, COLOR> Dimensions for PackedBuffer<'a, W, COLOR>
+impl<'a, COLOR> Dimensions for PackedBuffer<'a, COLOR>
 where
     COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
     fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(Point::zero(), Size::new(W as u32, self.height() as u32))
+        Rectangle::new(
+            Point::zero(),
+            Size::new(self.width() as u32, self.height() as u32),
+        )
     }
 }
 
-impl<'a, const W: usize, COLOR> DrawTarget for PackedBuffer<'a, W, COLOR>
+impl<'a, COLOR> DrawTarget for PackedBuffer<'a, COLOR>
 where
     COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
@@ -289,7 +325,7 @@ where
     {
         for pixel in pixels {
             self.set(
-                Self::y_offset(pixel.0.y as usize) + Self::x_offset(pixel.0.x as usize),
+                self.y_offset(pixel.0.y as usize) + Self::x_offset(pixel.0.x as usize),
                 Self::x_bits_offset(pixel.0.x as usize),
                 pixel.1,
             );
@@ -304,7 +340,7 @@ where
     {
         let mut colors = colors.into_iter();
 
-        for (byte_offset, bits_offset) in Self::offsets(*area) {
+        for (byte_offset, bits_offset) in self.offsets(*area) {
             if let Some(color) = colors.next() {
                 self.set(byte_offset, bits_offset, color);
             }
@@ -314,7 +350,7 @@ where
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        for (byte_offset, bits_offset) in Self::offsets(*area) {
+        for (byte_offset, bits_offset) in self.offsets(*area) {
             self.set(byte_offset, bits_offset, color);
         }
 
@@ -323,11 +359,11 @@ where
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         if Self::to_bits(color) == 0 {
-            for byte in self.0.iter_mut() {
+            for byte in self.buf.iter_mut() {
                 *byte = 0;
             }
         } else {
-            for (byte_offset, bits_offset) in Self::offsets(self.bounding_box()) {
+            for (byte_offset, bits_offset) in self.offsets(self.bounding_box()) {
                 self.set(byte_offset, bits_offset, color);
             }
         }

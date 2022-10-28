@@ -3,7 +3,7 @@ use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use log::info;
+use log::trace;
 
 use enumset::{enum_set, EnumSet, EnumSetType};
 
@@ -11,18 +11,18 @@ use embassy_futures::select::select_array;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
-use embedded_graphics::prelude::RgbColor;
-
 use embedded_svc::executor::asynch::Unblocker;
 
 use channel_bridge::notification::Notification;
 
 use crate::battery::{self, BatteryState};
 use crate::keepalive::{self, RemainingTime};
+use crate::screen::shapes::util::clear;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
 
 pub use adaptors::*;
+pub use shapes::Color;
 
 use self::pages::{Battery, Summary};
 
@@ -76,10 +76,6 @@ pub enum DataSource {
 pub struct ScreenState {
     changeset: EnumSet<DataSource>,
     active_page: Page,
-    valve: Option<ValveState>,
-    wm: WaterMeterState,
-    battery: BatteryState,
-    remaining_time: Option<RemainingTime>,
 }
 
 impl ScreenState {
@@ -94,33 +90,34 @@ impl ScreenState {
                     | DataSource::RemainingTime
             ),
             active_page: Page::new(),
-            valve: None,
-            wm: WaterMeterState::new(),
-            battery: BatteryState::new(),
-            remaining_time: None,
         }
     }
 
-    pub fn valve(&self) -> Option<&Option<ValveState>> {
-        self.changeset
-            .contains(DataSource::Valve)
-            .then(|| &self.valve)
+    pub fn valve(&self) -> Option<Option<ValveState>> {
+        self.changed([DataSource::Valve, DataSource::Page])
+            .then(|| valve::STATE.get())
     }
 
-    pub fn wm(&self) -> Option<&WaterMeterState> {
-        self.changeset.contains(DataSource::WM).then(|| &self.wm)
+    pub fn wm(&self) -> Option<WaterMeterState> {
+        self.changed([DataSource::WM, DataSource::Page])
+            .then(|| wm::STATE.get())
     }
 
-    pub fn battery(&self) -> Option<&BatteryState> {
-        self.changeset
-            .contains(DataSource::Battery)
-            .then(|| &self.battery)
+    pub fn battery(&self) -> Option<BatteryState> {
+        self.changed([DataSource::Battery, DataSource::Page])
+            .then(|| battery::STATE.get())
     }
 
-    pub fn remaining_time(&self) -> Option<&Option<RemainingTime>> {
-        self.changeset
-            .contains(DataSource::RemainingTime)
-            .then(|| &self.remaining_time)
+    pub fn remaining_time(&self) -> Option<RemainingTime> {
+        self.changed([DataSource::RemainingTime, DataSource::Page])
+            .then(|| keepalive::STATE.get())
+    }
+
+    fn changed<const N: usize>(&self, changes: [DataSource; N]) -> bool {
+        changes
+            .iter()
+            .find(|data_source| self.changeset.contains(**data_source))
+            .is_some()
     }
 }
 
@@ -169,19 +166,15 @@ pub async fn process() {
                     }
                     2 => {}
                     3 => {
-                        screen_state.valve = valve::STATE.get();
                         screen_state.changeset.insert(DataSource::Valve);
                     }
                     4 => {
-                        screen_state.wm = wm::STATE.get();
                         screen_state.changeset.insert(DataSource::WM);
                     }
                     5 => {
-                        screen_state.battery = battery::STATE.get();
                         screen_state.changeset.insert(DataSource::Battery);
                     }
                     6 => {
-                        screen_state.remaining_time = Some(keepalive::STATE.get());
                         screen_state.changeset.insert(DataSource::RemainingTime);
                     }
                     _ => unreachable!(),
@@ -196,8 +189,7 @@ pub async fn process() {
 pub async fn unblock_run_draw<U, D>(unblocker: U, mut display: D)
 where
     U: Unblocker,
-    D: FlushableDrawTarget + Send + 'static,
-    D::Color: RgbColor,
+    D: FlushableDrawTarget<Color = Color> + Send + 'static,
     D::Error: Debug + Send + 'static,
 {
     loop {
@@ -220,8 +212,7 @@ where
 
 pub async fn run_draw<D>(mut display: D)
 where
-    D: FlushableDrawTarget,
-    D::Color: RgbColor,
+    D: FlushableDrawTarget<Color = Color>,
     D::Error: Debug,
 {
     loop {
@@ -241,20 +232,23 @@ where
 
 fn draw<D>(mut display: D, screen_state: ScreenState) -> Result<D, D::Error>
 where
-    D: FlushableDrawTarget,
-    D::Color: RgbColor,
+    D: FlushableDrawTarget<Color = Color>,
     D::Error: Debug,
 {
-    info!("DRAWING: {:?}", screen_state);
+    trace!("DRAWING: {:?}", screen_state);
+
+    if screen_state.changeset.contains(DataSource::Page) {
+        clear(&display.bounding_box(), &mut display)?;
+    }
 
     match screen_state.active_page {
         Page::Summary => Summary::draw(
             &mut display,
-            screen_state.valve(),
-            screen_state.wm(),
-            screen_state.battery(),
+            screen_state.valve().as_ref(),
+            screen_state.wm().as_ref(),
+            screen_state.battery().as_ref(),
         )?,
-        Page::Battery => Battery::draw(&mut display, screen_state.battery())?,
+        Page::Battery => Battery::draw(&mut display, screen_state.battery().as_ref())?,
     }
 
     display.flush()?;

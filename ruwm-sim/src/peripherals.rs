@@ -7,6 +7,8 @@ use hal_sim::gpio::*;
 use hal_sim::peripherals::*;
 use hal_sim::web;
 
+use ruwm::battery::BatteryState;
+
 pub struct SystemPeripherals {
     pub shared: SharedPeripherals,
     pub pulse: Pin<Input>,
@@ -31,14 +33,20 @@ impl SystemPeripherals {
                 close: peripherals.pins.output("Close", "Valve", false),
             },
             battery: BatteryPeripherals {
-                power: peripherals.pins.input("Power", "Battery", false),
-                voltage: peripherals.pins.adc("Voltage", "Battery", 3300),
+                power: peripherals.pins.input("Charging", "Battery", false),
+                voltage: peripherals.pins.adc_range(
+                    "Voltage",
+                    "Battery",
+                    BatteryState::LOW_VOLTAGE,
+                    BatteryState::MAX_VOLTAGE,
+                    (BatteryState::LOW_VOLTAGE + BatteryState::MAX_VOLTAGE) / 2,
+                ),
                 adc: peripherals.adc0,
             },
             buttons: ButtonsPeripherals {
-                button1: peripherals.pins.input_click("Button 1", "Buttons", false),
-                button2: peripherals.pins.input_click("Button 2", "Buttons", false),
-                button3: peripherals.pins.input_click("Button 3", "Buttons", false),
+                button1: peripherals.pins.input_click("Prev", "Display", false),
+                button2: peripherals.pins.input_click("Next", "Display", false),
+                button3: peripherals.pins.input_click("Action", "Display", false),
             },
             display: peripherals
                 .displays

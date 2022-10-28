@@ -1,17 +1,13 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
-    prelude::{Point, RgbColor, Size},
+    prelude::{Point, Size},
 };
 
-use crate::{
-    battery::BatteryState,
-    screen::{
-        shapes::{self, BatteryChargedText},
-        DrawTargetRef, RotateAngle, TransformingAdaptor,
-    },
-    valve::ValveState,
-    wm::WaterMeterState,
-};
+use crate::screen::shapes::{self, BatteryChargedText};
+use crate::screen::{DrawTargetRef, RotateAngle, TransformingAdaptor};
+use crate::valve::ValveState;
+use crate::wm::WaterMeterState;
+use crate::{battery::BatteryState, screen::shapes::Color};
 
 pub struct Summary;
 
@@ -23,8 +19,7 @@ impl Summary {
         battery_state: Option<&BatteryState>,
     ) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         if let Some(valve_state) = valve_state {
             // TODO
@@ -43,13 +38,8 @@ impl Summary {
         }
 
         if let Some(battery_state) = battery_state {
-            let percentage = battery_state.voltage.map(|voltage| {
-                (voltage as u32 * 100
-                    / (BatteryState::MAX_VOLTAGE as u32 + BatteryState::LOW_VOLTAGE as u32))
-                    as u8
-            });
-
-            let battery_shape = shapes::Battery::new(percentage, BatteryChargedText::No, false);
+            let battery_shape =
+                shapes::Battery::new(battery_state.percentage(), BatteryChargedText::No, false);
 
             let bbox = target.bounding_box();
 

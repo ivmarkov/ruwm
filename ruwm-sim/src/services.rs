@@ -3,11 +3,12 @@ use core::fmt::Debug;
 use embassy_time::Duration;
 
 use embedded_graphics_core::pixelcolor::Rgb888;
-use embedded_graphics_core::prelude::RgbColor;
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use channel_bridge::notification::Notification;
+
+use static_cell::*;
 
 use hal_sim::display::Display;
 use hal_sim::gpio::{Input, Pin};
@@ -15,7 +16,7 @@ use hal_sim::gpio::{Input, Pin};
 use ruwm::button::PressedLevel;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{FlushableAdaptor, FlushableDrawTarget};
+use ruwm::screen::{BufferingAdaptor, Color, ColorAdaptor, FlushableAdaptor, FlushableDrawTarget};
 use ruwm::valve::ValveState;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
@@ -127,10 +128,18 @@ pub fn button(pin: Pin<Input>, notification: &'static Notification) -> impl Inpu
     subscribe_pin(pin, move || notification.notify())
 }
 
+// TODO
+static B1: StaticCell<[u8; 38400 * 2]> = StaticCell::new();
+static B2: StaticCell<[u8; 38400 * 2]> = StaticCell::new();
+
 pub fn display(
     display: Display<Rgb888>,
-) -> impl FlushableDrawTarget<Color = impl RgbColor, Error = impl Debug> + 'static {
-    FlushableAdaptor::noop(display)
+) -> impl FlushableDrawTarget<Color = Color, Error = impl Debug> + 'static {
+    BufferingAdaptor::new(
+        B1.init([0_u8; 38400 * 2]),
+        B2.init([0_u8; 38400 * 2]),
+        FlushableAdaptor::noop(ColorAdaptor::new(Color::into_rgb::<Rgb888>, display)),
+    )
 }
 
 // pub fn mqtt() -> Result<

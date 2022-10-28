@@ -2,10 +2,13 @@ use core::str;
 
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
 use embedded_graphics::mono_font::*;
-use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, RgbColor, Size};
+use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, Size};
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
+
+use super::util::{clear, draw, fill, text, to_str};
+use super::Color;
 
 pub struct WaterMeterClassic<const DIGITS: usize = 8> {
     edges_count: Option<u64>,
@@ -34,12 +37,11 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         // Clear the area
         Rectangle::new(Point::new(0, 0), Self::SIZE)
-            .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
+            .into_styled(PrimitiveStyle::with_fill(Color::Black))
             .draw(target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
@@ -50,13 +52,12 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget + OriginDimensions,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
 
         if self.outline && DIGITS > 5 {
-            bbox.into_styled(PrimitiveStyle::with_stroke(D::Color::RED, 2))
+            bbox.into_styled(PrimitiveStyle::with_stroke(Color::Red, 2))
                 .draw(target)?;
 
             Rectangle::new(
@@ -69,7 +70,7 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
                     bbox.size.height,
                 ),
             )
-            .into_styled(PrimitiveStyle::with_fill(D::Color::RED))
+            .into_styled(PrimitiveStyle::with_fill(Color::Red))
             .draw(target)?;
         }
 
@@ -82,38 +83,14 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
             [b'?'; DIGITS]
         };
 
-        self.draw_text(
+        text(
+            &Self::FONT,
             target,
             Point::zero(),
             str::from_utf8(&wm_text).unwrap(),
-            D::Color::WHITE,
+            Color::White,
+            None,
         )?;
-
-        Ok(())
-    }
-
-    fn draw_text<D>(
-        &self,
-        target: &mut D,
-        position: Point,
-        text: &str,
-        color: D::Color,
-    ) -> Result<(), D::Error>
-    where
-        D: DrawTarget,
-        D::Color: RgbColor,
-    {
-        let character_style = MonoTextStyleBuilder::new()
-            .font(&Self::FONT)
-            .text_color(color)
-            .build();
-
-        let text_style = TextStyleBuilder::new()
-            .baseline(Baseline::Top)
-            .alignment(Alignment::Left)
-            .build();
-
-        Text::with_text_style(text, position, character_style, text_style).draw(target)?;
 
         Ok(())
     }
@@ -144,13 +121,10 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         // Clear the area
-        Rectangle::new(Point::new(0, 0), Self::SIZE)
-            .into_styled(PrimitiveStyle::with_fill(D::Color::BLACK))
-            .draw(target)?;
+        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
             Point::new(Self::PADDING as _, Self::PADDING as _),
@@ -160,27 +134,27 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
-        D: DrawTarget + OriginDimensions,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
 
         if DIGITS > 5 {
-            bbox.into_styled(PrimitiveStyle::with_stroke(D::Color::RED, 2))
-                .draw(target)?;
+            draw(&bbox, Color::Red, 2, target)?;
 
-            Rectangle::new(
-                Point::new(
-                    bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
-                    bbox.top_left.y,
+            fill(
+                &Rectangle::new(
+                    Point::new(
+                        bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
+                        bbox.top_left.y,
+                    ),
+                    Size::new(
+                        Self::FONT.character_size.width * (DIGITS as u32 - 5),
+                        bbox.size.height,
+                    ),
                 ),
-                Size::new(
-                    Self::FONT.character_size.width * (DIGITS as u32 - 5),
-                    bbox.size.height,
-                ),
-            )
-            .into_styled(PrimitiveStyle::with_fill(D::Color::RED))
-            .draw(target)?;
+                Color::Red,
+                target,
+            )?;
         }
 
         let wm_text = if let Some(edges_count) = self.edges_count {
@@ -192,11 +166,13 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
             [b'?'; DIGITS]
         };
 
-        self.draw_text(
+        text(
+            &Self::FONT,
             target,
             Point::zero(),
             str::from_utf8(&wm_text).unwrap(),
-            D::Color::WHITE,
+            Color::White,
+            None,
         )?;
 
         Ok(())
@@ -207,11 +183,10 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
         target: &mut D,
         position: Point,
         text: &str,
-        color: D::Color,
+        color: Color,
     ) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         let character_style = MonoTextStyleBuilder::new()
             .font(&Self::FONT)
@@ -227,24 +202,4 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
 
         Ok(())
     }
-}
-
-fn to_str(mut num: u64, buf: &mut [u8]) -> usize {
-    let mut len = buf.len();
-
-    if num == 0 {
-        len -= 1;
-
-        buf[len] = b'0';
-    }
-
-    while num > 0 {
-        len -= 1;
-
-        buf[len] = b'0' + (num % 10) as u8;
-
-        num /= 10;
-    }
-
-    len
 }

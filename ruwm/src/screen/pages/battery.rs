@@ -1,24 +1,17 @@
-use embedded_graphics::{draw_target::DrawTarget, prelude::RgbColor};
+use embedded_graphics::draw_target::DrawTarget;
 
-use crate::{
-    battery::BatteryState,
-    screen::shapes::{self, BatteryChargedText},
-};
+use crate::battery::BatteryState;
+use crate::screen::shapes::{self, BatteryChargedText, Color};
 
 pub struct Battery;
 
 impl Battery {
     pub fn draw<D>(target: &mut D, state: Option<&BatteryState>) -> Result<(), D::Error>
     where
-        D: DrawTarget,
-        D::Color: RgbColor,
+        D: DrawTarget<Color = Color>,
     {
         if let Some(state) = state {
-            let percentage = state.voltage.map(|voltage| {
-                (voltage * 100 / (BatteryState::MAX_VOLTAGE + BatteryState::LOW_VOLTAGE)) as u8
-            });
-
-            shapes::Battery::new(percentage, BatteryChargedText::Xor, true).draw(target)?;
+            shapes::Battery::new(state.percentage(), BatteryChargedText::Xor, true).draw(target)?;
         }
 
         Ok(())
