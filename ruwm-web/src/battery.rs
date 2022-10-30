@@ -23,7 +23,7 @@ impl Reducer<BatteryStore> for BatteryMsg {
 
 #[function_component(Battery)]
 pub fn battery() -> Html {
-    let battery_store = use_store::<BatteryStore>();
+    let battery_store = use_store_value::<BatteryStore>();
 
     html! {
         {format!("Battery Powered: {}, mV: {:?}", battery_store.0.powered.unwrap_or(false), battery_store.0.voltage)}

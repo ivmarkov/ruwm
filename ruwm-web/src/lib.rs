@@ -148,7 +148,7 @@ fn init_middleware(_endpoint: String) {
     middleware::receive::<WebEvent>(receiver);
 }
 
-fn log<S, M>(dispatch: impl Dispatch<M> + Clone) -> impl Dispatch<M>
+fn log<S, M>(dispatch: impl MiddlewareDispatch<M> + Clone) -> impl MiddlewareDispatch<M>
 where
     S: Store + Debug,
     M: Reducer<S> + Debug + 'static,
@@ -158,7 +158,7 @@ where
         .fuse(Rc::new(log_msg(Level::Trace)))
 }
 
-fn role_as_request(msg: RoleState, dispatch: impl Dispatch<RoleState>) {
+fn role_as_request(msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>) {
     let request = match &msg {
         RoleState::Authenticating(credentials) => Some(WebRequest::Authenticate(
             credentials.username.as_str().into(),

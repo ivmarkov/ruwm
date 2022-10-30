@@ -23,7 +23,7 @@ impl Reducer<ValveStore> for ValveMsg {
 
 #[function_component(Valve)]
 pub fn valve() -> Html {
-    let valve_store = use_store::<ValveStore>();
+    let valve_store = use_store_value::<ValveStore>();
 
     html! {
         {format!("Valve State: {:?}", valve_store.0.as_ref())}
