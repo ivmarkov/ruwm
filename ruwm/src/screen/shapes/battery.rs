@@ -29,32 +29,19 @@ pub struct Battery {
     pub charged_percentage: Option<u8>,
 }
 
-impl Default for Battery {
-    fn default() -> Self {
+impl Battery {
+    pub const fn new() -> Self {
         Self {
             size: Size::new(100, 200),
             padding: 10,
             outline: 2,
             distinct_outline: true,
             cathode: Size::new(40, 10),
-            percentage_threhsold: Default::default(),
+            percentage_threhsold: 15,
             text: BatteryChargedText::Xor,
             font: &profont::PROFONT_24_POINT,
             charged_percentage: Some(100),
         }
-    }
-}
-
-impl Battery {
-    fn padded_size(&self) -> Size {
-        Size::new(
-            self.size.width - self.padding * 2,
-            self.size.height - self.padding * 2,
-        )
-    }
-
-    pub fn new() -> Self {
-        Default::default()
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -274,5 +261,18 @@ impl Battery {
         } else {
             text(&self.font, target, position, "?", color, text_style)
         }
+    }
+
+    fn padded_size(&self) -> Size {
+        Size::new(
+            self.size.width - self.padding * 2,
+            self.size.height - self.padding * 2,
+        )
+    }
+}
+
+impl Default for Battery {
+    fn default() -> Self {
+        Self::new()
     }
 }

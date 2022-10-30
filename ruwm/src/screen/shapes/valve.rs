@@ -1,38 +1,34 @@
-use core::str;
-
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
-use embedded_graphics::mono_font::*;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
-use embedded_graphics::text::{Alignment, Baseline, TextStyleBuilder};
 
-use super::util::{clear, fill, text, to_str};
+use super::util::{clear, fill};
 use super::Color;
 
+#[derive(Clone, Debug)]
 pub struct Valve {
-    open_percentage: Option<u8>,
+    pub size: Size,
+    pub padding: u32,
+    pub outline: u32,
+    pub handle_area: Size,
+    pub open_percentage: Option<u8>,
+}
+
+impl Default for Valve {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Valve {
-    pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
-    pub const WIDTH: u32 = 80;
-    pub const HEIGHT: u32 = 60;
-
-    const FONT: MonoFont<'static> = profont::PROFONT_24_POINT;
-
-    const PADDING: u32 = 10;
-    const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
-    const PADDED_HEIGHT: u32 = Self::HEIGHT - Self::PADDING * 2;
-
-    const OUTLINE: u32 = 4;
-
-    const HANDLE_AREA_WIDTH: u32 = 20;
-    const HANDLE_AREA__HEIGHT: u32 = 10;
-
-    const PERCENTAGE_THRESHOLD: u8 = 15;
-
-    pub fn new(open_percentage: Option<u8>) -> Self {
-        Self { open_percentage }
+    pub const fn new() -> Self {
+        Self {
+            size: Size::new(80, 60),
+            padding: 10,
+            outline: 4,
+            handle_area: Size::new(20, 10),
+            open_percentage: Some(100),
+        }
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -40,11 +36,11 @@ impl Valve {
         D: DrawTarget<Color = Color>,
     {
         // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
+        clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(Self::PADDING as _, Self::PADDING as _),
-            Size::new(Self::PADDED_WIDTH, Self::PADDED_HEIGHT),
+            Point::new(self.padding as _, self.padding as _),
+            self.padded_size(),
         )))
     }
 
@@ -75,8 +71,8 @@ impl Valve {
         // // Left outline
         // clear(
         //     &Rectangle::new(
-        //         Point::new(0, Self::HANDLE_AREA__HEIGHT as _),
-        //         Size::new(Self::OUTLINE, height - Self::HANDLE_AREA__HEIGHT),
+        //         Point::new(0, self.handle_area.height as _),
+        //         Size::new(self.outline, height - self.handle_area.height),
         //     ),
         //     target,
         // )?;
@@ -85,10 +81,10 @@ impl Valve {
         // clear(
         //     &Rectangle::new(
         //         Point::new(
-        //             width as i32 - Self::OUTLINE as i32,
-        //             Self::HANDLE_AREA__HEIGHT as _,
+        //             width as i32 - self.outline as i32,
+        //             self.handle_area.height as _,
         //         ),
-        //         Size::new(Self::OUTLINE, height - Self::HANDLE_AREA__HEIGHT),
+        //         Size::new(self.outline, height - self.handle_area.height),
         //     ),
         //     target,
         // )?;
@@ -96,8 +92,8 @@ impl Valve {
         // Bottom outline
         fill(
             &Rectangle::new(
-                Point::new(0, height as i32 - Self::OUTLINE as i32),
-                Size::new(width, Self::OUTLINE),
+                Point::new(0, height as i32 - self.outline as i32),
+                Size::new(width, self.outline),
             ),
             outline_color,
             target,
@@ -107,10 +103,10 @@ impl Valve {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 - Self::HANDLE_AREA_WIDTH as i32) / 2,
-                    -(Self::OUTLINE as i32) * 2,
+                    (width as i32 - self.handle_area.width as i32) / 2,
+                    -(self.outline as i32) * 2,
                 ),
-                Size::new(Self::HANDLE_AREA_WIDTH, Self::OUTLINE),
+                Size::new(self.handle_area.width, self.outline),
             ),
             outline_color,
             target,
@@ -119,10 +115,10 @@ impl Valve {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 - Self::OUTLINE as i32) / 2,
-                    -(Self::OUTLINE as i32),
+                    (width as i32 - self.outline as i32) / 2,
+                    -(self.outline as i32),
                 ),
-                Size::new(Self::OUTLINE, Self::OUTLINE),
+                Size::new(self.outline, self.outline),
             ),
             outline_color,
             target,
@@ -131,8 +127,8 @@ impl Valve {
         // Top outline
         fill(
             &Rectangle::new(
-                Point::new((width as i32 - Self::HANDLE_AREA_WIDTH as i32) / 2, 0),
-                Size::new(Self::HANDLE_AREA_WIDTH, Self::OUTLINE),
+                Point::new((width as i32 - self.handle_area.width as i32) / 2, 0),
+                Size::new(self.handle_area.width, self.outline),
             ),
             outline_color,
             target,
@@ -141,8 +137,8 @@ impl Valve {
         // Top left horizontal outline
         fill(
             &Rectangle::new(
-                Point::new(0, Self::HANDLE_AREA__HEIGHT as _),
-                Size::new((width - Self::HANDLE_AREA_WIDTH) / 2, Self::OUTLINE),
+                Point::new(0, self.handle_area.height as _),
+                Size::new((width - self.handle_area.width) / 2, self.outline),
             ),
             outline_color,
             target,
@@ -152,10 +148,10 @@ impl Valve {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 + Self::HANDLE_AREA_WIDTH as i32) / 2,
-                    Self::HANDLE_AREA__HEIGHT as _,
+                    (width as i32 + self.handle_area.width as i32) / 2,
+                    self.handle_area.height as _,
                 ),
-                Size::new((width - Self::HANDLE_AREA_WIDTH) / 2, Self::OUTLINE),
+                Size::new((width - self.handle_area.width) / 2, self.outline),
             ),
             outline_color,
             target,
@@ -164,8 +160,8 @@ impl Valve {
         // Top left vertical outline
         fill(
             &Rectangle::new(
-                Point::new((width as i32 - Self::HANDLE_AREA_WIDTH as i32) / 2, 0),
-                Size::new(Self::OUTLINE, Self::HANDLE_AREA__HEIGHT + Self::OUTLINE),
+                Point::new((width as i32 - self.handle_area.width as i32) / 2, 0),
+                Size::new(self.outline, self.handle_area.height + self.outline),
             ),
             outline_color,
             target,
@@ -175,10 +171,10 @@ impl Valve {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 + Self::HANDLE_AREA_WIDTH as i32) / 2 - Self::OUTLINE as i32,
+                    (width as i32 + self.handle_area.width as i32) / 2 - self.outline as i32,
                     0,
                 ),
-                Size::new(Self::OUTLINE, Self::HANDLE_AREA__HEIGHT + Self::OUTLINE),
+                Size::new(self.outline, self.handle_area.height + self.outline),
             ),
             outline_color,
             target,
@@ -189,8 +185,8 @@ impl Valve {
             &Rectangle::new(
                 Point::new(0, 0),
                 Size::new(
-                    (width - Self::HANDLE_AREA_WIDTH) / 2,
-                    Self::HANDLE_AREA__HEIGHT,
+                    (width - self.handle_area.width) / 2,
+                    self.handle_area.height,
                 ),
             ),
             target,
@@ -199,10 +195,10 @@ impl Valve {
         // Remove fill from the top right corner
         clear(
             &Rectangle::new(
-                Point::new((width as i32 + Self::HANDLE_AREA_WIDTH as i32) / 2, 0),
+                Point::new((width as i32 + self.handle_area.width as i32) / 2, 0),
                 Size::new(
-                    (width - Self::HANDLE_AREA_WIDTH) / 2,
-                    Self::HANDLE_AREA__HEIGHT,
+                    (width - self.handle_area.width) / 2,
+                    self.handle_area.height,
                 ),
             ),
             target,
@@ -215,5 +211,12 @@ impl Valve {
         // };
 
         Ok(())
+    }
+
+    fn padded_size(&self) -> Size {
+        Size::new(
+            self.size.width - self.padding * 2,
+            self.size.height - self.padding * 2,
+        )
     }
 }

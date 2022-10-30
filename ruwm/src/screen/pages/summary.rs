@@ -24,7 +24,10 @@ impl Summary {
         let bbox = target.bounding_box();
 
         if let Some(valve_state) = valve_state {
-            let valve = shapes::Valve::new(valve_state.map(|valve_state| 50_u8));
+            let valve = shapes::Valve {
+                open_percentage: valve_state.map(|valve_state| 50_u8),
+                ..Default::default()
+            };
 
             valve.draw(target)?;
         }
