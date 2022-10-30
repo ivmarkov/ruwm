@@ -1,5 +1,8 @@
+use core::cmp::{max, min};
 use core::convert::Infallible;
 use core::marker::PhantomData;
+
+use log::trace;
 
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
 use embedded_graphics::prelude::{
@@ -7,7 +10,6 @@ use embedded_graphics::prelude::{
 };
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::Pixel;
-use log::info;
 
 pub struct DrawTargetRef<'a, D>(&'a mut D);
 
@@ -198,7 +200,7 @@ where
         }
     }
 
-    pub fn apply<D>(&mut self, new: &Self, to: &mut D) -> Result<(), D::Error>
+    pub fn apply<D>(&mut self, new: &Self, to: &mut D) -> Result<usize, D::Error>
     where
         D: DrawTarget<Color = COLOR>,
     {
@@ -225,24 +227,37 @@ where
                 }
             });
 
-        let res = to.draw_iter(pixels);
+        to.draw_iter(pixels)?;
 
-        info!(
+        trace!(
             "Display updated ({}/{} changed pixels)",
             changes,
             width * height
         );
 
-        res
+        Ok(changes)
     }
 
     fn offsets(&self, area: Rectangle) -> impl Iterator<Item = (usize, usize)> {
-        (self.y_offset(area.top_left.y as usize)
-            ..self.y_offset(area.top_left.y as usize + area.size.height as usize))
+        let dimensions = self.bounding_box();
+        let bottom_right = dimensions.bottom_right().unwrap_or(dimensions.top_left);
+
+        let x = min(max(area.top_left.x, 0), bottom_right.x) as usize;
+        let y = min(max(area.top_left.y, 0), bottom_right.y) as usize;
+
+        let xend = min(
+            max(area.top_left.x + area.size.width as i32, 0),
+            bottom_right.x,
+        ) as usize;
+        let yend = min(
+            max(area.top_left.y + area.size.height as i32, 0),
+            bottom_right.y,
+        ) as usize;
+
+        (self.y_offset(y)..self.y_offset(yend))
             .step_by(self.bytes_per_row())
             .flat_map(move |y_offset| {
-                (area.top_left.x as usize..area.top_left.x as usize + area.size.width as usize)
-                    .map(move |x| (y_offset + Self::x_offset(x), Self::x_bits_offset(x)))
+                (x..xend).map(move |x| (y_offset + Self::x_offset(x), Self::x_bits_offset(x)))
             })
     }
 
@@ -324,11 +339,17 @@ where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for pixel in pixels {
-            self.set(
-                self.y_offset(pixel.0.y as usize) + Self::x_offset(pixel.0.x as usize),
-                Self::x_bits_offset(pixel.0.x as usize),
-                pixel.1,
-            );
+            if pixel.0.x >= 0
+                && pixel.0.x < self.width() as _
+                && pixel.0.y >= 0
+                && pixel.0.y < self.height() as _
+            {
+                self.set(
+                    self.y_offset(pixel.0.y as usize) + Self::x_offset(pixel.0.x as usize),
+                    Self::x_bits_offset(pixel.0.x as usize),
+                    pixel.1,
+                );
+            }
         }
 
         Ok(())
