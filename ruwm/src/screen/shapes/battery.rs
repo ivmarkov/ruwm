@@ -16,36 +16,45 @@ pub enum BatteryChargedText {
     Xor,
 }
 
+#[derive(Clone, Debug)]
 pub struct Battery {
-    percentage: Option<u8>,
-    text_rendering: BatteryChargedText,
-    outline: bool,
+    pub size: Size,
+    pub padding: u32,
+    pub outline: u32,
+    pub distinct_outline: bool,
+    pub cathode: Size,
+    pub percentage_threhsold: u8,
+    pub text: BatteryChargedText,
+    pub font: &'static MonoFont<'static>,
+    pub charged_percentage: Option<u8>,
+}
+
+impl Default for Battery {
+    fn default() -> Self {
+        Self {
+            size: Size::new(100, 200),
+            padding: 10,
+            outline: 2,
+            distinct_outline: true,
+            cathode: Size::new(40, 10),
+            percentage_threhsold: Default::default(),
+            text: BatteryChargedText::Xor,
+            font: &profont::PROFONT_24_POINT,
+            charged_percentage: Some(100),
+        }
+    }
 }
 
 impl Battery {
-    pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
-    pub const WIDTH: u32 = 100;
-    pub const HEIGHT: u32 = 200;
+    fn padded_size(&self) -> Size {
+        Size::new(
+            self.size.width - self.padding * 2,
+            self.size.height - self.padding * 2,
+        )
+    }
 
-    const FONT: MonoFont<'static> = profont::PROFONT_24_POINT;
-
-    const PADDING: u32 = 10;
-    const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
-    const PADDED_HEIGHT: u32 = Self::HEIGHT - Self::PADDING * 2;
-
-    const OUTLINE: u32 = 5;
-
-    const CATHODE_WIDTH: u32 = 40;
-    const CATHODE_HEIGHT: u32 = 10;
-
-    const PERCENTAGE_THRESHOLD: u8 = 15;
-
-    pub fn new(percentage: Option<u8>, text_rendering: BatteryChargedText, outline: bool) -> Self {
-        Self {
-            percentage,
-            text_rendering,
-            outline,
-        }
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -53,11 +62,11 @@ impl Battery {
         D: DrawTarget<Color = Color>,
     {
         // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
+        clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(Self::PADDING as _, Self::PADDING as _),
-            Size::new(Self::PADDED_WIDTH, Self::PADDED_HEIGHT),
+            Point::new(self.padding as _, self.padding as _),
+            self.padded_size(),
         )))
     }
 
@@ -67,7 +76,7 @@ impl Battery {
     {
         let Size { width, height } = target.size();
 
-        let percentage = self.percentage.unwrap_or(0);
+        let percentage = self.charged_percentage.unwrap_or(0);
 
         let fill_line = if percentage >= 100 {
             0
@@ -75,8 +84,8 @@ impl Battery {
             height * (100 - percentage as u32) / 100
         };
 
-        let charged_color = if let Some(percentage) = self.percentage {
-            if percentage < Self::PERCENTAGE_THRESHOLD {
+        let charged_color = if let Some(percentage) = self.charged_percentage {
+            if percentage < self.percentage_threhsold {
                 Color::Red
             } else {
                 Color::Green
@@ -85,7 +94,7 @@ impl Battery {
             Color::Yellow
         };
 
-        let outline_color = if self.outline && self.percentage.is_some() {
+        let outline_color = if self.distinct_outline && self.charged_percentage.is_some() {
             Color::White
         } else {
             charged_color
@@ -104,8 +113,8 @@ impl Battery {
         // Left outline
         fill(
             &Rectangle::new(
-                Point::new(0, Self::CATHODE_HEIGHT as _),
-                Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
+                Point::new(0, self.cathode.height as _),
+                Size::new(self.outline, height - self.cathode.height),
             ),
             outline_color,
             target,
@@ -114,11 +123,8 @@ impl Battery {
         // Right outline
         fill(
             &Rectangle::new(
-                Point::new(
-                    width as i32 - Self::OUTLINE as i32,
-                    Self::CATHODE_HEIGHT as _,
-                ),
-                Size::new(Self::OUTLINE, height - Self::CATHODE_HEIGHT),
+                Point::new(width as i32 - self.outline as i32, self.cathode.height as _),
+                Size::new(self.outline, height - self.cathode.height),
             ),
             outline_color,
             target,
@@ -127,8 +133,8 @@ impl Battery {
         // Bottom outline
         fill(
             &Rectangle::new(
-                Point::new(0, height as i32 - Self::OUTLINE as i32),
-                Size::new(width, Self::OUTLINE),
+                Point::new(0, height as i32 - self.outline as i32),
+                Size::new(width, self.outline),
             ),
             outline_color,
             target,
@@ -137,8 +143,8 @@ impl Battery {
         // Top outline
         fill(
             &Rectangle::new(
-                Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
-                Size::new(Self::CATHODE_WIDTH, Self::OUTLINE),
+                Point::new((width as i32 - self.cathode.width as i32) / 2, 0),
+                Size::new(self.cathode.width, self.outline),
             ),
             outline_color,
             target,
@@ -147,8 +153,8 @@ impl Battery {
         // Top left horizontal outline
         fill(
             &Rectangle::new(
-                Point::new(0, Self::CATHODE_HEIGHT as _),
-                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
+                Point::new(0, self.cathode.height as _),
+                Size::new((width - self.cathode.width) / 2, self.outline),
             ),
             outline_color,
             target,
@@ -158,10 +164,10 @@ impl Battery {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 + Self::CATHODE_WIDTH as i32) / 2,
-                    Self::CATHODE_HEIGHT as _,
+                    (width as i32 + self.cathode.width as i32) / 2,
+                    self.cathode.height as _,
                 ),
-                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::OUTLINE),
+                Size::new((width - self.cathode.width) / 2, self.outline),
             ),
             outline_color,
             target,
@@ -170,8 +176,8 @@ impl Battery {
         // Top left vertical outline
         fill(
             &Rectangle::new(
-                Point::new((width as i32 - Self::CATHODE_WIDTH as i32) / 2, 0),
-                Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
+                Point::new((width as i32 - self.cathode.width as i32) / 2, 0),
+                Size::new(self.outline, self.cathode.height + self.outline),
             ),
             outline_color,
             target,
@@ -181,10 +187,10 @@ impl Battery {
         fill(
             &Rectangle::new(
                 Point::new(
-                    (width as i32 + Self::CATHODE_WIDTH as i32) / 2 - Self::OUTLINE as i32,
+                    (width as i32 + self.cathode.width as i32) / 2 - self.outline as i32,
                     0,
                 ),
-                Size::new(Self::OUTLINE, Self::CATHODE_HEIGHT + Self::OUTLINE),
+                Size::new(self.outline, self.cathode.height + self.outline),
             ),
             outline_color,
             target,
@@ -194,7 +200,7 @@ impl Battery {
         clear(
             &Rectangle::new(
                 Point::new(0, 0),
-                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
+                Size::new((width - self.cathode.width) / 2, self.cathode.height),
             ),
             target,
         )?;
@@ -202,13 +208,13 @@ impl Battery {
         // Remove charge fill from the top right corner
         clear(
             &Rectangle::new(
-                Point::new((width as i32 + Self::CATHODE_WIDTH as i32) / 2, 0),
-                Size::new((width - Self::CATHODE_WIDTH) / 2, Self::CATHODE_HEIGHT),
+                Point::new((width as i32 + self.cathode.width as i32) / 2, 0),
+                Size::new((width - self.cathode.width) / 2, self.cathode.height),
             ),
             target,
         )?;
 
-        let light_color = if percentage < Self::PERCENTAGE_THRESHOLD {
+        let light_color = if percentage < self.percentage_threhsold {
             charged_color
         } else {
             outline_color
@@ -216,7 +222,7 @@ impl Battery {
 
         let position = Point::new(width as i32 / 2, height as i32 / 2);
 
-        if self.text_rendering == BatteryChargedText::Xor {
+        if self.text == BatteryChargedText::Xor {
             let mut wonb = target.clipped(&Rectangle::new(
                 Point::new(0, 0),
                 Size::new(width, fill_line),
@@ -228,7 +234,7 @@ impl Battery {
                 Size::new(width, height - fill_line),
             ));
             self.draw_percentage(&mut bonw, position, Color::Black)?;
-        } else if self.text_rendering == BatteryChargedText::Outline {
+        } else if self.text == BatteryChargedText::Outline {
             self.draw_percentage(target, position, light_color)?;
         }
 
@@ -251,14 +257,14 @@ impl Battery {
                 .build(),
         );
 
-        if let Some(percentage) = self.percentage {
+        if let Some(percentage) = self.charged_percentage {
             let mut charged_text = [0_u8; 4];
             charged_text[3] = b'%';
 
             let offset = to_str(percentage as _, &mut charged_text[..3]);
 
             text(
-                &Self::FONT,
+                &self.font,
                 target,
                 position,
                 str::from_utf8(&charged_text[offset..]).unwrap(),
@@ -266,7 +272,7 @@ impl Battery {
                 text_style,
             )
         } else {
-            text(&Self::FONT, target, position, "?", color, text_style)
+            text(&self.font, target, position, "?", color, text_style)
         }
     }
 }

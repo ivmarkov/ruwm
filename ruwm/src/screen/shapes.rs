@@ -2,15 +2,19 @@ use embedded_graphics::pixelcolor::raw::RawU4;
 use embedded_graphics::prelude::{PixelColor, RgbColor};
 
 pub use battery::*;
-pub use water_meter::*;
+pub use valve::*;
+pub use wm::*;
 
 mod battery;
-mod water_meter;
+mod valve;
+mod wm;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Color {
     Black,
     Red,
+    LightBlue,
+    Gray,
     Green,
     Yellow,
     White,
@@ -21,6 +25,8 @@ impl Color {
         match self {
             Color::Black => C::BLACK,
             Color::Red => C::RED,
+            Color::LightBlue => C::BLUE,
+            Color::Gray => C::MAGENTA,
             Color::Green => C::GREEN,
             Color::Yellow => C::YELLOW,
             Color::White => C::WHITE,
@@ -43,8 +49,10 @@ impl From<u8> for Color {
         match raw {
             0 => Self::Black,
             1 => Self::Red,
-            2 => Self::Green,
-            3 => Self::Yellow,
+            2 => Self::LightBlue,
+            3 => Self::Gray,
+            4 => Self::Green,
+            5 => Self::Yellow,
             _ => Self::White,
         }
     }

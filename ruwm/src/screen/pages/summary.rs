@@ -21,31 +21,38 @@ impl Summary {
     where
         D: DrawTarget<Color = Color>,
     {
+        let bbox = target.bounding_box();
+
         if let Some(valve_state) = valve_state {
-            // TODO
+            let valve = shapes::Valve::new(valve_state.map(|valve_state| 50_u8));
+
+            valve.draw(target)?;
         }
 
         if let Some(water_meter_state) = water_meter_state {
             let wm_shape =
                 shapes::WaterMeterClassic::<8>::new(Some(water_meter_state.edges_count), 1, true);
 
-            //let bbox = target.bounding_box();
-
-            let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
-                .translate(Point::new(0, 30));
+            let mut target =
+                TransformingAdaptor::display(DrawTargetRef::new(target)).translate(Point::new(
+                    bbox.size.width as i32 - shapes::WaterMeterClassic::<8>::SIZE.width as i32,
+                    22,
+                ));
 
             wm_shape.draw(&mut target)?;
         }
 
         if let Some(battery_state) = battery_state {
-            let battery_shape =
-                shapes::Battery::new(battery_state.percentage(), BatteryChargedText::No, false);
-
-            let bbox = target.bounding_box();
+            let battery_shape = shapes::Battery {
+                charged_percentage: battery_state.percentage(),
+                text: BatteryChargedText::No,
+                distinct_outline: false,
+                ..Default::default()
+            };
 
             let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
-                .translate(Point::new(bbox.size.width as i32 - 40, 0))
-                .scale_from(shapes::Battery::SIZE, Size::new(20, 40))
+                .translate(Point::new(bbox.size.width as i32 - 40, -40))
+                .scale_from(battery_shape.size, Size::new(20, 40))
                 .rotate(RotateAngle::Degrees270);
 
             battery_shape.draw(&mut target)?;

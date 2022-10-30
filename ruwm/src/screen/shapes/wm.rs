@@ -40,9 +40,7 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
         D: DrawTarget<Color = Color>,
     {
         // Clear the area
-        Rectangle::new(Point::new(0, 0), Self::SIZE)
-            .into_styled(PrimitiveStyle::with_fill(Color::Black))
-            .draw(target)?;
+        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
             Point::new(Self::PADDING as _, Self::PADDING as _),
@@ -57,21 +55,22 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
         let bbox = target.bounding_box();
 
         if self.outline && DIGITS > 5 {
-            bbox.into_styled(PrimitiveStyle::with_stroke(Color::Red, 2))
-                .draw(target)?;
+            draw(&bbox, Color::Red, 2, target)?;
 
-            Rectangle::new(
-                Point::new(
-                    bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
-                    bbox.top_left.y,
+            fill(
+                &Rectangle::new(
+                    Point::new(
+                        bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
+                        bbox.top_left.y,
+                    ),
+                    Size::new(
+                        Self::FONT.character_size.width * (DIGITS as u32 - 5),
+                        bbox.size.height,
+                    ),
                 ),
-                Size::new(
-                    Self::FONT.character_size.width * (DIGITS as u32 - 5),
-                    bbox.size.height,
-                ),
-            )
-            .into_styled(PrimitiveStyle::with_fill(Color::Red))
-            .draw(target)?;
+                Color::Red,
+                target,
+            )?;
         }
 
         let wm_text = if let Some(edges_count) = self.edges_count {
