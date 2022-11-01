@@ -38,8 +38,8 @@ wasm-logger = "0.2"
 web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.19", default-features = false }
 yew-router = { version = "0.16" }
-yewdux = "0.8"
-yewdux-middleware = { version = "0.1", git = "https://github.com/ivmarkov/yewdux-middleware" }
+yewdux = "0.8.3"
+yewdux-middleware = { version = "0.1" }
 strum = { version = "0.23" }
 serde = "1"
 embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
