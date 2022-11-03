@@ -30,7 +30,7 @@ use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::reset::WakeupReason;
 use esp_idf_hal::spi::*;
-use esp_idf_hal::task::embassy_sync::CriticalSectionRawMutex;
+use esp_idf_hal::task::embassy_sync::EspRawMutex;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
@@ -145,7 +145,7 @@ pub fn storage(
 
     static STORAGE: static_cell::StaticCell<
         Mutex<
-            CriticalSectionRawMutex,
+            EspRawMutex,
             RefCell<
                 embedded_svc::storage::StorageImpl<
                     { POSTCARD_BUF_SIZE },
@@ -303,7 +303,7 @@ pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<{ ws::WS_MAX_CONNECTIONS }, { ws::WS_MAX_FRAME_LEN }>::new(());
 
-    let ws_processor = Mutex::<CriticalSectionRawMutex, _>::new(RefCell::new(ws_processor));
+    let ws_processor = Mutex::<EspRawMutex, _>::new(RefCell::new(ws_processor));
 
     let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
 
