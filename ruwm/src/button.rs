@@ -4,7 +4,7 @@ use core::future::pending;
 use embassy_time::{Duration, Timer};
 use serde::{Deserialize, Serialize};
 
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select, select3, Either, Either3};
 
 use embedded_hal::digital::v2::InputPin;
 
@@ -142,6 +142,132 @@ pub async fn wait_press<'a>(
             if pressed {
                 return;
             }
+        }
+    }
+}
+
+pub async fn button1_button2_roller_process<'a>(
+    pin_1: impl InputPin<Error = impl Debug>,
+    pin_2: impl InputPin<Error = impl Debug>,
+) {
+    roller_process(
+        pin_1,
+        pin_2,
+        &BUTTON1_PIN_EDGE,
+        &BUTTON2_PIN_EDGE,
+        Some(Duration::from_millis(50)),
+        "ROLLER",
+        BUTTON1_NOTIFY,
+        BUTTON2_NOTIFY,
+    )
+    .await;
+}
+
+pub async fn roller_process<'a>(
+    mut pin_1: impl InputPin<Error = impl Debug>,
+    mut pin_2: impl InputPin<Error = impl Debug>,
+    pin_1_edge: &'a Notification,
+    pin_2_edge: &'a Notification,
+    debounce_duration: Option<Duration>,
+    rolled_sink_msg: &'a str,
+    rolled_clockwise_sink: &'a [&'a Notification],
+    rolled_counter_clockwise_sink: &'a [&'a Notification],
+) {
+    loop {
+        let clockwise = wait_roller(
+            &mut pin_1,
+            &mut pin_2,
+            pin_1_edge,
+            pin_2_edge,
+            debounce_duration,
+        )
+        .await;
+
+        log::info!("[{}]: {}", rolled_sink_msg, clockwise);
+
+        let sink = if clockwise {
+            rolled_clockwise_sink
+        } else {
+            rolled_counter_clockwise_sink
+        };
+
+        for notification in sink {
+            notification.notify();
+        }
+    }
+}
+
+pub async fn wait_roller<'a>(
+    pin_1: &mut impl InputPin<Error = impl Debug>,
+    pin_2: &mut impl InputPin<Error = impl Debug>,
+    pin_1_edge: &'a Notification,
+    pin_2_edge: &'a Notification,
+    debounce_duration: Option<Duration>,
+) -> bool {
+    let mut debounce = false;
+    let mut clockwise = false;
+
+    let mut pin_1_was_high = pin_1.is_high().unwrap();
+    let mut pin_2_was_high = pin_2.is_high().unwrap();
+
+    loop {
+        let pin_a_edge = pin_1_edge.wait();
+        let pin_b_edge = pin_2_edge.wait();
+
+        let timer = if debounce {
+            if let Some(debounce_duration) = debounce_duration {
+                futures::future::Either::Left(Timer::after(debounce_duration))
+            } else {
+                futures::future::Either::Right(pending())
+            }
+        } else {
+            futures::future::Either::Right(pending())
+        };
+
+        let check = match select3(pin_a_edge, pin_b_edge, timer).await {
+            Either3::First(_) | Either3::Second(_) => {
+                let pin_1_high = pin_1.is_high().unwrap();
+                let pin_2_high = pin_2.is_high().unwrap();
+
+                let pin_1_changed = pin_1_high != pin_1_was_high;
+                let pin_2_changed = pin_2_high != pin_2_was_high;
+
+                if pin_1_changed != pin_2_changed {
+                    clockwise = pin_1_changed;
+
+                    if debounce_duration.is_some() {
+                        debounce = true;
+                        false
+                    } else {
+                        return clockwise;
+                    }
+                } else {
+                    pin_1_was_high = pin_1_high;
+                    pin_2_was_high = pin_2_high;
+
+                    false
+                }
+            }
+            Either3::Third(_) => {
+                if debounce {
+                    debounce = false;
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if check {
+            let pin_1_high = pin_1.is_high().unwrap();
+            let pin_2_high = pin_2.is_high().unwrap();
+
+            if pin_1_high == pin_2_high && pin_1_high != pin_1_was_high {
+                return clockwise;
+            }
+
+            pin_1_was_high = pin_1_high;
+            pin_2_was_high = pin_2_high;
         }
     }
 }

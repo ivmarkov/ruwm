@@ -113,6 +113,7 @@ fn start() -> Result<(), SpawnError> {
         peripherals.battery.adc,
         peripherals.battery.voltage,
         peripherals.battery.power,
+        false,
         services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE),
         services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE),
         services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE),

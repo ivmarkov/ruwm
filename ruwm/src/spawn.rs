@@ -37,9 +37,10 @@ pub fn high_prio<'a, ADC, BP, const C: usize, M>(
     battery_voltage: impl adc::OneShot<ADC, u16, BP> + 'a,
     battery_pin: BP,
     power_pin: impl InputPin + 'a,
-    button1_pin: impl InputPin + 'a,
-    button2_pin: impl InputPin + 'a,
-    button3_pin: impl InputPin + 'a,
+    roller: bool,
+    button1_pin: impl InputPin<Error = impl Debug + 'a> + 'a,
+    button2_pin: impl InputPin<Error = impl Debug + 'a> + 'a,
+    button3_pin: impl InputPin<Error = impl Debug + 'a> + 'a,
 ) -> Result<(), SpawnError>
 where
     M: Monitor + Default,
@@ -61,19 +62,28 @@ where
             tasks,
         )?
         .spawn_local_collect(
-            button::button1_process(button1_pin, PressedLevel::Low),
-            tasks,
-        )?
-        .spawn_local_collect(
-            button::button2_process(button2_pin, PressedLevel::Low),
-            tasks,
-        )?
-        .spawn_local_collect(
             button::button3_process(button3_pin, PressedLevel::Low),
             tasks,
         )?
         .spawn_local_collect(emergency::process(), tasks)?
         .spawn_local_collect(keepalive::process(), tasks)?;
+
+    if roller {
+        executor.spawn_local_collect(
+            button::button1_button2_roller_process(button1_pin, button2_pin),
+            tasks,
+        )?;
+    } else {
+        executor
+            .spawn_local_collect(
+                button::button1_process(button1_pin, PressedLevel::Low),
+                tasks,
+            )?
+            .spawn_local_collect(
+                button::button2_process(button2_pin, PressedLevel::Low),
+                tasks,
+            )?;
+    }
 
     Ok(())
 }

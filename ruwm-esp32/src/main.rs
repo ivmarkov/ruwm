@@ -191,6 +191,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
         AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
         PinDriver::input(peripherals.battery.power)?,
+        false,
         services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE)?,
         services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE)?,
         services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,

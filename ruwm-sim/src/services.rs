@@ -124,7 +124,7 @@ pub fn pulse(pulse: Pin<Input>) -> (impl PulseCounter, impl PulseWakeup) {
     (pulse_counter, ())
 }
 
-pub fn button(pin: Pin<Input>, notification: &'static Notification) -> impl InputPin {
+pub fn button(pin: Pin<Input>, notification: &'static Notification) -> impl InputPin<Error = impl Debug> {
     subscribe_pin(pin, move || notification.notify())
 }
 
@@ -167,7 +167,7 @@ pub fn display(
 //     Ok((client_id, mqtt_client, mqtt_conn))
 // }
 
-fn subscribe_pin(mut pin: Pin<Input>, notify: impl Fn() + Send + 'static) -> impl InputPin {
+fn subscribe_pin(mut pin: Pin<Input>, notify: impl Fn() + Send + 'static) -> impl InputPin<Error = impl Debug> {
     pin.subscribe(notify);
 
     pin

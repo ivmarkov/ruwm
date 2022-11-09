@@ -201,7 +201,7 @@ pub fn pulse(
 pub fn button<'d, P: InputPin + OutputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notification: &'static Notification,
-) -> Result<impl embedded_hal::digital::v2::InputPin + 'd, InitError> {
+) -> Result<impl embedded_hal::digital::v2::InputPin<Error = impl Debug + 'd> + 'd, InitError> {
     subscribe_pin(pin, move || notification.notify())
 }
 
@@ -359,7 +359,7 @@ pub fn mqtt() -> Result<
 fn subscribe_pin<'d, P: InputPin + OutputPin>(
     pin: impl Peripheral<P = P> + 'd,
     notify: impl Fn() + Send + 'static,
-) -> Result<impl embedded_hal::digital::v2::InputPin + 'd, InitError> {
+) -> Result<impl embedded_hal::digital::v2::InputPin<Error = impl Debug + 'd> + 'd, InitError> {
     let mut pin = PinDriver::input(pin)?;
 
     pin.set_interrupt_type(InterruptType::NegEdge)?;
