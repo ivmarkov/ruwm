@@ -42,7 +42,7 @@ pub async fn process<D>(
             }
             Either::Second(command) => match command {
                 WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),
-            },
+            }
         }
     }
 }

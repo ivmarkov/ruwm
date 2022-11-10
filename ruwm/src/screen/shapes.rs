@@ -1,12 +1,16 @@
 use embedded_graphics::pixelcolor::raw::RawU4;
 use embedded_graphics::prelude::{PixelColor, RgbColor};
 
+pub use actions::*;
 pub use battery::*;
 pub use valve::*;
+pub use wifi::*;
 pub use wm::*;
 
+mod actions;
 mod battery;
 mod valve;
+mod wifi;
 mod wm;
 
 #[derive(Copy, Clone, Eq, PartialEq)]

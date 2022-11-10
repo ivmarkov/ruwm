@@ -1,6 +1,7 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
+use embedded_graphics::prelude::Point;
 use serde::{Deserialize, Serialize};
 
 use log::trace;
@@ -18,6 +19,7 @@ use channel_bridge::notification::Notification;
 use crate::battery::{self, BatteryState};
 use crate::keepalive::{self, RemainingTime};
 use crate::screen::shapes::util::clear;
+use crate::screen::shapes::Actions;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
 
@@ -25,6 +27,7 @@ pub use adaptors::*;
 pub use shapes::Color;
 
 use self::pages::{Battery, Summary};
+use self::shapes::Action;
 
 mod adaptors;
 mod pages;
@@ -54,6 +57,21 @@ impl Page {
             Self::Battery => Self::Summary,
         }
     }
+
+    pub fn actions(&self) -> EnumSet<Action> {
+        let actions = match self {
+            Self::Summary => Action::OpenValve | Action::CloseValve | Action::Arm | Action::Disarm,
+            Self::Battery => EnumSet::empty(),
+        };
+
+        let mut actions = actions.intersection(Action::active());
+
+        if !actions.is_empty() {
+            actions |= Action::Dismiss;
+        }
+
+        actions
+    }
 }
 
 impl Default for Page {
@@ -76,6 +94,7 @@ pub enum DataSource {
 pub struct ScreenState {
     changeset: EnumSet<DataSource>,
     active_page: Page,
+    page_actions: Option<(EnumSet<Action>, Action)>,
 }
 
 impl ScreenState {
@@ -90,6 +109,7 @@ impl ScreenState {
                     | DataSource::RemainingTime
             ),
             active_page: Page::new(),
+            page_actions: None,
         }
     }
 
@@ -157,14 +177,37 @@ pub async fn process() {
 
                 match index {
                     0 => {
-                        screen_state.active_page = screen_state.active_page.prev();
+                        if let Some((actions, action)) = screen_state.page_actions {
+                            screen_state.page_actions =
+                                action.prev(&actions).map(|action| (actions, action));
+                        } else {
+                            screen_state.active_page = screen_state.active_page.prev();
+                        }
+
                         screen_state.changeset.insert(DataSource::Page);
                     }
                     1 => {
-                        screen_state.active_page = screen_state.active_page.next();
+                        if let Some((actions, action)) = screen_state.page_actions {
+                            screen_state.page_actions =
+                                action.next(&actions).map(|action| (actions, action));
+                        } else {
+                            screen_state.active_page = screen_state.active_page.next();
+                        }
+
                         screen_state.changeset.insert(DataSource::Page);
                     }
-                    2 => {}
+                    2 => {
+                        if let Some((_, action)) = screen_state.page_actions {
+                            screen_state.page_actions = None;
+                            action.trigger();
+                        } else {
+                            let actions = screen_state.active_page.actions();
+                            screen_state.page_actions =
+                                Action::first(&actions).map(|action| (actions, action));
+                        }
+
+                        screen_state.changeset.insert(DataSource::Page);
+                    }
                     3 => {
                         screen_state.changeset.insert(DataSource::Valve);
                     }
@@ -249,6 +292,24 @@ where
             screen_state.battery().as_ref(),
         )?,
         Page::Battery => Battery::draw(&mut display, screen_state.battery().as_ref())?,
+    }
+
+    if let Some((actions, action)) = screen_state.page_actions {
+        let bbox = display.bounding_box();
+
+        let actions_shape = Actions {
+            enabled: actions,
+            selected: action,
+            ..Default::default()
+        };
+
+        let mut target =
+            TransformingAdaptor::display(DrawTargetRef::new(&mut display)).translate(Point::new(
+                (bbox.size.width as i32 - actions_shape.width as i32) / 2,
+                (bbox.size.height as i32 - actions_shape.height() as i32) / 2,
+            ));
+
+        actions_shape.draw(&mut target)?;
     }
 
     display.flush()?;

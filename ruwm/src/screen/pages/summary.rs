@@ -61,6 +61,18 @@ impl Summary {
             battery_shape.draw(&mut target)?;
         }
 
+        let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
+            .translate(Point::new(200, 100));
+
+        shapes::Wifi {
+            size: Size::new(40, 40),
+            padding: 1,
+            outline: 1,
+            strength: Some(60),
+            ..Default::default()
+        }
+        .draw(&mut target)?;
+
         Ok(())
     }
 }
