@@ -15,10 +15,11 @@ use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Pub
 use embedded_svc::mqtt::client::Details;
 
 use channel_bridge::notification::Notification;
+use wm::WaterMeterState;
 
 use crate::battery::{self, BatteryState};
 use crate::valve::{ValveCommand, ValveState};
-use crate::wm::{WaterMeterCommand, WaterMeterState};
+use crate::wm::WaterMeterCommand;
 use crate::{error, valve, wm};
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -76,6 +77,7 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
 
     let topic_powered = topic("/powered");
 
+    let mut published_valve_state = None;
     let mut published_wm_state: Option<WaterMeterState> = None;
     let mut published_battery_state: Option<BatteryState> = None;
 
@@ -90,7 +92,12 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
             .await
             {
                 Either4::First(conn_state) => (Some(conn_state), None, None, None),
-                Either4::Second(_) => (None, Some(valve::STATE.get()), None, None),
+                Either4::Second(_) => (
+                    None,
+                    Some(valve::STATE.get().map(|state| state.simplify())),
+                    None,
+                    None,
+                ),
                 Either4::Third(_) => (None, None, Some(wm::STATE.get()), None),
                 Either4::Fourth(_) => (None, None, None, Some(battery::STATE.get())),
             }
@@ -119,22 +126,26 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
         }
 
         if let Some(valve_state) = valve_state {
-            let status = match valve_state {
-                Some(ValveState::Open) => "open",
-                Some(ValveState::Opening) => "opening",
-                Some(ValveState::Closed) => "closed",
-                Some(ValveState::Closing) => "closing",
-                None => "unknown",
-            };
+            if published_valve_state != valve_state {
+                published_valve_state = valve_state;
 
-            publish(
-                connected,
-                &mut mqtt,
-                &topic_valve,
-                QoS::AtLeastOnce,
-                status.as_bytes(),
-            )
-            .await;
+                let status = match valve_state {
+                    Some(ValveState::Open) => "open",
+                    Some(ValveState::Opening(_)) => "opening",
+                    Some(ValveState::Closed) => "closed",
+                    Some(ValveState::Closing(_)) => "closing",
+                    None => "unknown",
+                };
+
+                publish(
+                    connected,
+                    &mut mqtt,
+                    &topic_valve,
+                    QoS::AtLeastOnce,
+                    status.as_bytes(),
+                )
+                .await;
+            }
         }
 
         if let Some(wm_state) = wm_state {

@@ -17,7 +17,7 @@ pub enum BatteryChargedText {
 }
 
 #[derive(Clone, Debug)]
-pub struct Battery {
+pub struct Battery<'a> {
     pub size: Size,
     pub padding: u32,
     pub outline: u32,
@@ -25,11 +25,11 @@ pub struct Battery {
     pub cathode: Size,
     pub percentage_threhsold: u8,
     pub text: BatteryChargedText,
-    pub font: &'static MonoFont<'static>,
+    pub font: MonoFont<'a>,
     pub charged_percentage: Option<u8>,
 }
 
-impl Battery {
+impl<'a> Battery<'a> {
     pub const fn new() -> Self {
         Self {
             size: Size::new(100, 200),
@@ -39,7 +39,7 @@ impl Battery {
             cathode: Size::new(40, 10),
             percentage_threhsold: 15,
             text: BatteryChargedText::Xor,
-            font: &profont::PROFONT_24_POINT,
+            font: profont::PROFONT_24_POINT,
             charged_percentage: Some(100),
         }
     }
@@ -271,7 +271,7 @@ impl Battery {
     }
 }
 
-impl Default for Battery {
+impl<'a> Default for Battery<'a> {
     fn default() -> Self {
         Self::new()
     }

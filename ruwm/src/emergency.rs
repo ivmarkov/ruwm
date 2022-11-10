@@ -44,7 +44,7 @@ pub async fn process() {
         if emergency_close
             && !matches!(
                 valve_state,
-                Some(ValveState::Closing) | Some(ValveState::Closed)
+                Some(ValveState::Closing(_)) | Some(ValveState::Closed)
             )
         {
             valve::COMMAND.signal(ValveCommand::Close);

@@ -99,7 +99,7 @@ where
         info!("[WEB RECEIVE] {:?}", request);
 
         if let Some(request) = request {
-            let web_event = if request.role() >= role.lock(|role| role.get()) {
+            let web_event = if request.role() <= role.lock(|role| role.get()) {
                 match request {
                     WebRequest::ValveCommand(command) => {
                         valve::COMMAND.signal(command);
@@ -184,7 +184,7 @@ async fn web_send_auth<S>(mut ws_sender: S, event: WebEvent, role: Role) -> Resu
 where
     S: Sender<Data = WebEvent>,
 {
-    if event.role() >= role {
+    if event.role() <= role {
         info!("[WS SEND] {:?}", event);
 
         ws_sender.send(event).await

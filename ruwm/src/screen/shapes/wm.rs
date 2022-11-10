@@ -2,49 +2,55 @@ use core::str;
 
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
 use embedded_graphics::mono_font::*;
-use embedded_graphics::prelude::{OriginDimensions, Point, Primitive, Size};
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
+use embedded_graphics::prelude::{OriginDimensions, Point, Size};
+use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
 
 use super::util::{clear, draw, fill, text, to_str};
 use super::Color;
 
-pub struct WaterMeterClassic<const DIGITS: usize = 8> {
-    edges_count: Option<u64>,
-    divider: u32,
-    outline: bool,
+pub struct WaterMeterClassic<'a, const DIGITS: usize = 8> {
+    pub edges_count: Option<u64>,
+    pub divider: u32,
+    pub padding: u32,
+    pub outline: u32,
+    pub font: MonoFont<'a>,
 }
 
-impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
-    pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
-    pub const WIDTH: u32 = Self::FONT.character_size.width * DIGITS as u32 + Self::PADDING * 2;
-    pub const HEIGHT: u32 = Self::FONT.character_size.height + Self::PADDING * 2;
-
-    const FONT: MonoFont<'static> = profont::PROFONT_24_POINT;
-
-    const PADDING: u32 = 2;
-    const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
-    const PADDED_HEIGHT: u32 = Self::HEIGHT - Self::PADDING * 2;
-
-    pub fn new(edges_count: Option<u64>, divider: u32, outline: bool) -> Self {
+impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
+    pub const fn new() -> Self {
         Self {
-            edges_count,
-            divider,
-            outline,
+            edges_count: None,
+            divider: 1,
+            padding: 2,
+            outline: 2,
+            font: profont::PROFONT_24_POINT,
         }
+    }
+
+    pub fn size(&self) -> Size {
+        let width = self.font.character_size.width * DIGITS as u32 + self.padding * 2;
+        let height = self.font.character_size.height + self.padding * 2;
+
+        Size::new(width, height)
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Color>,
     {
+        let size = self.size();
+
         // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
+        clear(&Rectangle::new(Point::new(0, 0), size), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(Self::PADDING as _, Self::PADDING as _),
-            Size::new(Self::PADDED_WIDTH, Self::PADDED_HEIGHT),
+            Point::new(self.padding as _, self.padding as _),
+            Size::new(
+                size.width - self.padding * 2,
+                size.height - self.padding * 2,
+            ),
         )))
     }
 
@@ -54,17 +60,17 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
     {
         let bbox = target.bounding_box();
 
-        if self.outline && DIGITS > 5 {
-            draw(&bbox, Color::Red, 2, target)?;
+        if self.outline > 0 && DIGITS > 5 {
+            draw(&bbox, Color::Red, self.outline, target)?;
 
             fill(
                 &Rectangle::new(
                     Point::new(
-                        bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
+                        bbox.top_left.x + self.font.character_size.width as i32 * 5,
                         bbox.top_left.y,
                     ),
                     Size::new(
-                        Self::FONT.character_size.width * (DIGITS as u32 - 5),
+                        self.font.character_size.width * (DIGITS as u32 - 5),
                         bbox.size.height,
                     ),
                 ),
@@ -83,7 +89,7 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
         };
 
         text(
-            &Self::FONT,
+            &self.font,
             target,
             Point::zero(),
             str::from_utf8(&wm_text).unwrap(),
@@ -95,39 +101,53 @@ impl<const DIGITS: usize> WaterMeterClassic<DIGITS> {
     }
 }
 
-pub struct WaterMeterFract<const DIGITS: usize> {
-    edges_count: Option<u64>,
-    divider: u32,
+impl<'a, const DIGITS: usize> Default for WaterMeterClassic<'a, DIGITS> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
-    pub const SIZE: Size = Size::new(Self::WIDTH, Self::HEIGHT);
-    pub const WIDTH: u32 = Self::FONT.character_size.width * DIGITS as u32 + Self::PADDING * 2;
-    pub const HEIGHT: u32 = Self::FONT.character_size.height + Self::PADDING * 2;
+pub struct WaterMeterFract<'a, const DIGITS: usize> {
+    pub edges_count: Option<u64>,
+    pub divider: u32,
+    pub padding: u32,
+    pub outline: u32,
+    pub font: MonoFont<'a>,
+}
 
-    const FONT: MonoFont<'static> = profont::PROFONT_24_POINT;
-
-    const PADDING: u32 = 2;
-    const PADDED_WIDTH: u32 = Self::WIDTH - Self::PADDING * 2;
-    const PADDED_HEIGHT: u32 = Self::HEIGHT - Self::PADDING * 2;
-
-    pub fn new(edges_count: Option<u64>, divider: u32) -> Self {
+impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
+    pub const fn new() -> Self {
         Self {
-            edges_count,
-            divider,
+            edges_count: None,
+            divider: 1,
+            padding: 2,
+            outline: 2,
+            font: profont::PROFONT_24_POINT,
         }
+    }
+
+    pub fn size(&self) -> Size {
+        let width = self.font.character_size.width * DIGITS as u32 + self.padding * 2;
+        let height = self.font.character_size.height + self.padding * 2;
+
+        Size::new(width, height)
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Color>,
     {
+        let size = self.size();
+
         // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), Self::SIZE), target)?;
+        clear(&Rectangle::new(Point::new(0, 0), size), target)?;
 
         self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(Self::PADDING as _, Self::PADDING as _),
-            Size::new(Self::PADDED_WIDTH, Self::PADDED_HEIGHT),
+            Point::new(self.padding as _, self.padding as _),
+            Size::new(
+                size.width - self.padding * 2,
+                size.height - self.padding * 2,
+            ),
         )))
     }
 
@@ -143,11 +163,11 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
             fill(
                 &Rectangle::new(
                     Point::new(
-                        bbox.top_left.x + Self::FONT.character_size.width as i32 * 5,
+                        bbox.top_left.x + self.font.character_size.width as i32 * 5,
                         bbox.top_left.y,
                     ),
                     Size::new(
-                        Self::FONT.character_size.width * (DIGITS as u32 - 5),
+                        self.font.character_size.width * (DIGITS as u32 - 5),
                         bbox.size.height,
                     ),
                 ),
@@ -166,7 +186,7 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
         };
 
         text(
-            &Self::FONT,
+            &self.font,
             target,
             Point::zero(),
             str::from_utf8(&wm_text).unwrap(),
@@ -188,7 +208,7 @@ impl<const DIGITS: usize> WaterMeterFract<DIGITS> {
         D: DrawTarget<Color = Color>,
     {
         let character_style = MonoTextStyleBuilder::new()
-            .font(&Self::FONT)
+            .font(&self.font)
             .text_color(color)
             .build();
 

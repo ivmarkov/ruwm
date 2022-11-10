@@ -25,7 +25,7 @@ impl Summary {
 
         if let Some(valve_state) = valve_state {
             let valve = shapes::Valve {
-                open_percentage: valve_state.map(|valve_state| 50_u8),
+                open_percentage: valve_state.map(|valve_state| valve_state.open_percentage()),
                 ..Default::default()
             };
 
@@ -33,14 +33,14 @@ impl Summary {
         }
 
         if let Some(water_meter_state) = water_meter_state {
-            let wm_shape =
-                shapes::WaterMeterClassic::<8>::new(Some(water_meter_state.edges_count), 1, true);
+            let wm_shape = shapes::WaterMeterClassic::<8> {
+                edges_count: Some(water_meter_state.edges_count),
+                ..Default::default()
+            };
 
-            let mut target =
-                TransformingAdaptor::display(DrawTargetRef::new(target)).translate(Point::new(
-                    bbox.size.width as i32 - shapes::WaterMeterClassic::<8>::SIZE.width as i32,
-                    22,
-                ));
+            let mut target = TransformingAdaptor::display(DrawTargetRef::new(target)).translate(
+                Point::new(bbox.size.width as i32 - wm_shape.size().width as i32, 22),
+            );
 
             wm_shape.draw(&mut target)?;
         }

@@ -1,12 +1,14 @@
 use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::mono_font::MonoFont;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 
-use super::util::{clear, fill};
+use super::util::{clear, fill, text};
 use super::Color;
 
 #[derive(Clone, Debug)]
-pub struct Valve {
+pub struct Valve<'a> {
+    pub font: MonoFont<'a>,
     pub size: Size,
     pub padding: u32,
     pub outline: u32,
@@ -14,15 +16,16 @@ pub struct Valve {
     pub open_percentage: Option<u8>,
 }
 
-impl Default for Valve {
+impl<'a> Default for Valve<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Valve {
+impl<'a> Valve<'a> {
     pub const fn new() -> Self {
         Self {
+            font: profont::PROFONT_18_POINT,
             size: Size::new(80, 60),
             padding: 10,
             outline: 4,
@@ -50,44 +53,81 @@ impl Valve {
     {
         let Size { width, height } = target.size();
 
-        let percentage = self.open_percentage.unwrap_or(0);
-
-        // let fill_line = if percentage >= 100 {
-        //     0
-        // } else {
-        //     height * (100 - percentage as u32) / 100
-        // };
-
-        let water_color = Color::LightBlue;
         let outline_color = Color::Gray;
 
-        // Draw water fill
-        fill(
-            &Rectangle::new(Point::new(0, 0), Size::new(width, height)),
-            water_color,
-            target,
-        )?;
+        if let Some(percentage) = self.open_percentage {
+            let water_color = Color::LightBlue;
 
-        // // Left outline
-        // clear(
-        //     &Rectangle::new(
-        //         Point::new(0, self.handle_area.height as _),
-        //         Size::new(self.outline, height - self.handle_area.height),
-        //     ),
-        //     target,
-        // )?;
+            // Draw water fill
+            fill(
+                &Rectangle::new(Point::new(0, 0), Size::new(width, height)),
+                water_color,
+                target,
+            )?;
 
-        // // Right outline
-        // clear(
-        //     &Rectangle::new(
-        //         Point::new(
-        //             width as i32 - self.outline as i32,
-        //             self.handle_area.height as _,
-        //         ),
-        //         Size::new(self.outline, height - self.handle_area.height),
-        //     ),
-        //     target,
-        // )?;
+            const STEP: usize = 6;
+            const BUBBLE: u32 = 1;
+
+            for y in (0..height).step_by(STEP) {
+                for x in (0..width).step_by(STEP) {
+                    let x = x as i32;
+                    let x_offs = if y as i32 % (STEP as i32 * 2) == 0 {
+                        0
+                    } else {
+                        STEP as i32 / 2
+                    };
+
+                    if x + x_offs < width as i32 {
+                        fill(
+                            &Rectangle::new(
+                                Point::new(x + x_offs, y as i32),
+                                Size::new(BUBBLE, BUBBLE),
+                            ),
+                            Color::White,
+                            target,
+                        )?;
+                    }
+                }
+            }
+
+            let stop_line = if percentage >= 100 {
+                0
+            } else {
+                height * (100 - percentage as u32) / 100
+            };
+
+            clear(
+                &Rectangle::new(
+                    Point::new((width / 2) as i32, 0),
+                    Size::new(width / 2 + 1, stop_line),
+                ),
+                target,
+            )?;
+
+            fill(
+                &Rectangle::new(
+                    Point::new(((width - self.outline) / 2) as i32, 0),
+                    Size::new(self.outline, stop_line),
+                ),
+                outline_color,
+                target,
+            )?;
+        } else {
+            text(
+                &self.font,
+                target,
+                Point::new(
+                    (width - self.font.character_size.width) as i32 / 2,
+                    self.handle_area.height as i32
+                        + (height - self.handle_area.height - self.font.character_size.height)
+                            as i32
+                            / 2,
+                ),
+                "?",
+                Color::White,
+                None,
+            )?;
+        }
 
         // Bottom outline
         fill(
