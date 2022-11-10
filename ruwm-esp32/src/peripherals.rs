@@ -13,7 +13,7 @@ pub struct SystemPeripherals<P, ADC, V, B1, B2, B3, SPI> {
     pub modem: Modem,
 }
 
-#[cfg(any(esp32, esp32s2, esp32s3))]
+#[cfg(esp32)]
 impl SystemPeripherals<Gpio33, ADC1, Gpio36, Gpio2, Gpio4, Gpio32, SPI2> {
     pub fn take() -> Self {
         let peripherals = Peripherals::take().unwrap();
@@ -38,6 +38,48 @@ impl SystemPeripherals<Gpio33, ADC1, Gpio36, Gpio2, Gpio4, Gpio32, SPI2> {
                 button1: peripherals.pins.gpio2,
                 button2: peripherals.pins.gpio4,
                 button3: peripherals.pins.gpio32,
+            },
+            display: DisplaySpiPeripherals {
+                control: DisplayControlPeripherals {
+                    backlight: Some(peripherals.pins.gpio15.into()),
+                    dc: peripherals.pins.gpio18.into(),
+                    rst: peripherals.pins.gpio19.into(),
+                },
+                spi: peripherals.spi2,
+                sclk: peripherals.pins.gpio14.into(),
+                sdo: peripherals.pins.gpio13.into(),
+                cs: Some(peripherals.pins.gpio5.into()),
+            },
+            modem: peripherals.modem,
+        }
+    }
+}
+
+#[cfg(any(esp32s2, esp32s3))]
+impl SystemPeripherals<Gpio1, ADC1, Gpio9, Gpio2, Gpio4, Gpio12, SPI2> {
+    pub fn take() -> Self {
+        let peripherals = Peripherals::take().unwrap();
+
+        SystemPeripherals {
+            pulse_counter: PulseCounterPeripherals {
+                pulse: peripherals.pins.gpio1,
+                #[cfg(feature = "ulp")]
+                ulp: peripherals.ulp,
+            },
+            valve: ValvePeripherals {
+                power: peripherals.pins.gpio3.into(),
+                open: peripherals.pins.gpio6.into(),
+                close: peripherals.pins.gpio7.into(),
+            },
+            battery: BatteryPeripherals {
+                power: peripherals.pins.gpio8.into(),
+                voltage: peripherals.pins.gpio9,
+                adc: peripherals.adc1,
+            },
+            buttons: ButtonsPeripherals {
+                button1: peripherals.pins.gpio2,
+                button2: peripherals.pins.gpio4,
+                button3: peripherals.pins.gpio12,
             },
             display: DisplaySpiPeripherals {
                 control: DisplayControlPeripherals {
