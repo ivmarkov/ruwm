@@ -221,13 +221,14 @@ pub fn display(
     //let baudrate = 40.MHz().into();
 
     let di = SPIInterfaceNoCS::new(
-        SpiMasterDriver::new(
+        SpiDeviceDriver::new_single(
             peripherals.spi,
             peripherals.sclk,
             peripherals.sdo,
             Option::<Gpio21>::None,
+            Dma::Disabled,
             peripherals.cs,
-            &SpiMasterConfig::new().baudrate(baudrate),
+            &SpiConfig::new().baudrate(baudrate),
         )?,
         PinDriver::output(peripherals.control.dc)?,
     );
