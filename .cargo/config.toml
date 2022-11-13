@@ -29,6 +29,8 @@ build-std = ["std", "panic_abort"]
 build-std-features = ["panic_immediate_abort"]
 
 [env]
+CARGO_WORKSPACE_DIR = { value = "", relative = true }
+ESP_IDF_SDKCONFIG_DEFAULTS = { value = "sdkconfig.defaults", relative = true }
 ESP_IDF_VERSION = { value = "branch:release/v4.4" }
 #ESP_IDF_VERSION = { value = "branch:release/v5.0" }
 #ESP_IDF_VERSION = { value = "branch:master" }
