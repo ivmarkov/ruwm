@@ -62,13 +62,15 @@ impl Summary {
         }
 
         let mut target = TransformingAdaptor::display(DrawTargetRef::new(target))
-            .translate(Point::new(200, 100));
+            .translate(Point::new(200, 100))
+            //.mirror(false)
+            ;
 
         shapes::Wifi {
-            size: Size::new(40, 40),
+            size: Size::new(17, 20),
             padding: 1,
-            outline: 1,
-            strength: Some(60),
+            outline: 2,
+            strength: None, //Some(60),
             ..Default::default()
         }
         .draw(&mut target)?;

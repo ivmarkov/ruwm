@@ -141,7 +141,10 @@ pub fn display(
     BufferingAdaptor::new(
         B1.init([0_u8; 38400 * 2]),
         B2.init([0_u8; 38400 * 2]),
-        FlushableAdaptor::noop(ColorAdaptor::new(Color::into_rgb::<Rgb888>, display)),
+        FlushableAdaptor::noop(ColorAdaptor::new(
+            |color| Color::into_rgb(color, Rgb888::new),
+            display,
+        )),
     )
 }
 

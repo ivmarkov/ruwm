@@ -53,7 +53,7 @@ impl<'a> Valve<'a> {
     {
         let Size { width, height } = target.size();
 
-        let outline_color = Color::Gray;
+        let outline_color = Color::LightGray;
 
         if let Some(percentage) = self.open_percentage {
             let water_color = Color::LightBlue;

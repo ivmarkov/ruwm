@@ -17,20 +17,24 @@ mod wm;
 pub enum Color {
     Black,
     Red,
+    Blue,
     LightBlue,
     Gray,
+    LightGray,
     Green,
     Yellow,
     White,
 }
 
 impl Color {
-    pub fn into_rgb<C: RgbColor>(self) -> C {
+    pub fn into_rgb<C: RgbColor, F: Fn(u8, u8, u8) -> C>(self, converter: F) -> C {
         match self {
             Color::Black => C::BLACK,
             Color::Red => C::RED,
-            Color::LightBlue => C::BLUE,
-            Color::Gray => C::MAGENTA,
+            Color::Blue => C::BLUE,
+            Color::LightBlue => converter(50, 50, 200),
+            Color::Gray => converter(128, 128, 128),
+            Color::LightGray => converter(200, 200, 200),
             Color::Green => C::GREEN,
             Color::Yellow => C::YELLOW,
             Color::White => C::WHITE,
@@ -53,10 +57,12 @@ impl From<u8> for Color {
         match raw {
             0 => Self::Black,
             1 => Self::Red,
-            2 => Self::LightBlue,
-            3 => Self::Gray,
-            4 => Self::Green,
-            5 => Self::Yellow,
+            2 => Self::Blue,
+            3 => Self::LightBlue,
+            4 => Self::Gray,
+            5 => Self::LightGray,
+            6 => Self::Green,
+            7 => Self::Yellow,
             _ => Self::White,
         }
     }

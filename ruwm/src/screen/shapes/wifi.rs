@@ -37,40 +37,53 @@ impl Wifi {
         // Clear the area
         clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
 
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
+        let rect = Rectangle::new(
             Point::new(self.padding as _, self.padding as _),
             self.padded_size(),
-        )))
+        );
+
+        self.draw_shape(
+            &mut target
+                //.clipped(&rect)
+                .cropped(&rect),
+        )
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Color> + OriginDimensions,
     {
-        let Size { width, height } = target.size();
+        let bbox = target.bounding_box();
+        let Size { width, height } = bbox.size;
 
-        let center = Point::new(width as i32 / 2, height as i32);
+        let center = Point::new(
+            bbox.top_left.x + width as i32 / 2,
+            bbox.top_left.y + height as i32 - self.outline as i32,
+        );
+        let diameter = height * 2 * 4 / 5;
 
         self.draw_arc(
             center,
-            height,
+            diameter,
             self.strength.map(|strength| strength > 80).unwrap_or(false),
             target,
         )?;
+
         self.draw_arc(
             center,
-            height * 2 / 3,
+            diameter * 2 / 3,
             self.strength.map(|strength| strength > 40).unwrap_or(false),
             target,
         )?;
+
         self.draw_arc(
             center,
-            height / 3,
+            diameter / 3,
             self.strength.map(|strength| strength > 20).unwrap_or(false),
             target,
         )?;
 
-        Circle::with_center(center, self.outline)
+        Circle::with_center(center, self.outline * 2)
             .into_styled(PrimitiveStyle::with_fill(
                 if self.strength.map(|strength| strength > 10).unwrap_or(false) {
                     Color::White
@@ -81,7 +94,7 @@ impl Wifi {
             .draw(target)?;
 
         if self.strength.is_none() {
-            Line::new(Point::zero(), Point::new(width as i32, height as i32))
+            Line::new(bbox.top_left, bbox.top_left + bbox.size - Point::new(1, 1))
                 .into_styled(PrimitiveStyle::with_stroke(Color::White, self.outline))
                 .draw(target)?;
         }
@@ -97,7 +110,7 @@ impl Wifi {
         target: &mut D,
     ) -> Result<(), D::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        D: DrawTarget<Color = Color>,
     {
         let color = if strong_signal {
             Color::White
@@ -105,7 +118,7 @@ impl Wifi {
             Color::Gray
         };
 
-        Arc::with_center(center, diameter, 270.0.deg(), 45.0.deg())
+        Arc::with_center(center, diameter, 45.0.deg(), 90.0.deg())
             .into_styled(PrimitiveStyle::with_stroke(color, self.outline))
             .draw(target)
     }

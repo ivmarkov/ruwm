@@ -256,7 +256,10 @@ pub fn display(
     );
 
     // TODO: Double-buffer
-    let display = FlushableAdaptor::noop(ColorAdaptor::new(Color::into_rgb::<Rgb565>, display));
+    let display = FlushableAdaptor::noop(ColorAdaptor::new(
+        |color| Color::into_rgb(color, Rgb565::new),
+        display,
+    ));
 
     Ok(display)
 }
