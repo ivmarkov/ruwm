@@ -1,14 +1,17 @@
 use embedded_graphics::pixelcolor::raw::RawU4;
+use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::{PixelColor, RgbColor};
 
 pub use actions::*;
 pub use battery::*;
+pub use textbox::*;
 pub use valve::*;
 pub use wifi::*;
 pub use wm::*;
 
 mod actions;
 mod battery;
+mod textbox;
 mod valve;
 mod wifi;
 mod wm;
@@ -29,16 +32,28 @@ pub enum Color {
 impl Color {
     pub fn into_rgb<C: RgbColor, F: Fn(u8, u8, u8) -> C>(self, converter: F) -> C {
         match self {
-            Color::Black => C::BLACK,
-            Color::Red => C::RED,
-            Color::Blue => C::BLUE,
-            Color::LightBlue => converter(50, 50, 200),
-            Color::Gray => converter(128, 128, 128),
-            Color::LightGray => converter(200, 200, 200),
-            Color::Green => C::GREEN,
-            Color::Yellow => C::YELLOW,
-            Color::White => C::WHITE,
+            Self::Black => C::BLACK,
+            Self::Red => C::RED,
+            Self::Blue => C::BLUE,
+            Self::LightBlue => converter(50, 50, 200),
+            Self::Gray => converter(128, 128, 128),
+            Self::LightGray => converter(200, 200, 200),
+            Self::Green => C::GREEN,
+            Self::Yellow => C::YELLOW,
+            Self::White => C::WHITE,
         }
+    }
+
+    pub fn into_binary(self) -> BinaryColor {
+        if self.is_off() {
+            BinaryColor::Off
+        } else {
+            BinaryColor::On
+        }
+    }
+
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Black | Self::Gray)
     }
 }
 
