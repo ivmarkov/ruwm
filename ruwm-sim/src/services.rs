@@ -25,6 +25,8 @@ use ruwm::wm_stats::WaterMeterStatsState;
 
 use crate::peripherals::ValvePeripherals;
 
+pub static mut RTC_MEMORY: RtcMemory = RtcMemory::new();
+
 #[derive(Default)]
 pub struct RtcMemory {
     pub valve: Option<ValveState>,
@@ -41,8 +43,6 @@ impl RtcMemory {
         }
     }
 }
-
-pub static mut RTC_MEMORY: RtcMemory = RtcMemory::new();
 
 pub fn valve_pins(
     peripherals: ValvePeripherals,
@@ -133,17 +133,18 @@ pub fn button(
     subscribe_pin(pin, move || notification.notify())
 }
 
-pub const BUFFER_SIZE: usize = PackedBuffer::<Color>::buffer_size(crate::peripherals::DISPLAY_SIZE);
-
-static B1: StaticCell<[u8; BUFFER_SIZE]> = StaticCell::new();
-static B2: StaticCell<[u8; BUFFER_SIZE]> = StaticCell::new();
-
 pub fn display(
     display: Display<Rgb888>,
 ) -> impl FlushableDrawTarget<Color = Color, Error = impl Debug> + 'static {
+    const DISPLAY_BUFFER_SIZE: usize =
+        PackedBuffer::<Color>::buffer_size(crate::peripherals::DISPLAY_SIZE);
+
+    static DISPLAY_BUFFER_1: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
+    static DISPLAY_BUFFER_2: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
+
     BufferingAdaptor::new(
-        B1.init_with(|| [0_u8; BUFFER_SIZE]),
-        B2.init_with(|| [0_u8; BUFFER_SIZE]),
+        DISPLAY_BUFFER_1.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
+        DISPLAY_BUFFER_2.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
         FlushableAdaptor::noop(ColorAdaptor::new(
             |color| Color::into_rgb(color, Rgb888::new),
             display,
