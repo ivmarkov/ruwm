@@ -1,5 +1,5 @@
 use embedded_graphics_core::pixelcolor::Rgb888;
-use embedded_graphics_core::prelude::IntoStorage;
+use embedded_graphics_core::prelude::{IntoStorage, Size};
 
 use hal_sim::adc::*;
 use hal_sim::display::*;
@@ -8,6 +8,8 @@ use hal_sim::peripherals::*;
 use hal_sim::web;
 
 use ruwm::battery::BatteryState;
+
+pub const DISPLAY_SIZE: Size = Size::new(320, 240);
 
 pub struct SystemPeripherals {
     pub shared: SharedPeripherals,
@@ -48,9 +50,12 @@ impl SystemPeripherals {
                 button2: peripherals.pins.input_click("Next", "Display", false),
                 button3: peripherals.pins.input_click("Action", "Display", false),
             },
-            display: peripherals
-                .displays
-                .display("Display", 320, 240, |color: Rgb888| color.into_storage()),
+            display: peripherals.displays.display(
+                "Display",
+                DISPLAY_SIZE.width as _,
+                DISPLAY_SIZE.height as _,
+                |color: Rgb888| color.into_storage(),
+            ),
         }
     }
 }
