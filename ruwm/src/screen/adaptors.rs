@@ -184,8 +184,8 @@ where
         }
     }
 
-    pub const fn buffer_size(width: usize, height: usize) -> usize {
-        width * height / Self::bits_per_pixel()
+    pub const fn buffer_size(display_size: Size) -> usize {
+        display_size.width as usize * display_size.height as usize / (8 / Self::bits_per_pixel())
     }
 
     const fn bits_per_pixel() -> usize {
