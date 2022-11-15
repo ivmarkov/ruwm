@@ -16,9 +16,7 @@ use hal_sim::gpio::{Input, Pin};
 use ruwm::button::PressedLevel;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{
-    BufferingAdaptor, Color, ColorAdaptor, FlushableAdaptor, FlushableDrawTarget, PackedBuffer,
-};
+use ruwm::screen::{buffer_size, Color, Flushable, OwnedDrawTargetExt};
 use ruwm::valve::ValveState;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
@@ -135,20 +133,15 @@ pub fn button(
 
 pub fn display(
     display: Display<Rgb888>,
-) -> impl FlushableDrawTarget<Color = Color, Error = impl Debug> + 'static {
-    const DISPLAY_BUFFER_SIZE: usize =
-        PackedBuffer::<Color>::buffer_size(crate::peripherals::DISPLAY_SIZE);
+) -> impl Flushable<Color = Color, Error = impl Debug> + 'static {
+    const DISPLAY_BUFFER_SIZE: usize = buffer_size::<Color>(crate::peripherals::DISPLAY_SIZE);
 
     static DISPLAY_BUFFER_1: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
     static DISPLAY_BUFFER_2: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
 
-    BufferingAdaptor::new(
+    display.owned_color_converted().owned_buffered(
         DISPLAY_BUFFER_1.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
         DISPLAY_BUFFER_2.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
-        FlushableAdaptor::noop(ColorAdaptor::new(
-            |color| Color::into_rgb(color, Rgb888::new),
-            display,
-        )),
     )
 }
 

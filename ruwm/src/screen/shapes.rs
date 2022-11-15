@@ -1,5 +1,5 @@
 use embedded_graphics::pixelcolor::raw::RawU4;
-use embedded_graphics::pixelcolor::{BinaryColor, Rgb565};
+use embedded_graphics::pixelcolor::{BinaryColor, Rgb565, Rgb888};
 use embedded_graphics::prelude::{PixelColor, RgbColor};
 
 pub use actions::*;
@@ -86,6 +86,12 @@ impl From<u8> for Color {
 impl From<Color> for Rgb565 {
     fn from(color: Color) -> Self {
         color.into_rgb(Rgb565::new)
+    }
+}
+
+impl From<Color> for Rgb888 {
+    fn from(color: Color) -> Self {
+        color.into_rgb(Rgb888::new)
     }
 }
 

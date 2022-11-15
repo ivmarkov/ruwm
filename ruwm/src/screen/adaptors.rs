@@ -131,21 +131,20 @@ where
     }
 }
 
-pub struct FlushingT<T>(T);
+pub struct FlushingT<T, F>(T, F);
 
-impl<T> Transformer for FlushingT<T>
+impl<T, F> Transformer for FlushingT<T, F>
 where
-    T: DrawTarget,
-    //F: FnMut(&mut T) -> Result<(), T::Error> + Clone,
+    T: DrawTarget + 'static,
+    F: FnMut(&mut T) -> Result<(), T::Error> + Send + Clone + 'static,
 {
     type Color = T::Color;
     type Error = T::Error;
 
-    type DrawTarget<'a> = Flushing<'a, T, fn() -> Result<(), Self::Error>> where Self: 'a;
+    type DrawTarget<'a> = Flushing<'a, T, F> where Self: 'a;
 
     fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
-        //self.0.flushing(|| Ok(()))
-        todo!()
+        self.0.flushing(self.1.clone())
     }
 }
 
@@ -279,9 +278,16 @@ where
     target: T,
 }
 
+pub const fn buffer_size<C>(display_size: Size) -> usize
+where
+    C: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+{
+    PackedFramebuffer::<C>::buffer_size(display_size)
+}
+
 impl<'a, T> Buffered<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
     T::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
     pub fn new(draw_buf: &'a mut [u8], reference_buf: &'a mut [u8], display: T) -> Self {
@@ -652,7 +658,7 @@ impl RotateAngle {
 
 pub struct Rotated<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     parent: &'a mut T,
     angle: RotateAngle,
@@ -660,7 +666,7 @@ where
 
 impl<'a, T> Rotated<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     pub fn new(parent: &'a mut T, angle: RotateAngle) -> Self {
         Self { parent, angle }
@@ -669,10 +675,9 @@ where
 
 impl<'a, T> DrawTarget for Rotated<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     type Error = T::Error;
-
     type Color = T::Color;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
@@ -718,7 +723,7 @@ where
 
 impl<'a, T> Dimensions for Rotated<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     fn bounding_box(&self) -> Rectangle {
         if self.angle != RotateAngle::Degrees180 {
@@ -740,7 +745,7 @@ where
 
 pub struct Scaled<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     parent: &'a mut T,
     size: Size,
@@ -748,7 +753,7 @@ where
 
 impl<'a, T> Scaled<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     pub fn new(parent: &'a mut T, size: Size) -> Self {
         Self { parent, size }
@@ -766,10 +771,9 @@ where
 
 impl<'a, T> DrawTarget for Scaled<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     type Error = T::Error;
-
     type Color = T::Color;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
@@ -813,7 +817,7 @@ where
 
 impl<'a, T> Dimensions for Scaled<'a, T>
 where
-    T: DrawTarget + Dimensions,
+    T: DrawTarget,
 {
     fn bounding_box(&self) -> Rectangle {
         Rectangle::new(self.parent.bounding_box().top_left, self.size)
@@ -876,7 +880,28 @@ pub trait OwnedDrawTargetExt: DrawTarget + Sized {
 
     fn owned_scaled(self, size: Size) -> Owned<ScaledT<Self>>;
 
-    fn owned_noop_flushing(self) -> Owned<FlushingT<Self>>;
+    fn owned_flushing<F: FnMut(&mut Self) -> Result<(), Self::Error> + Send + Clone + 'static>(
+        self,
+        flusher: F,
+    ) -> Owned<FlushingT<Self, F>>
+    where
+        Self: 'static,
+        Self::Error: 'static;
+
+    fn owned_noop_flushing(
+        self,
+    ) -> Owned<FlushingT<Self, fn(&mut Self) -> Result<(), Self::Error>>>
+    where
+        Self: 'static,
+        Self::Error: 'static;
+
+    fn owned_buffered<'a>(
+        self,
+        draw_buf: &'a mut [u8],
+        reference_buf: &'a mut [u8],
+    ) -> Buffered<'a, Self>
+    where
+        Self::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>;
 }
 
 impl<T> OwnedDrawTargetExt for T
@@ -910,7 +935,33 @@ where
         ScaledT(self, size).into_owned()
     }
 
-    fn owned_noop_flushing(self) -> Owned<FlushingT<Self>> {
-        FlushingT(self).into_owned()
+    fn owned_flushing<F: FnMut(&mut Self) -> Result<(), Self::Error> + Send + Clone + 'static>(
+        self,
+        flusher: F,
+    ) -> Owned<FlushingT<Self, F>>
+    where
+        Self: 'static,
+        Self::Error: 'static,
+    {
+        FlushingT(self, flusher).into_owned()
+    }
+
+    fn owned_noop_flushing(self) -> Owned<FlushingT<Self, fn(&mut Self) -> Result<(), Self::Error>>>
+    where
+        Self: 'static,
+        Self::Error: 'static,
+    {
+        self.owned_flushing(|_| Ok(()))
+    }
+
+    fn owned_buffered<'a>(
+        self,
+        draw_buf: &'a mut [u8],
+        reference_buf: &'a mut [u8],
+    ) -> Buffered<'a, Self>
+    where
+        Self::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    {
+        Buffered::new(draw_buf, reference_buf, self)
     }
 }
