@@ -30,7 +30,7 @@ pub trait Transformer {
     where
         Self: Sized,
     {
-        Owned(self)
+        Owned::new(self)
     }
 }
 
@@ -148,7 +148,18 @@ where
     }
 }
 
-pub struct Owned<T>(T);
+pub struct Owned<T>(T, Rectangle);
+
+impl<T> Owned<T>
+where
+    T: Transformer,
+{
+    fn new(mut transformer: T) -> Self {
+        let bbox = transformer.transform().bounding_box();
+
+        Self(transformer, bbox)
+    }
+}
 
 impl<T> DrawTarget for Owned<T>
 where
@@ -163,6 +174,21 @@ where
     {
         self.0.transform().draw_iter(pixels)
     }
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        self.0.transform().fill_contiguous(area, colors)
+    }
+
+    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        self.0.transform().fill_solid(area, color)
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.0.transform().clear(color)
+    }
 }
 
 impl<T> Dimensions for Owned<T>
@@ -170,16 +196,17 @@ where
     T: Transformer,
 {
     fn bounding_box(&self) -> Rectangle {
-        todo!()
+        self.1
     }
 }
 
 impl<T> Flushable for Owned<T>
 where
     T: Transformer,
+    for<'a> T::DrawTarget<'a>: Flushable,
 {
     fn flush(&mut self) -> Result<(), Self::Error> {
-        todo!()
+        self.0.transform().flush()
     }
 }
 

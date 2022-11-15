@@ -139,10 +139,13 @@ pub fn display(
     static DISPLAY_BUFFER_1: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
     static DISPLAY_BUFFER_2: StaticCell<[u8; DISPLAY_BUFFER_SIZE]> = StaticCell::new();
 
-    display.owned_color_converted().owned_buffered(
-        DISPLAY_BUFFER_1.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
-        DISPLAY_BUFFER_2.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
-    )
+    display
+        .owned_color_converted()
+        .owned_noop_flushing()
+        .owned_buffered(
+            DISPLAY_BUFFER_1.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
+            DISPLAY_BUFFER_2.init_with(|| [0_u8; DISPLAY_BUFFER_SIZE]),
+        )
 }
 
 // pub fn mqtt() -> Result<
