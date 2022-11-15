@@ -293,7 +293,7 @@ where
 }
 
 //
-// BufferedDrawTarget
+// Buffered
 //
 
 pub struct Buffered<'a, T>
