@@ -9,10 +9,6 @@ use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
-use mipidsi::{Display, DisplayOptions};
-
-use display_interface_spi::SPIInterfaceNoCS;
-
 use embedded_hal::digital::v2::OutputPin as EHOutputPin;
 
 use embedded_svc::http::server::Method;
@@ -219,30 +215,54 @@ pub fn display(
     let baudrate = 26.MHz().into();
     //let baudrate = 40.MHz().into();
 
-    let di = SPIInterfaceNoCS::new(
-        SpiDeviceDriver::new_single(
-            peripherals.spi,
-            peripherals.sclk,
-            peripherals.sdo,
-            Option::<Gpio21>::None,
-            Dma::Disabled,
-            peripherals.cs,
-            &SpiConfig::new().baudrate(baudrate),
-        )?,
-        PinDriver::output(peripherals.control.dc)?,
-    );
+    let spi = SpiDeviceDriver::new_single(
+        peripherals.spi,
+        peripherals.sclk,
+        peripherals.sdo,
+        Option::<Gpio21>::None,
+        Dma::Disabled,
+        peripherals.cs,
+        &SpiConfig::new().baudrate(baudrate),
+    )?;
 
-    let rst = PinDriver::output(peripherals.control.rst)?;
+    let dc = PinDriver::output(peripherals.control.dc)?;
 
-    #[cfg(feature = "ili9342")]
-    let mut display = Display::ili9342c_rgb565(di, rst);
+    #[cfg(any(feature = "ili9342", feature = "st7789"))]
+    let display = {
+        let rst = PinDriver::output(peripherals.control.rst)?;
 
-    #[cfg(feature = "st7789")]
-    let mut display = Display::st7789_rgb565(di, rst);
+        #[cfg(feature = "ili9342")]
+        let builder = mipidsi::Builder::ili9342c_rgb565(
+            display_interface_spi::SPIInterfaceNoCS::new(spi, dc),
+        );
 
-    display
-        .init(&mut delay::Ets, DisplayOptions::default())
-        .unwrap();
+        #[cfg(feature = "st7789")]
+        let builder =
+            mipidsi::Builder::st7789(display_interface_spi::SPIInterfaceNoCS::new(spi, dc));
+
+        builder.init(&mut delay::Ets, Some(rst)).unwrap()
+    };
+
+    #[cfg(feature = "ssd1351")]
+    let display = {
+        use ssd1351::mode::displaymode::DisplayModeTrait;
+
+        let mut display =
+            ssd1351::mode::graphics::GraphicsMode::new(ssd1351::display::Display::new(
+                ssd1351::interface::spi::SpiInterface::new(spi, dc),
+                ssd1351::properties::DisplaySize::Display128x128,
+                ssd1351::properties::DisplayRotation::Rotate0,
+            ));
+
+        display
+            .reset(
+                &mut PinDriver::output(peripherals.control.rst)?,
+                &mut delay::Ets,
+            )
+            .unwrap();
+
+        display
+    };
 
     #[cfg(feature = "ttgo")]
     let mut display = {
