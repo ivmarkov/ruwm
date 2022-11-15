@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embedded_graphics::prelude::Point;
+use embedded_graphics::prelude::{DrawTargetExt, Point};
 use serde::{Deserialize, Serialize};
 
 use log::trace;
@@ -232,7 +232,7 @@ pub async fn process() {
 pub async fn unblock_run_draw<U, D>(unblocker: U, mut display: D)
 where
     U: Unblocker,
-    D: FlushableDrawTarget<Color = Color> + Send + 'static,
+    D: Flushable<Color = Color> + Send + 'static,
     D::Error: Debug + Send + 'static,
 {
     loop {
@@ -255,7 +255,7 @@ where
 
 pub async fn run_draw<D>(mut display: D)
 where
-    D: FlushableDrawTarget<Color = Color>,
+    D: Flushable<Color = Color>,
     D::Error: Debug,
 {
     loop {
@@ -275,7 +275,7 @@ where
 
 fn draw<D>(mut display: D, screen_state: ScreenState) -> Result<D, D::Error>
 where
-    D: FlushableDrawTarget<Color = Color>,
+    D: Flushable<Color = Color>,
     D::Error: Debug,
 {
     trace!("DRAWING: {:?}", screen_state);
@@ -303,11 +303,10 @@ where
             ..Default::default()
         };
 
-        let mut target =
-            TransformingAdaptor::display(DrawTargetRef::new(&mut display)).translate(Point::new(
-                (bbox.size.width as i32 - actions_shape.width as i32) / 2,
-                (bbox.size.height as i32 - actions_shape.height() as i32) / 2,
-            ));
+        let mut target = display.translated(Point::new(
+            (bbox.size.width as i32 - actions_shape.width as i32) / 2,
+            (bbox.size.height as i32 - actions_shape.height() as i32) / 2,
+        ));
 
         actions_shape.draw(&mut target)?;
     }

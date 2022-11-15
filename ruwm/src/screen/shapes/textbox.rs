@@ -63,7 +63,7 @@ impl<'a> Textbox<'a> {
     {
         let bbox = target.bounding_box();
 
-        if self.outline > 0 && self.strikethrough {
+        if self.outline > 0 && !self.strikethrough {
             draw(&bbox, self.color, self.outline, target)?;
         }
 

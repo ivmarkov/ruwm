@@ -25,7 +25,7 @@ impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
             divider: 1,
             padding: 2,
             outline: 2,
-            font: profont::PROFONT_24_POINT,
+            font: profont::PROFONT_18_POINT,
         }
     }
 
@@ -122,7 +122,7 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
             divider: 1,
             padding: 2,
             outline: 2,
-            font: profont::PROFONT_24_POINT,
+            font: profont::PROFONT_18_POINT,
         }
     }
 

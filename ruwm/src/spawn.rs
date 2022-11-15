@@ -17,7 +17,7 @@ use wm_stats::WaterMeterStatsState;
 use crate::button::{self, PressedLevel};
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
-use crate::screen::{Color, FlushableDrawTarget};
+use crate::screen::{Color, Flushable};
 use crate::web::{self, WebEvent, WebRequest};
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
@@ -96,7 +96,7 @@ pub fn mid_prio<'a, const C: usize, M, D>(
 ) -> Result<(), SpawnError>
 where
     M: Monitor + Default,
-    D: FlushableDrawTarget<Color = Color> + 'a,
+    D: Flushable<Color = Color> + 'a,
     D::Error: Debug,
 {
     executor

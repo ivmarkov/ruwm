@@ -9,7 +9,8 @@ use hal_sim::web;
 
 use ruwm::battery::BatteryState;
 
-pub const DISPLAY_SIZE: Size = Size::new(320, 240);
+//pub const DISPLAY_SIZE: Size = Size::new(320, 240);
+pub const DISPLAY_SIZE: Size = Size::new(128, 128);
 
 pub struct SystemPeripherals {
     pub shared: SharedPeripherals,

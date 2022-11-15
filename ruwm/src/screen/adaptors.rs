@@ -1,121 +1,332 @@
 use core::cmp::{max, min};
 use core::convert::Infallible;
+use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use log::trace;
 
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
-use embedded_graphics::prelude::{
-    Dimensions, IntoStorage, OriginDimensions, PixelColor, Point, RawData, Size,
+use embedded_graphics::draw_target::{
+    Clipped, ColorConverted, Cropped, DrawTarget, DrawTargetExt, Translated,
 };
-use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::prelude::{Dimensions, IntoStorage, PixelColor, Point, RawData, Size};
+use embedded_graphics::primitives::{PointsIter, Rectangle};
 use embedded_graphics::Pixel;
 
-pub struct DrawTargetRef<'a, D>(&'a mut D);
+//
+// Owned
+//
 
-impl<'a, D> DrawTargetRef<'a, D> {
-    pub fn new(draw_target: &'a mut D) -> Self {
-        Self(draw_target)
+pub trait Transformer {
+    type Color: PixelColor;
+    type Error;
+
+    type DrawTarget<'a>: DrawTarget<Color = Self::Color, Error = Self::Error>
+    where
+        Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a>;
+
+    fn into_owned(self) -> Owned<Self>
+    where
+        Self: Sized,
+    {
+        Owned(self)
     }
 }
 
-impl<'a, D> DrawTarget for DrawTargetRef<'a, D>
-where
-    D: DrawTarget,
-{
-    type Color = D::Color;
+pub struct TranslatedT<T>(T, Point);
 
-    type Error = D::Error;
+impl<T> Transformer for TranslatedT<T>
+where
+    T: DrawTarget,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Translated<'a, T> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.translated(self.1)
+    }
+}
+
+pub struct CroppedT<T>(T, Rectangle);
+
+impl<T> Transformer for CroppedT<T>
+where
+    T: DrawTarget,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Cropped<'a, T> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.cropped(&self.1)
+    }
+}
+
+pub struct ClippedT<T>(T, Rectangle);
+
+impl<T> Transformer for ClippedT<T>
+where
+    T: DrawTarget,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Clipped<'a, T> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.clipped(&self.1)
+    }
+}
+
+pub struct ColorConvertedT<T, C>(T, PhantomData<C>);
+
+impl<T, C> Transformer for ColorConvertedT<T, C>
+where
+    T: DrawTarget,
+    C: PixelColor + Into<T::Color>,
+{
+    type Color = C;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = ColorConverted<'a, T, C> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.color_converted()
+    }
+}
+
+pub struct RotatedT<T>(T, RotateAngle);
+
+impl<T> Transformer for RotatedT<T>
+where
+    T: DrawTarget,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Rotated<'a, T> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.rotated(self.1)
+    }
+}
+
+pub struct ScaledT<T>(T, Size);
+
+impl<T> Transformer for ScaledT<T>
+where
+    T: DrawTarget,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Scaled<'a, T> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        self.0.scaled(self.1)
+    }
+}
+
+pub struct FlushingT<T>(T);
+
+impl<T> Transformer for FlushingT<T>
+where
+    T: DrawTarget,
+    //F: FnMut(&mut T) -> Result<(), T::Error> + Clone,
+{
+    type Color = T::Color;
+    type Error = T::Error;
+
+    type DrawTarget<'a> = Flushing<'a, T, fn() -> Result<(), Self::Error>> where Self: 'a;
+
+    fn transform<'a>(&'a mut self) -> Self::DrawTarget<'a> {
+        //self.0.flushing(|| Ok(()))
+        todo!()
+    }
+}
+
+pub struct Owned<T>(T);
+
+impl<T> DrawTarget for Owned<T>
+where
+    T: Transformer,
+{
+    type Color = T::Color;
+    type Error = T::Error;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        self.0.draw_iter(pixels)
+        self.0.transform().draw_iter(pixels)
+    }
+}
+
+impl<T> Dimensions for Owned<T>
+where
+    T: Transformer,
+{
+    fn bounding_box(&self) -> Rectangle {
+        todo!()
+    }
+}
+
+impl<T> Flushable for Owned<T>
+where
+    T: Transformer,
+{
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        todo!()
+    }
+}
+
+//
+// Flushable
+//
+
+pub trait Flushable: DrawTarget {
+    fn flush(&mut self) -> Result<(), Self::Error>;
+}
+
+pub struct Flushing<'a, T, F> {
+    parent: &'a mut T,
+    flusher: F,
+}
+
+impl<'a, T, F> Flushing<'a, T, F> {
+    pub fn new(parent: &'a mut T, flusher: F) -> Self {
+        Self { parent, flusher }
+    }
+}
+
+impl<'a, T> Flushing<'a, T, fn(&mut T) -> Result<(), T::Error>>
+where
+    T: DrawTarget,
+{
+    pub fn noop(parent: &'a mut T) -> Self {
+        Self::new(parent, |_| Ok(()))
+    }
+}
+
+impl<'a, T, F> Flushable for Flushing<'a, T, F>
+where
+    T: DrawTarget,
+    F: FnMut(&mut T) -> Result<(), T::Error>,
+{
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        let Self {
+            parent: target,
+            flusher,
+        } = self;
+
+        (flusher)(target)
+    }
+}
+
+impl<'a, T, F> DrawTarget for Flushing<'a, T, F>
+where
+    T: DrawTarget,
+{
+    type Error = T::Error;
+    type Color = T::Color;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        self.parent.draw_iter(pixels)
     }
 
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        self.0.fill_contiguous(area, colors)
+        self.parent.fill_contiguous(area, colors)
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.0.fill_solid(area, color)
+        self.parent.fill_solid(area, color)
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.0.clear(color)
+        self.parent.clear(color)
     }
 }
 
-impl<'a, D> Dimensions for DrawTargetRef<'a, D>
+impl<'a, T, F> Dimensions for Flushing<'a, T, F>
 where
-    D: Dimensions,
+    T: Dimensions,
 {
     fn bounding_box(&self) -> Rectangle {
-        self.0.bounding_box()
+        self.parent.bounding_box()
     }
 }
 
-pub struct BufferingAdaptor<'a, D>
+//
+// BufferedDrawTarget
+//
+
+pub struct Buffered<'a, T>
 where
-    D: DrawTarget,
+    T: DrawTarget,
 {
-    draw_target: PackedBuffer<'a, D::Color>,
-    reference: PackedBuffer<'a, D::Color>,
-    display: D,
+    current: PackedFramebuffer<'a, T::Color>,
+    reference: PackedFramebuffer<'a, T::Color>,
+    target: T,
 }
 
-impl<'a, D> BufferingAdaptor<'a, D>
+impl<'a, T> Buffered<'a, T>
 where
-    D: DrawTarget + Dimensions,
-    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    T: DrawTarget + Dimensions,
+    T::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
-    pub fn new(draw_buf: &'a mut [u8], reference_buf: &'a mut [u8], display: D) -> Self {
+    pub fn new(draw_buf: &'a mut [u8], reference_buf: &'a mut [u8], display: T) -> Self {
         let bbox = display.bounding_box();
 
         Self {
-            draw_target: PackedBuffer::<D::Color>::new(
+            current: PackedFramebuffer::<T::Color>::new(
                 draw_buf,
                 bbox.size.width as _,
                 bbox.size.height as _,
             ),
-            reference: PackedBuffer::<D::Color>::new(
+            reference: PackedFramebuffer::<T::Color>::new(
                 reference_buf,
                 bbox.size.width as _,
                 bbox.size.height as _,
             ),
-            display,
+            target: display,
         }
     }
 }
 
-impl<'a, D> Dimensions for BufferingAdaptor<'a, D>
+impl<'a, T> Dimensions for Buffered<'a, T>
 where
-    D: DrawTarget,
-    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    T: DrawTarget,
+    T::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
     fn bounding_box(&self) -> Rectangle {
-        self.draw_target.bounding_box()
+        self.current.bounding_box()
     }
 }
 
-impl<'a, D> DrawTarget for BufferingAdaptor<'a, D>
+impl<'a, T> DrawTarget for Buffered<'a, T>
 where
-    D: DrawTarget,
-    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    T: DrawTarget,
+    T::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
-    type Error = D::Error;
+    type Error = T::Error;
 
-    type Color = D::Color;
+    type Color = T::Color;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        self.draw_target.draw_iter(pixels).unwrap();
+        self.current.draw_iter(pixels).unwrap();
 
         Ok(())
     }
@@ -124,45 +335,48 @@ where
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        self.draw_target.fill_contiguous(area, colors).unwrap();
+        self.current.fill_contiguous(area, colors).unwrap();
 
         Ok(())
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.draw_target.fill_solid(area, color).unwrap();
+        self.current.fill_solid(area, color).unwrap();
 
         Ok(())
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.draw_target.clear(color).unwrap();
+        self.current.clear(color).unwrap();
 
         Ok(())
     }
 }
 
-impl<'a, D> FlushableDrawTarget for BufferingAdaptor<'a, D>
+impl<'a, T> Flushable for Buffered<'a, T>
 where
-    D: FlushableDrawTarget,
-    D::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
+    T: Flushable,
+    T::Color: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.reference
-            .apply(&mut self.draw_target, &mut self.display)?;
+        self.reference.apply(&mut self.current, &mut self.target)?;
 
-        self.display.flush()
+        self.target.flush()
     }
 }
 
-pub struct PackedBuffer<'a, COLOR> {
+//
+// PackedFramebuffer
+//
+
+pub struct PackedFramebuffer<'a, COLOR> {
     buf: &'a mut [u8],
     width: usize,
     height: usize,
     _color: PhantomData<COLOR>,
 }
 
-impl<'a, COLOR> PackedBuffer<'a, COLOR>
+impl<'a, COLOR> PackedFramebuffer<'a, COLOR>
 where
     COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
@@ -314,7 +528,7 @@ where
     }
 }
 
-impl<'a, COLOR> Dimensions for PackedBuffer<'a, COLOR>
+impl<'a, COLOR> Dimensions for PackedFramebuffer<'a, COLOR>
 where
     COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
@@ -326,7 +540,7 @@ where
     }
 }
 
-impl<'a, COLOR> DrawTarget for PackedBuffer<'a, COLOR>
+impl<'a, COLOR> DrawTarget for PackedFramebuffer<'a, COLOR>
 where
     COLOR: PixelColor + IntoStorage<Storage = u8> + From<u8>,
 {
@@ -393,207 +607,9 @@ where
     }
 }
 
-pub trait FlushableDrawTarget: DrawTarget {
-    fn flush(&mut self) -> Result<(), Self::Error>;
-}
-
-pub struct FlushableAdaptor<A, D> {
-    adaptor: A,
-    display: D,
-}
-
-impl<A, D> FlushableAdaptor<A, D> {
-    pub fn new(adaptor: A, display: D) -> Self {
-        Self { adaptor, display }
-    }
-}
-
-impl<D> FlushableAdaptor<fn(&mut D) -> Result<(), D::Error>, D>
-where
-    D: DrawTarget,
-{
-    pub fn noop(display: D) -> Self {
-        Self {
-            adaptor: |_| Result::<_, D::Error>::Ok(()),
-            display,
-        }
-    }
-}
-
-impl<A, D> FlushableDrawTarget for FlushableAdaptor<A, D>
-where
-    A: Fn(&mut D) -> Result<(), D::Error>,
-    D: DrawTarget,
-{
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        (self.adaptor)(&mut self.display)
-    }
-}
-
-impl<A, D> DrawTarget for FlushableAdaptor<A, D>
-where
-    D: DrawTarget,
-{
-    type Error = D::Error;
-
-    type Color = D::Color;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        self.display.draw_iter(pixels)
-    }
-
-    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        self.display.fill_contiguous(area, colors)
-    }
-
-    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.fill_solid(area, color)
-    }
-
-    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.clear(color)
-    }
-}
-
-impl<A, D> Dimensions for FlushableAdaptor<A, D>
-where
-    D: Dimensions,
-{
-    fn bounding_box(&self) -> Rectangle {
-        self.display.bounding_box()
-    }
-}
-
-pub struct CroppedAdaptor<D> {
-    draw_area: Rectangle,
-    display: D,
-}
-
-impl<D> CroppedAdaptor<D> {
-    pub fn new(draw_area: Rectangle, display: D) -> Self {
-        Self { draw_area, display }
-    }
-}
-
-impl<D> DrawTarget for CroppedAdaptor<D>
-where
-    D: DrawTarget,
-{
-    type Error = D::Error;
-
-    type Color = D::Color;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        self.display.cropped(&self.draw_area).draw_iter(pixels)
-    }
-
-    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        self.display
-            .cropped(&self.draw_area)
-            .fill_contiguous(area, colors)
-    }
-
-    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.display
-            .cropped(&self.draw_area)
-            .fill_solid(area, color)
-    }
-
-    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.cropped(&self.draw_area).clear(color)
-    }
-}
-
-impl<D> OriginDimensions for CroppedAdaptor<D> {
-    fn size(&self) -> Size {
-        self.draw_area.size
-    }
-}
-
-pub struct ColorAdaptor<C, A, D> {
-    _color: PhantomData<C>,
-    adaptor: A,
-    display: D,
-}
-
-impl<C, A, D> ColorAdaptor<C, A, D>
-where
-    A: Fn(C) -> D::Color,
-    C: PixelColor,
-    D: DrawTarget,
-{
-    pub fn new(adaptor: A, display: D) -> Self {
-        Self {
-            _color: PhantomData,
-            adaptor,
-            display,
-        }
-    }
-}
-
-impl<C, A, D> DrawTarget for ColorAdaptor<C, A, D>
-where
-    A: Fn(C) -> D::Color,
-    C: PixelColor,
-    D: DrawTarget,
-{
-    type Error = D::Error;
-
-    type Color = C;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        let display = &mut self.display;
-        let adaptor = &self.adaptor;
-
-        display.draw_iter(
-            pixels
-                .into_iter()
-                .map(|pixel| Pixel(pixel.0, (adaptor)(pixel.1))),
-        )
-    }
-
-    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        let display = &mut self.display;
-        let adaptor = &self.adaptor;
-
-        display.fill_contiguous(area, colors.into_iter().map(adaptor))
-    }
-
-    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.fill_solid(area, (self.adaptor)(color))
-    }
-
-    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.clear((self.adaptor)(color))
-    }
-}
-
-impl<C, A, D> Dimensions for ColorAdaptor<C, A, D>
-where
-    D: Dimensions,
-{
-    fn bounding_box(&self) -> Rectangle {
-        self.display.bounding_box()
-    }
-}
+//
+// Rotated
+//
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum RotateAngle {
@@ -602,174 +618,299 @@ pub enum RotateAngle {
     Degrees270,
 }
 
-pub struct TransformingAdaptor<D, T> {
-    display: D,
-    transform: T,
-}
-
-impl<D> TransformingAdaptor<D, fn(Point) -> Point> {
-    pub fn display(display: D) -> Self {
-        Self::new(display, core::convert::identity)
-    }
-}
-
-impl<D, T> TransformingAdaptor<D, T> {
-    pub fn new(display: D, transform: T) -> Self {
-        Self { display, transform }
-    }
-
-    pub fn translate(self, to: Point) -> TransformingAdaptor<Self, impl Fn(Point) -> Point>
-    where
-        D: DrawTarget + Dimensions,
-        T: Fn(Point) -> Point,
-    {
-        TransformingAdaptor::new(self, move |point: Point| {
-            Point::new(point.x + to.x, point.y + to.y)
-        })
-    }
-
-    pub fn rotate(self, angle: RotateAngle) -> TransformingAdaptor<Self, impl Fn(Point) -> Point>
-    where
-        D: DrawTarget + Dimensions,
-        T: Fn(Point) -> Point,
-    {
-        let bbox = self.display.bounding_box();
-
-        TransformingAdaptor::new(self, move |point: Point| match angle {
+impl RotateAngle {
+    fn transform(&self, point: Point, bbox: &Rectangle) -> Point {
+        match self {
             RotateAngle::Degrees90 => Point::new(
-                bbox.top_left.y + bbox.size.height as i32 - point.y - 1,
-                point.x,
+                point.y,
+                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
             ),
             RotateAngle::Degrees180 => Point::new(
-                bbox.top_left.x + bbox.size.width as i32 - point.x - 1,
-                bbox.top_left.y + bbox.size.height as i32 - point.y - 1,
+                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
+                bbox.top_left.y * 2 + bbox.size.height as i32 - point.y,
             ),
             RotateAngle::Degrees270 => Point::new(
-                point.y,
-                bbox.top_left.x + bbox.size.width as i32 - point.x - 1,
+                bbox.top_left.y * 2 + bbox.size.height as i32 - point.y,
+                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
             ),
-        })
+        }
     }
 
-    pub fn mirror(self, horizontal: bool) -> TransformingAdaptor<Self, impl Fn(Point) -> Point>
-    where
-        D: DrawTarget + Dimensions,
-        T: Fn(Point) -> Point,
-    {
-        let bbox = self.display.bounding_box();
+    fn transform_rect(&self, rect: &Rectangle, bbox: &Rectangle) -> Rectangle {
+        let point1 = self.transform(rect.top_left, bbox);
+        let point2 = self.transform(rect.top_left + rect.size, bbox);
 
-        TransformingAdaptor::new(self, move |point: Point| {
-            Point::new(
-                if horizontal {
-                    bbox.top_left.x + bbox.size.width as i32 - point.x - 1
-                } else {
-                    point.x
-                },
-                if horizontal {
-                    point.y
-                } else {
-                    bbox.top_left.y + bbox.size.height as i32 - point.y - 1
-                },
-            )
-        })
-    }
+        let x1 = min(point1.x, point2.x);
+        let y1 = min(point1.y, point2.y);
 
-    pub fn scale(self, to: Size) -> TransformingAdaptor<Self, impl Fn(Point) -> Point>
-    where
-        D: DrawTarget + Dimensions,
-        T: Fn(Point) -> Point,
-    {
-        let bbox = self.display.bounding_box();
+        let x2 = max(point1.x, point2.x);
+        let y2 = max(point1.y, point2.y);
 
-        self.scale_from(bbox.size, to)
-    }
-
-    pub fn scale_from(
-        self,
-        from: Size,
-        to: Size,
-    ) -> TransformingAdaptor<Self, impl Fn(Point) -> Point>
-    where
-        D: DrawTarget + Dimensions,
-        T: Fn(Point) -> Point,
-    {
-        let bbox = self.display.bounding_box();
-
-        TransformingAdaptor::new(self, move |point: Point| {
-            Point::new(
-                bbox.top_left.x + (point.x - bbox.top_left.x) * to.width as i32 / from.width as i32,
-                bbox.top_left.y
-                    + (point.y - bbox.top_left.y) * to.height as i32 / from.height as i32,
-            )
-        })
-    }
-
-    fn transform_rect(&self, rect: &Rectangle) -> Rectangle
-    where
-        T: Fn(Point) -> Point,
-    {
-        let p1 = (self.transform)(rect.top_left);
-        let p2 = (self.transform)(Point::new(
-            rect.top_left.x + rect.size.width as i32,
-            rect.top_left.y + rect.size.height as i32,
-        ));
-
-        let p1f = Point::new(i32::min(p1.x, p2.x), i32::min(p1.y, p2.y));
-        let p2f = Point::new(i32::max(p1.x, p2.x), i32::max(p1.y, p2.y));
-
-        Rectangle::new(
-            p1f,
-            Size::new((p2f.x - p1f.x) as u32, (p2f.y - p1f.y) as u32),
-        )
+        Rectangle::with_corners(Point::new(x1, y1), Point::new(x2, y2))
     }
 }
 
-impl<D, T> DrawTarget for TransformingAdaptor<D, T>
+pub struct Rotated<'a, T>
 where
-    D: DrawTarget,
-    T: Fn(Point) -> Point,
+    T: DrawTarget + Dimensions,
 {
-    type Error = D::Error;
+    parent: &'a mut T,
+    angle: RotateAngle,
+}
 
-    type Color = D::Color;
+impl<'a, T> Rotated<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    pub fn new(parent: &'a mut T, angle: RotateAngle) -> Self {
+        Self { parent, angle }
+    }
+}
+
+impl<'a, T> DrawTarget for Rotated<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    type Error = T::Error;
+
+    type Color = T::Color;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let display = &mut self.display;
-        let transform = &self.transform;
+        let bbox = self.parent.bounding_box();
+        let angle = self.angle;
 
-        display.draw_iter(
+        self.parent.draw_iter(
             pixels
                 .into_iter()
-                .map(|pixel| Pixel((transform)(pixel.0), pixel.1)),
+                .map(|pixel| Pixel(angle.transform(pixel.0, &bbox), pixel.1)),
         )
     }
 
-    #[allow(unconditional_recursion)]
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        DrawTarget::fill_contiguous(self, area, colors)
+        let bbox = self.parent.bounding_box();
+        let angle = self.angle;
+
+        self.parent.draw_iter(
+            area.points()
+                .zip(colors)
+                .map(|(pos, color)| Pixel(angle.transform(pos, &bbox), color)),
+        )
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.fill_solid(&self.transform_rect(area), color)
+        let bbox = self.parent.bounding_box();
+        let angle = self.angle;
+
+        self.parent
+            .fill_solid(&angle.transform_rect(area, &bbox), color)
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.display.clear(color)
+        self.parent.clear(color)
     }
 }
 
-impl<D, T> Dimensions for TransformingAdaptor<D, T>
+impl<'a, T> Dimensions for Rotated<'a, T>
 where
-    D: Dimensions,
-    T: Fn(Point) -> Point,
+    T: DrawTarget + Dimensions,
 {
     fn bounding_box(&self) -> Rectangle {
-        self.display.bounding_box()
+        if self.angle != RotateAngle::Degrees180 {
+            let bbox = self.parent.bounding_box();
+
+            Rectangle::new(
+                Point::new(bbox.top_left.y, bbox.top_left.x),
+                Size::new(bbox.size.height, bbox.size.width),
+            )
+        } else {
+            self.parent.bounding_box()
+        }
+    }
+}
+
+//
+// Scaled
+//
+
+pub struct Scaled<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    parent: &'a mut T,
+    size: Size,
+}
+
+impl<'a, T> Scaled<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    pub fn new(parent: &'a mut T, size: Size) -> Self {
+        Self { parent, size }
+    }
+
+    fn scale(point: Point, size: Size, bbox: &Rectangle) -> Point {
+        Point::new(
+            (point.x - bbox.top_left.x) * size.width as i32 / bbox.size.width as i32
+                + bbox.top_left.x,
+            (point.y - bbox.top_left.y) * size.height as i32 / bbox.size.height as i32
+                + bbox.top_left.y,
+        )
+    }
+}
+
+impl<'a, T> DrawTarget for Scaled<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    type Error = T::Error;
+
+    type Color = T::Color;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        let bbox = self.parent.bounding_box();
+        let size = self.size;
+
+        self.parent.draw_iter(
+            pixels
+                .into_iter()
+                .map(|pixel| Pixel(Self::scale(pixel.0, size, &bbox), pixel.1)),
+        )
+    }
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        let bbox = self.parent.bounding_box();
+        let size = self.size;
+
+        self.parent.draw_iter(
+            area.points()
+                .zip(colors)
+                .map(|(pos, color)| Pixel(Self::scale(pos, size, &bbox), color)),
+        )
+    }
+
+    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        let area = Rectangle::new(area.top_left, self.size);
+
+        self.parent.fill_solid(&area, color)
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.parent.clear(color)
+    }
+}
+
+impl<'a, T> Dimensions for Scaled<'a, T>
+where
+    T: DrawTarget + Dimensions,
+{
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(self.parent.bounding_box().top_left, self.size)
+    }
+}
+
+//
+// DrawTargetExt2
+//
+
+pub trait DrawTargetExt2: DrawTarget + Sized {
+    fn rotated(&mut self, angle: RotateAngle) -> Rotated<'_, Self>;
+
+    fn scaled(&mut self, size: Size) -> Scaled<'_, Self>;
+
+    fn flushing<F: FnMut(&mut Self) -> Result<(), Self::Error>>(
+        &mut self,
+        flusher: F,
+    ) -> Flushing<'_, Self, F>;
+
+    fn noop_flushing(&mut self) -> Flushing<'_, Self, fn(&mut Self) -> Result<(), Self::Error>>;
+}
+
+impl<T> DrawTargetExt2 for T
+where
+    T: DrawTarget,
+{
+    fn rotated(&mut self, angle: RotateAngle) -> Rotated<'_, Self> {
+        Rotated::new(self, angle)
+    }
+
+    fn scaled(&mut self, size: Size) -> Scaled<'_, Self> {
+        Scaled::new(self, size)
+    }
+
+    fn flushing<F: FnMut(&mut Self) -> Result<(), Self::Error>>(
+        &mut self,
+        flusher: F,
+    ) -> Flushing<'_, Self, F> {
+        Flushing::new(self, flusher)
+    }
+
+    fn noop_flushing(&mut self) -> Flushing<'_, Self, fn(&mut Self) -> Result<(), Self::Error>> {
+        Flushing::noop(self)
+    }
+}
+
+pub trait OwnedDrawTargetExt: DrawTarget + Sized {
+    fn owned_translated(self, offset: Point) -> Owned<TranslatedT<Self>>;
+
+    fn owned_cropped(self, area: &Rectangle) -> Owned<CroppedT<Self>>;
+
+    fn owned_clipped(self, area: &Rectangle) -> Owned<ClippedT<Self>>;
+
+    fn owned_color_converted<C>(self) -> Owned<ColorConvertedT<Self, C>>
+    where
+        C: PixelColor + Into<Self::Color>;
+
+    fn owned_rotated(self, angle: RotateAngle) -> Owned<RotatedT<Self>>;
+
+    fn owned_scaled(self, size: Size) -> Owned<ScaledT<Self>>;
+
+    fn owned_noop_flushing(self) -> Owned<FlushingT<Self>>;
+}
+
+impl<T> OwnedDrawTargetExt for T
+where
+    T: DrawTarget,
+{
+    fn owned_translated(self, offset: Point) -> Owned<TranslatedT<Self>> {
+        TranslatedT(self, offset).into_owned()
+    }
+
+    fn owned_cropped(self, area: &Rectangle) -> Owned<CroppedT<Self>> {
+        CroppedT(self, *area).into_owned()
+    }
+
+    fn owned_clipped(self, area: &Rectangle) -> Owned<ClippedT<Self>> {
+        ClippedT(self, *area).into_owned()
+    }
+
+    fn owned_color_converted<C>(self) -> Owned<ColorConvertedT<Self, C>>
+    where
+        C: PixelColor + Into<Self::Color>,
+    {
+        ColorConvertedT(self, PhantomData::<C>).into_owned()
+    }
+
+    fn owned_rotated(self, angle: RotateAngle) -> Owned<RotatedT<Self>> {
+        RotatedT(self, angle).into_owned()
+    }
+
+    fn owned_scaled(self, size: Size) -> Owned<ScaledT<Self>> {
+        ScaledT(self, size).into_owned()
+    }
+
+    fn owned_noop_flushing(self) -> Owned<FlushingT<Self>> {
+        FlushingT(self).into_owned()
     }
 }

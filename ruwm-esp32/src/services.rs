@@ -9,7 +9,6 @@ use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
-use embedded_graphics::pixelcolor::Rgb565;
 use mipidsi::{Display, DisplayOptions};
 
 use display_interface_spi::SPIInterfaceNoCS;
@@ -51,7 +50,7 @@ use ruwm::button::PressedLevel;
 use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{Color, ColorAdaptor, FlushableAdaptor, FlushableDrawTarget};
+use ruwm::screen::{Color, Flushable, OwnedDrawTargetExt};
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
@@ -207,7 +206,7 @@ pub fn button<'d, P: InputPin + OutputPin>(
 
 pub fn display(
     peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
-) -> Result<impl FlushableDrawTarget<Color = Color, Error = impl Debug> + 'static, InitError> {
+) -> Result<impl Flushable<Color = Color, Error = impl Debug + 'static> + 'static, InitError> {
     if let Some(backlight) = peripherals.control.backlight {
         let mut backlight = PinDriver::output(backlight)?;
 
@@ -245,21 +244,17 @@ pub fn display(
         .init(&mut delay::Ets, DisplayOptions::default())
         .unwrap();
 
-    // The TTGO board's screen does not start at offset 0x0, and the physical size is 135x240, instead of 240x320
     #[cfg(feature = "ttgo")]
-    let display = ruwm::screen::CroppedAdaptor::new(
-        embedded_graphics::primitives::Rectangle::new(
+    let mut display = {
+        let rect = embedded_graphics::primitives::Rectangle::new(
             embedded_graphics::prelude::Point::new(52, 40),
             embedded_graphics::prelude::Size::new(135, 240),
-        ),
-        display,
-    );
+        );
 
-    // TODO: Double-buffer
-    let display = FlushableAdaptor::noop(ColorAdaptor::new(
-        |color| Color::into_rgb(color, Rgb565::new),
-        display,
-    ));
+        display.owned_cropped(display, &rect)
+    };
+
+    let display = display.owned_color_converted().owned_noop_flushing();
 
     Ok(display)
 }
