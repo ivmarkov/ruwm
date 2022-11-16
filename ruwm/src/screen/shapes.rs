@@ -100,7 +100,9 @@ pub mod util {
     use embedded_graphics::mono_font::{MonoFont, MonoTextStyleBuilder};
     use embedded_graphics::prelude::{DrawTarget, DrawTargetExt, Point, Size};
     use embedded_graphics::primitives::{Primitive, PrimitiveStyle, Rectangle};
-    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder};
+    use embedded_graphics::text::{
+        Alignment, Baseline, LineHeight, Text, TextStyle, TextStyleBuilder,
+    };
     use embedded_graphics::Drawable;
 
     use super::Color;
@@ -153,11 +155,15 @@ pub mod util {
             .text_color(color)
             .build();
 
-        let text_style = text_style.unwrap_or_else(|| {
-            TextStyleBuilder::new()
-                .baseline(Baseline::Top)
-                .alignment(Alignment::Left)
-                .build()
+        let (text_style, position) = text_style.map(|ts| (ts, position)).unwrap_or_else(|| {
+            (
+                TextStyleBuilder::new()
+                    .baseline(Baseline::Top)
+                    .alignment(Alignment::Left)
+                    .line_height(LineHeight::Pixels(font.character_size.height))
+                    .build(),
+                position, // + Size::new(0, font.character_size.height),
+            )
         });
 
         Text::with_text_style(text, position, character_style, text_style).draw(target)?;

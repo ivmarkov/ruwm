@@ -237,15 +237,7 @@ where
     D::Error: Debug + Send + 'static,
 {
     loop {
-        DRAW_REQUEST_NOTIF.wait().await;
-
-        let screen_state = STATE.lock(|screen_state| {
-            let screen_state_prev = screen_state.borrow().clone();
-
-            screen_state.borrow_mut().changeset = EnumSet::empty();
-
-            screen_state_prev
-        });
+        let screen_state = wait_change().await;
 
         display = unblocker
             .unblock(move || draw(display, screen_state))
@@ -260,18 +252,22 @@ where
     D::Error: Debug,
 {
     loop {
-        DRAW_REQUEST_NOTIF.wait().await;
-
-        let screen_state = STATE.lock(|screen_state| {
-            let screen_state_prev = screen_state.borrow().clone();
-
-            screen_state.borrow_mut().changeset = EnumSet::empty();
-
-            screen_state_prev
-        });
+        let screen_state = wait_change().await;
 
         display = draw(display, screen_state).unwrap();
     }
+}
+
+async fn wait_change() -> ScreenState {
+    DRAW_REQUEST_NOTIF.wait().await;
+
+    STATE.lock(|screen_state| {
+        let screen_state_prev = screen_state.borrow().clone();
+
+        screen_state.borrow_mut().changeset = EnumSet::empty();
+
+        screen_state_prev
+    })
 }
 
 fn draw<D>(mut display: D, screen_state: ScreenState) -> Result<D, D::Error>
@@ -291,6 +287,7 @@ where
             screen_state.valve().as_ref(),
             screen_state.wm().as_ref(),
             screen_state.battery().as_ref(),
+            screen_state.remaining_time().as_ref(),
         )?,
         Page::Battery => Battery::draw(&mut display, screen_state.battery().as_ref())?,
     }
