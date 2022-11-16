@@ -1,7 +1,8 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embedded_graphics::prelude::{DrawTargetExt, Point};
+use embedded_graphics::prelude::{DrawTargetExt, Point, Size};
+use embedded_graphics::primitives::Rectangle;
 use serde::{Deserialize, Serialize};
 
 use log::trace;
@@ -297,15 +298,32 @@ where
     if let Some((actions, action)) = screen_state.page_actions {
         let bbox = display.bounding_box();
 
+        let Size { width, .. } = bbox.size;
+
+        let font = if width <= 128 {
+            profont::PROFONT_12_POINT
+        } else {
+            profont::PROFONT_24_POINT
+        };
+
+        let bbox = display.bounding_box();
+
         let actions_shape = Actions {
             enabled: actions,
             selected: action,
+            font,
             ..Default::default()
         };
 
-        let mut target = display.translated(Point::new(
-            (bbox.size.width as i32 - actions_shape.width as i32) / 2,
-            (bbox.size.height as i32 - actions_shape.height() as i32) / 2,
+        let actions_shape_size =
+            Size::new(bbox.size.width - 10, actions_shape.preferred_size().height);
+
+        let mut target = display.cropped(&Rectangle::new(
+            Point::new(
+                (bbox.size.width as i32 - actions_shape_size.width as i32) / 2,
+                (bbox.size.height as i32 - actions_shape_size.height as i32) / 2,
+            ),
+            actions_shape_size,
         ));
 
         actions_shape.draw(&mut target)?;

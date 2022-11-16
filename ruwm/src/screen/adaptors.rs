@@ -8,7 +8,9 @@ use log::trace;
 use embedded_graphics::draw_target::{
     Clipped, ColorConverted, Cropped, DrawTarget, DrawTargetExt, Translated,
 };
-use embedded_graphics::prelude::{Dimensions, IntoStorage, PixelColor, Point, RawData, Size};
+use embedded_graphics::prelude::{
+    Dimensions, IntoStorage, OriginDimensions, PixelColor, Point, RawData, Size,
+};
 use embedded_graphics::primitives::{PointsIter, Rectangle};
 use embedded_graphics::Pixel;
 
@@ -652,26 +654,34 @@ pub enum RotateAngle {
 }
 
 impl RotateAngle {
-    fn transform(&self, point: Point, bbox: &Rectangle) -> Point {
+    fn transform(&self, point: Point, pdim: &Rectangle) -> Point {
         match self {
             RotateAngle::Degrees90 => Point::new(
-                point.y,
-                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
+                pdim.top_left.x + pdim.size.width as i32 - point.y,
+                pdim.top_left.y + point.x,
             ),
             RotateAngle::Degrees180 => Point::new(
-                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
-                bbox.top_left.y * 2 + bbox.size.height as i32 - point.y,
+                pdim.top_left.x + pdim.size.height as i32 - point.x,
+                pdim.top_left.y + pdim.size.width as i32 - point.y,
             ),
             RotateAngle::Degrees270 => Point::new(
-                bbox.top_left.y * 2 + bbox.size.height as i32 - point.y,
-                bbox.top_left.x * 2 + bbox.size.width as i32 - point.x,
+                pdim.top_left.x + point.y,
+                pdim.top_left.y + pdim.size.height as i32 - point.x,
             ),
         }
     }
 
-    fn transform_rect(&self, rect: &Rectangle, bbox: &Rectangle) -> Rectangle {
-        let point1 = self.transform(rect.top_left, bbox);
-        let point2 = self.transform(rect.top_left + rect.size, bbox);
+    fn transform_size(&self, size: Size) -> Size {
+        if *self != RotateAngle::Degrees180 {
+            Size::new(size.height, size.width)
+        } else {
+            size
+        }
+    }
+
+    fn transform_rect(&self, rect: &Rectangle, pdim: &Rectangle) -> Rectangle {
+        let point1 = self.transform(rect.top_left, pdim);
+        let point2 = self.transform(rect.top_left + rect.size, pdim);
 
         let x1 = min(point1.x, point2.x);
         let y1 = min(point1.y, point2.y);
@@ -711,13 +721,13 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let bbox = self.parent.bounding_box();
+        let pdim = self.parent.bounding_box();
         let angle = self.angle;
 
         self.parent.draw_iter(
             pixels
                 .into_iter()
-                .map(|pixel| Pixel(angle.transform(pixel.0, &bbox), pixel.1)),
+                .map(|pixel| Pixel(angle.transform(pixel.0, &pdim), pixel.1)),
         )
     }
 
@@ -725,22 +735,22 @@ where
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        let bbox = self.parent.bounding_box();
+        let pdim = self.parent.bounding_box();
         let angle = self.angle;
 
         self.parent.draw_iter(
             area.points()
                 .zip(colors)
-                .map(|(pos, color)| Pixel(angle.transform(pos, &bbox), color)),
+                .map(|(pos, color)| Pixel(angle.transform(pos, &pdim), color)),
         )
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        let bbox = self.parent.bounding_box();
+        let pdim = self.parent.bounding_box();
         let angle = self.angle;
 
         self.parent
-            .fill_solid(&angle.transform_rect(area, &bbox), color)
+            .fill_solid(&angle.transform_rect(area, &pdim), color)
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
@@ -748,21 +758,14 @@ where
     }
 }
 
-impl<'a, T> Dimensions for Rotated<'a, T>
+impl<'a, T> OriginDimensions for Rotated<'a, T>
 where
     T: DrawTarget,
 {
-    fn bounding_box(&self) -> Rectangle {
-        if self.angle != RotateAngle::Degrees180 {
-            let bbox = self.parent.bounding_box();
+    fn size(&self) -> Size {
+        let bbox = self.parent.bounding_box();
 
-            Rectangle::new(
-                Point::new(bbox.top_left.y, bbox.top_left.x),
-                Size::new(bbox.size.height, bbox.size.width),
-            )
-        } else {
-            self.parent.bounding_box()
-        }
+        self.angle.transform_size(bbox.size)
     }
 }
 
@@ -786,12 +789,10 @@ where
         Self { parent, size }
     }
 
-    fn scale(point: Point, size: Size, bbox: &Rectangle) -> Point {
+    fn transform(point: Point, size: Size, pdim: &Rectangle) -> Point {
         Point::new(
-            (point.x - bbox.top_left.x) * size.width as i32 / bbox.size.width as i32
-                + bbox.top_left.x,
-            (point.y - bbox.top_left.y) * size.height as i32 / bbox.size.height as i32
-                + bbox.top_left.y,
+            pdim.top_left.x + point.x * size.width as i32 / pdim.size.width as i32,
+            pdim.top_left.y + point.y * size.height as i32 / pdim.size.height as i32,
         )
     }
 }
@@ -807,13 +808,13 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let bbox = self.parent.bounding_box();
+        let pdim = self.parent.bounding_box();
         let size = self.size;
 
         self.parent.draw_iter(
             pixels
                 .into_iter()
-                .map(|pixel| Pixel(Self::scale(pixel.0, size, &bbox), pixel.1)),
+                .map(|pixel| Pixel(Self::transform(pixel.0, size, &pdim), pixel.1)),
         )
     }
 
@@ -821,13 +822,13 @@ where
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        let bbox = self.parent.bounding_box();
+        let pdim = self.parent.bounding_box();
         let size = self.size;
 
         self.parent.draw_iter(
             area.points()
                 .zip(colors)
-                .map(|(pos, color)| Pixel(Self::scale(pos, size, &bbox), color)),
+                .map(|(pos, color)| Pixel(Self::transform(pos, size, &pdim), color)),
         )
     }
 
@@ -842,12 +843,12 @@ where
     }
 }
 
-impl<'a, T> Dimensions for Scaled<'a, T>
+impl<'a, T> OriginDimensions for Scaled<'a, T>
 where
     T: DrawTarget,
 {
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.parent.bounding_box().top_left, self.size)
+    fn size(&self) -> Size {
+        self.size
     }
 }
 

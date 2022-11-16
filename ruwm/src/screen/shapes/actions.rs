@@ -1,6 +1,6 @@
 use core::str;
 
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::*;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
@@ -10,7 +10,7 @@ use valve::{ValveCommand, ValveState};
 use crate::dto::water_meter::WaterMeterCommand;
 use crate::{valve, wm};
 
-use super::util::{clear, fill, text};
+use super::util::{clear_cropped, fill, text};
 use super::Color;
 
 #[derive(Debug, EnumSetType)]
@@ -129,7 +129,6 @@ impl Action {
 }
 
 pub struct Actions<'a> {
-    pub width: u32,
     pub enabled: EnumSet<Action>,
     pub selected: Action,
     pub divider: u32,
@@ -141,7 +140,6 @@ pub struct Actions<'a> {
 impl<'a> Actions<'a> {
     pub fn new() -> Self {
         Self {
-            width: 200,
             enabled: EnumSet::all(),
             selected: Action::Dismiss,
             divider: 1,
@@ -151,28 +149,25 @@ impl<'a> Actions<'a> {
         }
     }
 
-    pub fn height(&self) -> u32 {
-        self.font.character_size.height * self.enabled.len() as u32
-            + self.padding * 2
-            + self.outline * 2
+    pub fn preferred_size(&self) -> Size {
+        let width = self
+            .enabled
+            .iter()
+            .map(|action| action.text().len())
+            .max()
+            .unwrap_or(0) as u32;
+        let height = self.font.character_size.height * self.enabled.len() as u32;
+
+        Size::new(width, height)
+            + Size::new(self.padding, self.padding) * 2
+            + Size::new(self.outline, self.outline) * 2
     }
 
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Color>,
     {
-        let height = self.height();
-
-        // Clear the area
-        clear(
-            &Rectangle::new(Point::new(0, 0), Size::new(self.width, height)),
-            target,
-        )?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            Size::new(self.width - self.padding * 2, height - self.padding * 2),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>

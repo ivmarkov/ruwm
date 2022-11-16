@@ -1,13 +1,13 @@
 use core::str;
 
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::*;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
 use embedded_graphics::Drawable;
 
-use super::util::{clear, draw, fill, text, to_str};
+use super::util::{clear_cropped, draw, fill, text, to_str};
 use super::Color;
 
 pub struct WaterMeterClassic<'a, const DIGITS: usize = 8> {
@@ -29,7 +29,7 @@ impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
         }
     }
 
-    pub fn size(&self) -> Size {
+    pub fn preferred_size(&self) -> Size {
         let width = self.font.character_size.width * DIGITS as u32 + self.padding * 2;
         let height = self.font.character_size.height + self.padding * 2;
 
@@ -40,18 +40,7 @@ impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
     where
         D: DrawTarget<Color = Color>,
     {
-        let size = self.size();
-
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), size), target)?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            Size::new(
-                size.width - self.padding * 2,
-                size.height - self.padding * 2,
-            ),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -91,7 +80,7 @@ impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
         text(
             &self.font,
             target,
-            Point::zero(),
+            bbox.top_left,
             str::from_utf8(&wm_text).unwrap(),
             Color::White,
             None,
@@ -126,7 +115,7 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
         }
     }
 
-    pub fn size(&self) -> Size {
+    pub fn preferred_size(&self) -> Size {
         let width = self.font.character_size.width * DIGITS as u32 + self.padding * 2;
         let height = self.font.character_size.height + self.padding * 2;
 
@@ -137,18 +126,7 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
     where
         D: DrawTarget<Color = Color>,
     {
-        let size = self.size();
-
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), size), target)?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            Size::new(
-                size.width - self.padding * 2,
-                size.height - self.padding * 2,
-            ),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -188,7 +166,7 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
         text(
             &self.font,
             target,
-            Point::zero(),
+            bbox.top_left,
             str::from_utf8(&wm_text).unwrap(),
             Color::White,
             None,

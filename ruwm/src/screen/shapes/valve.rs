@@ -1,15 +1,14 @@
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::MonoFont;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 
-use super::util::{clear, fill, text};
+use super::util::{clear, clear_cropped, fill, text};
 use super::Color;
 
 #[derive(Clone, Debug)]
 pub struct Valve<'a> {
     pub font: MonoFont<'a>,
-    pub size: Size,
     pub padding: u32,
     pub outline: u32,
     pub handle_area: Size,
@@ -26,7 +25,6 @@ impl<'a> Valve<'a> {
     pub const fn new() -> Self {
         Self {
             font: profont::PROFONT_18_POINT,
-            size: Size::new(80, 60),
             padding: 10,
             outline: 4,
             handle_area: Size::new(20, 10),
@@ -38,13 +36,7 @@ impl<'a> Valve<'a> {
     where
         D: DrawTarget<Color = Color>,
     {
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            self.padded_size(),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -251,12 +243,5 @@ impl<'a> Valve<'a> {
         // };
 
         Ok(())
-    }
-
-    fn padded_size(&self) -> Size {
-        Size::new(
-            self.size.width - self.padding * 2,
-            self.size.height - self.padding * 2,
-        )
     }
 }

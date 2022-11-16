@@ -1,14 +1,13 @@
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Arc, Circle, Line, Primitive, PrimitiveStyle, Rectangle};
+use embedded_graphics::primitives::{Arc, Circle, Line, Primitive, PrimitiveStyle};
 use embedded_graphics::Drawable;
 
-use super::util::clear;
+use super::util::clear_cropped;
 use super::Color;
 
 #[derive(Clone, Debug)]
 pub struct Wifi {
-    pub size: Size,
     pub padding: u32,
     pub outline: u32,
     pub strength: Option<u8>,
@@ -23,7 +22,6 @@ impl Default for Wifi {
 impl Wifi {
     pub const fn new() -> Self {
         Self {
-            size: Size::new(100, 100),
             padding: 10,
             outline: 4,
             strength: Some(100),
@@ -34,19 +32,7 @@ impl Wifi {
     where
         D: DrawTarget<Color = Color>,
     {
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
-
-        let rect = Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            self.padded_size(),
-        );
-
-        self.draw_shape(
-            &mut target
-                //.clipped(&rect)
-                .cropped(&rect),
-        )
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -121,12 +107,5 @@ impl Wifi {
         Arc::with_center(center, diameter, 45.0.deg(), 90.0.deg())
             .into_styled(PrimitiveStyle::with_stroke(color, self.outline))
             .draw(target)
-    }
-
-    fn padded_size(&self) -> Size {
-        Size::new(
-            self.size.width - self.padding * 2,
-            self.size.height - self.padding * 2,
-        )
     }
 }

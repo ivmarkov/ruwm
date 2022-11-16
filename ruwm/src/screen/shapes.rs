@@ -96,8 +96,9 @@ impl From<Color> for Rgb888 {
 }
 
 pub mod util {
+    use embedded_graphics::draw_target::Cropped;
     use embedded_graphics::mono_font::{MonoFont, MonoTextStyleBuilder};
-    use embedded_graphics::prelude::{DrawTarget, Point};
+    use embedded_graphics::prelude::{DrawTarget, DrawTargetExt, Point, Size};
     use embedded_graphics::primitives::{Primitive, PrimitiveStyle, Rectangle};
     use embedded_graphics::text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder};
     use embedded_graphics::Drawable;
@@ -182,5 +183,22 @@ pub mod util {
         }
 
         len
+    }
+
+    pub fn clear_cropped<'a, D>(target: &'a mut D, padding: u32) -> Result<Cropped<'a, D>, D::Error>
+    where
+        D: DrawTarget<Color = Color>,
+    {
+        let bbox = target.bounding_box();
+
+        // Clear the area
+        clear(&bbox, target)?;
+
+        let padding = Size::new(padding as _, padding as _);
+
+        Ok(target.cropped(&Rectangle::new(
+            bbox.top_left + padding,
+            bbox.size - padding * 2,
+        )))
     }
 }

@@ -1,12 +1,12 @@
 use core::str;
 
-use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::*;
 use embedded_graphics::prelude::{OriginDimensions, Point, Size};
-use embedded_graphics::primitives::{Line, Primitive, PrimitiveStyle, Rectangle};
+use embedded_graphics::primitives::{Line, Primitive, PrimitiveStyle};
 use embedded_graphics::Drawable;
 
-use super::util::{clear, draw, text};
+use super::util::{clear_cropped, draw, text};
 use super::Color;
 
 pub struct Textbox<'a> {
@@ -32,7 +32,7 @@ impl<'a> Textbox<'a> {
         }
     }
 
-    pub fn size(&self) -> Size {
+    pub fn preferred_size(&self) -> Size {
         let width = self.font.character_size.width * self.text.len() as u32 + self.padding * 2;
         let height = self.font.character_size.height + self.padding * 2;
 
@@ -43,18 +43,7 @@ impl<'a> Textbox<'a> {
     where
         D: DrawTarget<Color = Color>,
     {
-        let size = self.size();
-
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), size), target)?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            Size::new(
-                size.width - self.padding * 2,
-                size.height - self.padding * 2,
-            ),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -70,7 +59,7 @@ impl<'a> Textbox<'a> {
         text(
             &self.font,
             target,
-            Point::zero(),
+            bbox.top_left,
             self.text,
             self.color,
             None,

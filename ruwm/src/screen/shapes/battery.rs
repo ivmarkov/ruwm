@@ -6,7 +6,7 @@ use embedded_graphics::prelude::{OriginDimensions, Point, Size};
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::text::{Alignment, Baseline, TextStyleBuilder};
 
-use super::util::{clear, fill, text, to_str};
+use super::util::{clear, clear_cropped, fill, text, to_str};
 use super::Color;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -18,7 +18,6 @@ pub enum BatteryChargedText {
 
 #[derive(Clone, Debug)]
 pub struct Battery<'a> {
-    pub size: Size,
     pub padding: u32,
     pub outline: u32,
     pub distinct_outline: bool,
@@ -32,7 +31,6 @@ pub struct Battery<'a> {
 impl<'a> Battery<'a> {
     pub const fn new() -> Self {
         Self {
-            size: Size::new(100, 200),
             padding: 10,
             outline: 2,
             distinct_outline: true,
@@ -48,13 +46,7 @@ impl<'a> Battery<'a> {
     where
         D: DrawTarget<Color = Color>,
     {
-        // Clear the area
-        clear(&Rectangle::new(Point::new(0, 0), self.size), target)?;
-
-        self.draw_shape(&mut target.cropped(&Rectangle::new(
-            Point::new(self.padding as _, self.padding as _),
-            self.padded_size(),
-        )))
+        self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
     fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -261,13 +253,6 @@ impl<'a> Battery<'a> {
         } else {
             text(&self.font, target, position, "?", color, text_style)
         }
-    }
-
-    fn padded_size(&self) -> Size {
-        Size::new(
-            self.size.width - self.padding * 2,
-            self.size.height - self.padding * 2,
-        )
     }
 }
 
