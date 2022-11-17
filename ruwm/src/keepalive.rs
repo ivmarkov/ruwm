@@ -10,7 +10,6 @@ use crate::state::State;
 use crate::{battery, quit};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
-const REMAINING_TIME_TRIGGER: Duration = Duration::from_secs(1);
 
 pub static STATE: State<RemainingTime> = State::new(
     "REMAINING TIME",
