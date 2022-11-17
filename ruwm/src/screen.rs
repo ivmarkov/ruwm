@@ -289,7 +289,9 @@ where
             screen_state.battery().as_ref(),
             screen_state.remaining_time().as_ref(),
         )?,
-        Page::Battery => Battery::draw(&mut display, page_changed, screen_state.battery().as_ref())?,
+        Page::Battery => {
+            Battery::draw(&mut display, page_changed, screen_state.battery().as_ref())?
+        }
     }
 
     if let Some((actions, action)) = screen_state.page_actions {

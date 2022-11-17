@@ -1,14 +1,22 @@
 pub use battery::*;
-use embedded_graphics::{prelude::{DrawTarget, Size, DrawTargetExt, Point}, draw_target::Cropped, primitives::Rectangle};
+use embedded_graphics::{
+    draw_target::Cropped,
+    prelude::{DrawTarget, DrawTargetExt, Point, Size},
+    primitives::Rectangle,
+};
 pub use summary::*;
 
-use super::{Color, shapes::Textbox};
+use super::{shapes::Textbox, Color};
 
 pub mod actions;
 mod battery;
 mod summary;
 
-pub fn with_title<'a, T>(target: &'a mut T, page_changed: bool, title: &str) -> Result<Cropped<'a, T>, T::Error>
+pub fn with_title<'a, T>(
+    target: &'a mut T,
+    page_changed: bool,
+    title: &str,
+) -> Result<Cropped<'a, T>, T::Error>
 where
     T: DrawTarget<Color = Color>,
 {
@@ -36,7 +44,10 @@ where
     if page_changed {
         title_shape.draw(&mut target.cropped(&Rectangle::new(
             bbox.top_left + Size::new(padding, padding),
-            Size::new(bbox.size.width - padding * 2, title_shape.preferred_size().height),
+            Size::new(
+                bbox.size.width - padding * 2,
+                title_shape.preferred_size().height,
+            ),
         )))?;
     }
 

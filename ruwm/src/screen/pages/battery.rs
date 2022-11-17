@@ -8,7 +8,11 @@ use super::with_title;
 pub struct Battery;
 
 impl Battery {
-    pub fn draw<T>(target: &mut T, page_changed: bool, state: Option<&BatteryState>) -> Result<(), T::Error>
+    pub fn draw<T>(
+        target: &mut T,
+        page_changed: bool,
+        state: Option<&BatteryState>,
+    ) -> Result<(), T::Error>
     where
         T: DrawTarget<Color = Color>,
     {

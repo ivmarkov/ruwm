@@ -100,9 +100,7 @@ pub mod util {
     use embedded_graphics::mono_font::{MonoFont, MonoTextStyleBuilder};
     use embedded_graphics::prelude::{DrawTarget, DrawTargetExt, Point, Size};
     use embedded_graphics::primitives::{Primitive, PrimitiveStyle, Rectangle};
-    use embedded_graphics::text::{
-        Alignment, Baseline, Text, TextStyle, TextStyleBuilder,
-    };
+    use embedded_graphics::text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder};
     use embedded_graphics::Drawable;
 
     use super::Color;
