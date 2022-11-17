@@ -28,16 +28,16 @@ impl Wifi {
         }
     }
 
-    pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
-    fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
+    fn draw_shape<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        T: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
         let Size { width, height } = bbox.size;
@@ -88,15 +88,15 @@ impl Wifi {
         Ok(())
     }
 
-    fn draw_arc<D>(
+    fn draw_arc<T>(
         &self,
         center: Point,
         diameter: u32,
         strong_signal: bool,
-        target: &mut D,
-    ) -> Result<(), D::Error>
+        target: &mut T,
+    ) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         let color = if strong_signal {
             Color::White

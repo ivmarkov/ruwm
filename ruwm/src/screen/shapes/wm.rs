@@ -36,16 +36,16 @@ impl<'a, const DIGITS: usize> WaterMeterClassic<'a, DIGITS> {
         Size::new(width, height)
     }
 
-    pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
-    fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
+    fn draw_shape<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        T: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
 
@@ -122,16 +122,16 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
         Size::new(width, height)
     }
 
-    pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
-    fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
+    fn draw_shape<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        T: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
 
@@ -175,15 +175,15 @@ impl<'a, const DIGITS: usize> WaterMeterFract<'a, DIGITS> {
         Ok(())
     }
 
-    fn draw_text<D>(
+    fn draw_text<T>(
         &self,
-        target: &mut D,
+        target: &mut T,
         position: Point,
         text: &str,
         color: Color,
-    ) -> Result<(), D::Error>
+    ) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         let character_style = MonoTextStyleBuilder::new()
             .font(&self.font)

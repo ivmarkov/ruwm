@@ -39,16 +39,16 @@ impl<'a> Textbox<'a> {
         Size::new(width, height)
     }
 
-    pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
-    fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
+    fn draw_shape<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        T: DrawTarget<Color = Color> + OriginDimensions,
     {
         let bbox = target.bounding_box();
 

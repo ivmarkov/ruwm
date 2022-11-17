@@ -1,8 +1,6 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embedded_graphics::prelude::{DrawTargetExt, Point, Size};
-use embedded_graphics::primitives::Rectangle;
 use serde::{Deserialize, Serialize};
 
 use log::trace;
@@ -20,7 +18,6 @@ use channel_bridge::notification::Notification;
 use crate::battery::{self, BatteryState};
 use crate::keepalive::{self, RemainingTime};
 use crate::screen::shapes::util::clear;
-use crate::screen::shapes::Actions;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
 
@@ -277,53 +274,26 @@ where
 {
     trace!("DRAWING: {:?}", screen_state);
 
-    if screen_state.changeset.contains(DataSource::Page) {
+    let page_changed = screen_state.changeset.contains(DataSource::Page);
+
+    if page_changed {
         clear(&display.bounding_box(), &mut display)?;
     }
 
     match screen_state.active_page {
         Page::Summary => Summary::draw(
             &mut display,
+            page_changed,
             screen_state.valve().as_ref(),
             screen_state.wm().as_ref(),
             screen_state.battery().as_ref(),
             screen_state.remaining_time().as_ref(),
         )?,
-        Page::Battery => Battery::draw(&mut display, screen_state.battery().as_ref())?,
+        Page::Battery => Battery::draw(&mut display, page_changed, screen_state.battery().as_ref())?,
     }
 
     if let Some((actions, action)) = screen_state.page_actions {
-        let bbox = display.bounding_box();
-
-        let Size { width, .. } = bbox.size;
-
-        let font = if width <= 128 {
-            profont::PROFONT_12_POINT
-        } else {
-            profont::PROFONT_24_POINT
-        };
-
-        let bbox = display.bounding_box();
-
-        let actions_shape = Actions {
-            enabled: actions,
-            selected: action,
-            font,
-            ..Default::default()
-        };
-
-        let actions_shape_size =
-            Size::new(bbox.size.width - 10, actions_shape.preferred_size().height);
-
-        let mut target = display.cropped(&Rectangle::new(
-            Point::new(
-                (bbox.size.width as i32 - actions_shape_size.width as i32) / 2,
-                (bbox.size.height as i32 - actions_shape_size.height as i32) / 2,
-            ),
-            actions_shape_size,
-        ));
-
-        actions_shape.draw(&mut target)?;
+        pages::actions::draw(&mut display, actions, action)?;
     }
 
     display.flush()?;

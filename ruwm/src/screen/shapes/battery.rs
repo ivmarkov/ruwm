@@ -42,16 +42,16 @@ impl<'a> Battery<'a> {
         }
     }
 
-    pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         self.draw_shape(&mut clear_cropped(target, self.padding)?)
     }
 
-    fn draw_shape<D>(&self, target: &mut D) -> Result<(), D::Error>
+    fn draw_shape<T>(&self, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color> + OriginDimensions,
+        T: DrawTarget<Color = Color> + OriginDimensions,
     {
         let Size { width, height } = target.size();
 
@@ -220,14 +220,14 @@ impl<'a> Battery<'a> {
         Ok(())
     }
 
-    fn draw_percentage<D>(
+    fn draw_percentage<T>(
         &self,
-        target: &mut D,
+        target: &mut T,
         position: Point,
         color: Color,
-    ) -> Result<(), D::Error>
+    ) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         let text_style = Some(
             TextStyleBuilder::new()

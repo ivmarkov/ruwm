@@ -101,22 +101,22 @@ pub mod util {
     use embedded_graphics::prelude::{DrawTarget, DrawTargetExt, Point, Size};
     use embedded_graphics::primitives::{Primitive, PrimitiveStyle, Rectangle};
     use embedded_graphics::text::{
-        Alignment, Baseline, LineHeight, Text, TextStyle, TextStyleBuilder,
+        Alignment, Baseline, Text, TextStyle, TextStyleBuilder,
     };
     use embedded_graphics::Drawable;
 
     use super::Color;
 
-    pub fn clear<D>(area: &Rectangle, target: &mut D) -> Result<(), D::Error>
+    pub fn clear<T>(area: &Rectangle, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         fill(area, Color::Black, target)
     }
 
-    pub fn fill<D>(area: &Rectangle, color: D::Color, target: &mut D) -> Result<(), D::Error>
+    pub fn fill<T>(area: &Rectangle, color: T::Color, target: &mut T) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         area.into_styled(PrimitiveStyle::with_fill(color))
             .draw(target)?;
@@ -124,14 +124,14 @@ pub mod util {
         Ok(())
     }
 
-    pub fn draw<D>(
+    pub fn draw<T>(
         area: &Rectangle,
-        color: D::Color,
+        color: T::Color,
         width: u32,
-        target: &mut D,
-    ) -> Result<(), D::Error>
+        target: &mut T,
+    ) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         area.into_styled(PrimitiveStyle::with_stroke(color, width))
             .draw(target)?;
@@ -139,31 +139,27 @@ pub mod util {
         Ok(())
     }
 
-    pub fn text<'a, D>(
+    pub fn text<'a, T>(
         font: &'a MonoFont<'a>,
-        target: &'a mut D,
+        target: &'a mut T,
         position: Point,
         text: &'a str,
-        color: D::Color,
+        color: T::Color,
         text_style: Option<TextStyle>,
-    ) -> Result<(), D::Error>
+    ) -> Result<(), T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         let character_style = MonoTextStyleBuilder::new()
             .font(font)
             .text_color(color)
             .build();
 
-        let (text_style, position) = text_style.map(|ts| (ts, position)).unwrap_or_else(|| {
-            (
-                TextStyleBuilder::new()
-                    .baseline(Baseline::Top)
-                    .alignment(Alignment::Left)
-                    .line_height(LineHeight::Pixels(font.character_size.height))
-                    .build(),
-                position, // + Size::new(0, font.character_size.height),
-            )
+        let text_style = text_style.unwrap_or_else(|| {
+            TextStyleBuilder::new()
+                .baseline(Baseline::Top)
+                .alignment(Alignment::Left)
+                .build()
         });
 
         Text::with_text_style(text, position, character_style, text_style).draw(target)?;
@@ -191,9 +187,9 @@ pub mod util {
         len
     }
 
-    pub fn clear_cropped<'a, D>(target: &'a mut D, padding: u32) -> Result<Cropped<'a, D>, D::Error>
+    pub fn clear_cropped<'a, T>(target: &'a mut T, padding: u32) -> Result<Cropped<'a, T>, T::Error>
     where
-        D: DrawTarget<Color = Color>,
+        T: DrawTarget<Color = Color>,
     {
         let bbox = target.bounding_box();
 

@@ -20,6 +20,7 @@ pub struct Summary;
 impl Summary {
     pub fn draw<D>(
         target: &mut D,
+        _page_changed: bool,
         valve_state: Option<&Option<ValveState>>,
         wm_state: Option<&WaterMeterState>,
         battery_state: Option<&BatteryState>,
@@ -55,7 +56,7 @@ impl Summary {
         let Size { width, .. } = bbox.size;
 
         let (status_font, status_height, status_padding) = if width <= 128 {
-            (profont::PROFONT_10_POINT, 12, 5)
+            (profont::PROFONT_9_POINT, 12, 5)
         } else {
             (profont::PROFONT_14_POINT, 20, 2)
         };
@@ -221,7 +222,7 @@ impl Summary {
         let Size { width, .. } = bbox.size;
 
         let (status_font, status_height, status_padding) = if width <= 128 {
-            (profont::PROFONT_10_POINT, 12, 5)
+            (profont::PROFONT_9_POINT, 12, 5)
         } else {
             (profont::PROFONT_14_POINT, 20, 2)
         };
