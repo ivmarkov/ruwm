@@ -43,7 +43,7 @@ trunk serve -w . -w ../ruwm -w ../ruwm-web
 
 # Faster edit-compile-deploy-test cycle
 
-Note that the demo you are running via Trunk is - in fact - **live**. You can change from e.g. VSCode any part of the app code (its backend that would in reality run on the actual MCU, or the Web UI) and then hit save and - volilla - in a few seconds Trunk will reload the app in the browser!
+Note that the demo you are running via Trunk is - in fact - **live**. You can change from e.g. VSCode any part of the app code (its backend that would in reality run on the actual MCU, or the Web UI) and then hit save and - voila - in a few seconds Trunk will reload the app in the browser!
 
 A bit like Frontend development workflow, but for embedded.
 
