@@ -4,13 +4,11 @@
 [![CI](https://github.com/ivmarkov/ruwm/actions/workflows/ci.yml/badge.svg)](https://github.com/ivmarkov/ruwm/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-esp--rs-brightgreen)](https://ivmarkov.github.io/ruwm/ruwm/index.html)
 
-**WIP**
+**(Work in Progress)**
 
 # [DEMO](https://ivmarkov.github.io/ruwm/demo/) 
 
-Once in, hit F12 in the browser window to open the Dev Tools Console and see the demo logs.
-[![DEMO](ruwm.png)](https://ivmarkov.github.io/ruwm/demo/)
-
+(Once in, hit F12 in the browser window to open the Dev Tools Console and see the demo logs.)
 
 # How to build?
 
