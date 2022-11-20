@@ -4,13 +4,11 @@
 [![CI](https://github.com/ivmarkov/ruwm/actions/workflows/ci.yml/badge.svg)](https://github.com/ivmarkov/ruwm/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-esp--rs-brightgreen)](https://ivmarkov.github.io/ruwm/ruwm/index.html)
 
-**WIP**
+**(Work in Progress)**
 
 # [DEMO](https://ivmarkov.github.io/ruwm/demo/) 
 
-Once in, hit F12 in the browser window to open the Dev Tools Console and see the demo logs.
-[![DEMO](ruwm.png)](https://ivmarkov.github.io/ruwm/demo/)
-
+(Once in, hit F12 in the browser window to open the Dev Tools Console and see the demo logs.)
 
 # How to build?
 
@@ -43,7 +41,7 @@ trunk serve -w . -w ../ruwm -w ../ruwm-web
 
 # Faster edit-compile-deploy-test cycle
 
-Note that the demo you are running via Trunk is - in fact - **live**. You can change from e.g. VSCode any part of the app code (its backend that would in reality run on the actual MCU, or the Web UI) and then hit save and - volilla - in a few seconds Trunk will reload the app in the browser!
+Note that the demo you are running via Trunk is - in fact - **live**. You can change from e.g. VSCode any part of the app code (its backend that would in reality run on the actual MCU, or the Web UI) and then hit save and - voila - in a few seconds Trunk will reload the app in the browser!
 
 A bit like Frontend development workflow, but for embedded.
 
