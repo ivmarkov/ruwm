@@ -17,26 +17,20 @@ exclude = ["ruwm-web", "ruwm-sim"]
 #esp-idf-svc = { path = "../esp-idf-svc" }
 #edge-frame = { path = "../edge-frame/edge-frame" }
 #edge-executor = { path = "../edge-executor" }
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
-esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-embedded-io = { git = "https://github.com/ivmarkov/embedded-io" }
+#embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+#esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
+#esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
+#edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+#embedded-io = { git = "https://github.com/ivmarkov/embedded-io" }
 
 #[patch.'https://github.com/esp-rs/embedded-svc']
 #embedded-svc = { path = "../embedded-svc" }
-
 #[patch.'https://github.com/esp-rs/esp-idf-hal']
 #esp-idf-hal = { path = "../esp-idf-hal" }
-
 #[patch.'https://github.com/esp-rs/esp-idf-svc']
 #esp-idf-svc = { path = "../esp-idf-svc" }
-
 #[patch.'https://github.com/ivmarkov/edge-frame']
 #edge-frame = { path = "../edge-frame/edge-frame" }
-
-#[patch.'https://github.com/ivmarkov/embassy']
-#embassy-time = { path = "../embassy/embassy-time" }
 
 [profile.release]
 opt-level = "s"

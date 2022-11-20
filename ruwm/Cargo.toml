@@ -24,11 +24,11 @@ log = { version = "0.4", optional = true }
 futures = {version = "0.3", optional = true, features = ["async-await"] }
 embedded-hal = { version = "0.2.7", optional = true, features = [ "unproven" ] }
 embedded-svc = { version = "0.23", optional = true, features = ["nightly", "experimental"] }
-edge-frame = { version = "0.4", default-features = false, features = ["dto"], git = "https://github.com/ivmarkov/edge-frame" }
+edge-frame = { version = "0.4", default-features = false, features = ["dto"] }
 embassy-futures = { version = "0.1", optional = true }
 embassy-sync = { version = "0.1", optional = true }
 embassy-time = { version = "0.1", optional = true }
 embedded-graphics = { version = "0.7", optional = true }
 profont = { version = "0.5", optional = true }
 edge-executor = { version = "0.3", optional = true }
-channel-bridge = { version = "0.1", git = "https://github.com/ivmarkov/channel-bridge", default-features = false, features = ["notification", "nightly", "embedded-svc"], optional = true }
+channel-bridge = { version = "0.1", default-features = false, features = ["notification", "nightly", "embedded-svc"], optional = true }

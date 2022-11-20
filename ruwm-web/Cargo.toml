@@ -14,12 +14,6 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 #forced-target = "wasm32-unknown-unknown"
 
-[patch.crates-io]
-#embedded-svc = { path = "../../embedded-svc" }
-#edge-frame = { path = "../../edge-frame/edge-frame" }
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-
 [profile.release]
 lto = true
 opt-level = 'z'
@@ -43,7 +37,7 @@ yewdux-middleware = { version = "0.1" }
 strum = { version = "0.23" }
 serde = "1"
 embedded-svc = { version = "0.23", default-features = false, features = ["std"] }
-edge-frame = { version = "0.4", default-features = false, git = "https://github.com/ivmarkov/edge-frame" }
+edge-frame = { version = "0.4", default-features = false }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false }
 
 # middleware-local

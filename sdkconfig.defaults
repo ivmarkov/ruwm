@@ -18,3 +18,5 @@ CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y
 # Enable posting to event loops directly from an ISR 
 # (the event loop wrapper of `esp-idf-svc` is compatible with this, including the async postbox wrapper)
 CONFIG_ESP_EVENT_POST_FROM_ISR=y
+
+CONFIG_ESP_HTTPS_SERVER_ENABLE=y
