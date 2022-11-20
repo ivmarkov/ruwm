@@ -688,19 +688,19 @@ function getImports() {
         const ret = makeMutClosure(arg0, arg1, 30, __wbg_adapter_20);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper1001 = function(arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper1000 = function(arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 30, __wbg_adapter_23);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper1013 = function(arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper1011 = function(arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 30, __wbg_adapter_20);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper2094 = function(arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper2099 = function(arg0, arg1, arg2) {
         const ret = makeMutClosure(arg0, arg1, 30, __wbg_adapter_28);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper3474 = function(arg0, arg1, arg2) {
+    imports.wbg.__wbindgen_closure_wrapper3476 = function(arg0, arg1, arg2) {
         const ret = makeClosure(arg0, arg1, 89, __wbg_adapter_31);
         return addHeapObject(ret);
     };
@@ -741,7 +741,7 @@ function initSync(module) {
 
 async function init(input) {
     if (typeof input === 'undefined') {
-        input = new URL('ruwm-sim-8e5cddccabd17464_bg.wasm', import.meta.url);
+        input = new URL('ruwm-sim-10477942c8cd207a_bg.wasm', import.meta.url);
     }
     const imports = getImports();
 
