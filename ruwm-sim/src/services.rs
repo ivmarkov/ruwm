@@ -4,6 +4,8 @@ use embassy_time::Duration;
 
 use embedded_graphics_core::pixelcolor::Rgb888;
 
+use gfx_xtra::draw_target::{buffer_size, Flushable, OwnedDrawTargetExt};
+
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use channel_bridge::notification::Notification;
@@ -16,7 +18,7 @@ use hal_sim::gpio::{Input, Pin};
 use ruwm::button::PressedLevel;
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{buffer_size, Color, Flushable, OwnedDrawTargetExt};
+use ruwm::screen::Color;
 use ruwm::valve::ValveState;
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;

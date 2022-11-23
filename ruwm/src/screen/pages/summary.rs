@@ -6,14 +6,13 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 
-use crate::screen::{
-    shapes::{self, BatteryChargedText},
-    DrawTargetExt2,
-};
+use gfx_xtra::draw_target::{DrawTargetExt2, RotateAngle};
+
+use crate::battery::BatteryState;
+use crate::keepalive::RemainingTime;
+use crate::screen::shapes::{self, BatteryChargedText, Color};
 use crate::valve::ValveState;
 use crate::wm::WaterMeterState;
-use crate::{battery::BatteryState, screen::shapes::Color};
-use crate::{keepalive::RemainingTime, screen::RotateAngle};
 
 pub struct Summary;
 

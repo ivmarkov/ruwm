@@ -11,6 +11,8 @@ use embassy_futures::select::select_array;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
+use gfx_xtra::draw_target::Flushable;
+
 use embedded_svc::executor::asynch::Unblocker;
 
 use channel_bridge::notification::Notification;
@@ -21,13 +23,11 @@ use crate::screen::shapes::util::clear;
 use crate::valve::{self, ValveState};
 use crate::wm::{self, WaterMeterState};
 
-pub use adaptors::*;
 pub use shapes::Color;
 
 use self::pages::{Battery, Summary};
 use self::shapes::Action;
 
-mod adaptors;
 mod pages;
 mod shapes;
 

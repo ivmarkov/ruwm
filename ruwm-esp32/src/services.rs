@@ -36,6 +36,8 @@ use esp_idf_svc::wifi::{EspWifi, WifiEvent, WifiWait};
 
 use esp_idf_sys::EspError;
 
+use gfx_xtra::draw_target::{Flushable, OwnedDrawTargetExt};
+
 use edge_frame::assets;
 
 use edge_executor::*;
@@ -46,7 +48,7 @@ use ruwm::button::PressedLevel;
 use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
-use ruwm::screen::{Color, Flushable, OwnedDrawTargetExt};
+use ruwm::screen::Color;
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;

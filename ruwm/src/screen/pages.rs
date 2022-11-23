@@ -1,7 +1,7 @@
 pub use battery::*;
 use embedded_graphics::{
     draw_target::Cropped,
-    prelude::{DrawTarget, DrawTargetExt, Point, Size},
+    prelude::{DrawTarget, DrawTargetExt, Size},
     primitives::Rectangle,
 };
 pub use summary::*;

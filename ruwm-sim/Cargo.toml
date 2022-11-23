@@ -40,6 +40,7 @@ ruwm = { version = "0.2", path = "../ruwm", default-features = false, features =
 ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
 hal-sim = { version = "0.1", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
 embedded-graphics-core = "0.3"
+gfx-xtra = "0.1"
 edge-executor = { version = "0.3", features = ["wasm"] }
 channel-bridge = { version = "0.1", features = ["nightly"]}
 static_cell = "1"

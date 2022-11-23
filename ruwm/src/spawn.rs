@@ -7,6 +7,8 @@ use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::wifi::Wifi as WifiTrait;
 use embedded_svc::ws::asynch::server::Acceptor;
 
+use gfx_xtra::draw_target::Flushable;
+
 use edge_executor::*;
 
 use channel_bridge::asynch::*;
@@ -17,7 +19,7 @@ use wm_stats::WaterMeterStatsState;
 use crate::button::{self, PressedLevel};
 use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
-use crate::screen::{Color, Flushable};
+use crate::screen::Color;
 use crate::web::{self, WebEvent, WebRequest};
 use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
