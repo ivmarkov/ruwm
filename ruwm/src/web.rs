@@ -83,14 +83,14 @@ where
     select(
         receive(receiver, &role, &auth_signal),
         select4(
-            process_auth(&sender, &auth_signal),
-            send_state(&sender, &role, &valve::STATE, valve_state_notif, |state| {
+            process_auth_event(&sender, &auth_signal),
+            process_state_update(&sender, &role, &valve::STATE, valve_state_notif, |state| {
                 WebEvent::ValveState(state)
             }),
-            send_state(&sender, &role, &wm::STATE, wm_state_notif, |state| {
+            process_state_update(&sender, &role, &wm::STATE, wm_state_notif, |state| {
                 WebEvent::WaterMeterState(state)
             }),
-            send_state(
+            process_state_update(
                 &sender,
                 &role,
                 &battery::STATE,
@@ -156,7 +156,7 @@ where
     Ok(())
 }
 
-async fn process_auth<'a, S>(
+async fn process_auth_event<'a, S>(
     sender: &AsyncMutex<impl RawMutex, S>,
     auth_signal: &Signal<CriticalSectionRawMutex, AuthEvent>,
 ) -> Result<(), S::Error>
@@ -172,24 +172,24 @@ where
             _ => WebEvent::RoleState(Role::None),
         };
 
-        web_send_auth(&mut *sender.lock().await, web_event, event.role()).await?;
+        send_event(sender, web_event, event.role()).await?;
 
-        web_send_auth(
-            &mut *sender.lock().await,
+        send_event(
+            sender,
             WebEvent::ValveState(valve::STATE.get()),
             event.role(),
         )
         .await?;
 
-        web_send_auth(
-            &mut *sender.lock().await,
+        send_event(
+            sender,
             WebEvent::WaterMeterState(wm::STATE.get()),
             event.role(),
         )
         .await?;
 
-        web_send_auth(
-            &mut *sender.lock().await,
+        send_event(
+            sender,
             WebEvent::BatteryState(battery::STATE.get()),
             event.role(),
         )
@@ -197,7 +197,7 @@ where
     }
 }
 
-async fn send_state<'a, S, T>(
+async fn process_state_update<'a, S, T>(
     sender: &AsyncMutex<impl RawMutex, S>,
     role: &Mutex<impl RawMutex, Cell<Role>>,
     state: &State<'a, T>,
@@ -211,28 +211,29 @@ where
     loop {
         state_notif.wait().await;
 
-        web_send_auth(
-            &mut *sender.lock().await,
-            to_web_event(state.get()),
-            role.lock(Cell::get),
-        )
-        .await?;
+        send_event(sender, to_web_event(state.get()), role.lock(Cell::get)).await?;
     }
 }
 
-fn authenticate(_username: &str, _password: &str) -> Option<Role> {
-    Some(Role::Admin) // TODO
-}
-
-async fn web_send_auth<S>(mut ws_sender: S, event: WebEvent, role: Role) -> Result<(), S::Error>
+async fn send_event<S>(
+    sender: &AsyncMutex<impl RawMutex, S>,
+    event: WebEvent,
+    role: Role,
+) -> Result<(), S::Error>
 where
     S: Sender<Data = WebEvent>,
 {
     if event.role() <= role {
         info!("[WS SEND] {:?}", event);
 
-        ws_sender.send(event).await
+        let sender = &mut *sender.lock().await;
+
+        sender.send(event).await
     } else {
         Ok(())
     }
+}
+
+fn authenticate(_username: &str, _password: &str) -> Option<Role> {
+    Some(Role::Admin) // TODO
 }
