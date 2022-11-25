@@ -19,14 +19,9 @@ pub enum WebRequest {
     Logout,
 
     ValveCommand(ValveCommand),
-    ValveStateRequest,
-
     WaterMeterCommand(WaterMeterCommand),
-    WaterMeterStateRequest,
-
-    BatteryStateRequest,
-
-    WifiStatusRequest,
+    // TODO
+    //WifiSettingsUpdate(...),
 }
 
 impl WebRequest {
@@ -34,10 +29,6 @@ impl WebRequest {
         match self {
             Self::Authenticate(_, _) => Role::None,
             Self::Logout => Role::None,
-            Self::ValveStateRequest => Role::User,
-            Self::WaterMeterStateRequest => Role::User,
-            Self::BatteryStateRequest => Role::User,
-            Self::WifiStatusRequest => Role::Admin,
             Self::ValveCommand(_) => Role::User,
             Self::WaterMeterCommand(_) => Role::User,
         }
@@ -51,11 +42,8 @@ pub enum WebEvent {
     AuthenticationFailed,
 
     RoleState(Role),
-
     ValveState(Option<ValveState>),
-
     WaterMeterState(WaterMeterState),
-
     BatteryState(BatteryState),
     //WifiState(Status),
 
