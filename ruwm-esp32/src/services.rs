@@ -276,7 +276,7 @@ pub fn display(
         display.owned_cropped(display, &rect)
     };
 
-    let display = display.owned_color_converted().owned_noop_flushing();
+    let display = display.owned_noop_flushing().owned_color_converted();
 
     Ok(display)
 }
