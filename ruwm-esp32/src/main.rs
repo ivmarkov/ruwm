@@ -92,8 +92,6 @@ fn sleep() -> Result<(), InitError> {
 
         esp_idf_sys::esp_deep_sleep_start();
     }
-
-    Ok(())
 }
 
 fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
