@@ -18,7 +18,7 @@ exclude = ["ruwm-web", "ruwm-sim"]
 #edge-frame = { path = "../edge-frame/edge-frame" }
 #edge-executor = { path = "../edge-executor" }
 #embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
+#esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 #esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
 #edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
 #embedded-io = { git = "https://github.com/ivmarkov/embedded-io" }
