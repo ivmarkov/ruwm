@@ -32,7 +32,7 @@ use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::wifi::{EspWifi, WifiEvent, WifiWait};
+use esp_idf_svc::wifi::{BlockingWifi, EspWifi, WifiEvent};
 
 use esp_idf_sys::EspError;
 
@@ -222,8 +222,8 @@ pub fn display(
         peripherals.sclk,
         peripherals.sdo,
         Option::<Gpio21>::None,
-        Dma::Disabled,
         peripherals.cs,
+        &SpiDriverConfig::new().dma(Dma::Disabled),
         &SpiConfig::new().baudrate(baudrate),
     )?;
 
@@ -281,6 +281,7 @@ pub fn display(
     Ok(display)
 }
 
+// TODO: Make it async
 pub fn wifi<'d>(
     modem: impl Peripheral<P = impl WifiModemPeripheral + 'd> + 'd,
     mut sysloop: EspSystemEventLoop,
@@ -302,17 +303,17 @@ pub fn wifi<'d>(
         }))?;
     }
 
-    let wait = WifiWait::new(&sysloop)?;
+    let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
 
-    wifi.start()?;
+    bwifi.start()?;
 
-    wait.wait(|| wifi.is_started().unwrap());
-
-    wifi.connect()?;
+    bwifi.connect()?;
 
     // if !PASS.is_empty() {
     //     wait.wait(|| wifi.is_connected().unwrap());
     // }
+
+    bwifi.wait_netif_up()?;
 
     Ok((
         wifi,

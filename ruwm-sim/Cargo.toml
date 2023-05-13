@@ -11,7 +11,13 @@ description = "An all-in-one Web simulator for the Rust Water Meter."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+rust-version = "1.67"
 #forced-target = "wasm32-unknown-unknown"
+
+[patch.crates-io]
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
+hal-sim = { git = "https://github.com/ivmarkov/hal-sim" }
 
 [profile.release]
 lto = true
@@ -31,10 +37,10 @@ web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.19", default-features = false }
 strum = { version = "0.23" }
 serde = "1"
-embassy-sync = "0.1"
+embassy-sync = "0.2"
 embassy-time = { version = "0.1", features = ["wasm", "generic-queue"] }
 embedded-hal = { version = "0.2", features = ["unproven"] }
-embedded-svc = { version = "0.24", default-features = false, features = ["std"] }
+embedded-svc = { version = "0.25", default-features = false, features = ["std"] }
 edge-frame = { version = "0.5", default-features = false, features = ["middleware-local"] }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
 ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }

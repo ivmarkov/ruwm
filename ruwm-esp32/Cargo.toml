@@ -10,7 +10,7 @@ description = "ESP32 port of the Rust Water Meter backend."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.61"
+rust-version = "1.67"
 
 [features]
 default = ["ssd1351"]
@@ -30,12 +30,12 @@ futures = {version = "0.3", features = ["async-await"] }
 serde = { version = "1", default-features = false }
 postcard = "0.7"
 embedded-hal = { version = "0.2" }
-embedded-svc = { version = "0.24", features = ["nightly", "experimental"] }
-esp-idf-sys = { version = "0.32", features = ["binstart"] }
-esp-idf-svc = { version = "0.45", features = ["nightly", "experimental", "embassy-time-isr-queue"] }
-esp-idf-hal = { version = "0.40.1", features = ["edge-executor", "embassy-sync", "critical-section"] }
+embedded-svc = { version = "0.25", features = ["nightly"] }
+esp-idf-sys = { version = "0.33", features = ["binstart"] }
+esp-idf-svc = { version = "0.46", features = ["nightly", "embassy-time-isr-queue"] }
+esp-idf-hal = { version = "0.41", features = ["edge-executor", "embassy-sync", "critical-section"] }
 embassy-futures = { version = "0.1" }
-embassy-sync = { version = "0.1", features = ["std"] }
+embassy-sync = { version = "0.2", features = ["std"] }
 embassy-time = { version = "0.1" }
 static_cell = { version = "1" }
 edge-frame = { version = "0.5", default-features = false, features = ["assets-serve"] }
@@ -51,5 +51,5 @@ ruwm = { version = "0.2", path = "../ruwm", features = ["edge-executor"] }
 
 [build-dependencies]
 anyhow = "1"
-embuild = { version = "0.31", features = ["espidf", "elf"] }
+embuild = { version = "0.31.2", features = ["espidf", "elf"] }
 edge-frame = { version = "0.5", default-features = false, features = ["assets-prepare"] }

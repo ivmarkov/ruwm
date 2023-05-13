@@ -12,7 +12,11 @@ description = "Web frontend for the Rust Water Meter."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+rust-version = "1.67"
 #forced-target = "wasm32-unknown-unknown"
+
+[patch.crates-io]
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
 
 [profile.release]
 lto = true
@@ -36,12 +40,12 @@ yewdux = "0.8.3"
 yewdux-middleware = { version = "0.1" }
 strum = { version = "0.23" }
 serde = "1"
-embedded-svc = { version = "0.24", default-features = false, features = ["std"] }
+embedded-svc = { version = "0.25", default-features = false, features = ["std"] }
 edge-frame = { version = "0.5", default-features = false }
 ruwm = { version = "0.2", path = "../ruwm", default-features = false }
 
 # middleware-local
-embassy-sync = { version = "0.1", optional = true }
+embassy-sync = { version = "0.2", optional = true }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

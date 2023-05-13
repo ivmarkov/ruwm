@@ -1,8 +1,7 @@
 #![no_std]
 #![feature(cfg_version)]
-#![cfg_attr(not(version("1.65")), feature(generic_associated_types))]
-#![cfg_attr(not(version("1.64")), feature(future_poll_fn))]
 #![feature(type_alias_impl_trait)]
+#![cfg_attr(version("1.70"), feature(impl_trait_in_assoc_type))]
 
 #[cfg(feature = "system")]
 pub mod battery;
