@@ -2,7 +2,7 @@
 
 [package]
 name = "ruwm-sim"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support", "ui"]
@@ -13,11 +13,6 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.67"
 #forced-target = "wasm32-unknown-unknown"
-
-[patch.crates-io]
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
-hal-sim = { git = "https://github.com/ivmarkov/hal-sim" }
 
 [profile.release]
 lto = true
@@ -41,13 +36,13 @@ embassy-sync = "0.2"
 embassy-time = { version = "0.1", features = ["wasm", "generic-queue"] }
 embedded-hal = { version = "0.2", features = ["unproven"] }
 embedded-svc = { version = "0.25", default-features = false, features = ["std"] }
-edge-frame = { version = "0.5", default-features = false, features = ["middleware-local"] }
-ruwm = { version = "0.2", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
-ruwm-web = { version = "0.1", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
-hal-sim = { version = "0.2", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
+edge-frame = { version = "0.6", default-features = false, features = ["middleware-local"] }
+ruwm = { version = "0.3", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
+ruwm-web = { version = "0.2", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
+hal-sim = { version = "0.3", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
 embedded-graphics-core = "0.3"
 gfx-xtra = "0.1"
 edge-executor = { version = "0.3", features = ["wasm"] }
-channel-bridge = { version = "0.2", features = ["nightly"]}
+channel-bridge = { version = "0.3", features = ["nightly"]}
 static_cell = "1"
 critical-section = { version = "1.1.1", features = ["std"] }

@@ -11,8 +11,6 @@ exclude = ["ruwm-web", "ruwm-sim"]
 [patch.crates-io]
 #socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
 #polling = { git = "https://github.com/esp-rs-compat/polling" }
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
 
 [profile.release]
 opt-level = "s"

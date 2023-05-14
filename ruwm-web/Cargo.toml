@@ -2,7 +2,7 @@
 
 [package]
 name = "ruwm-web"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
@@ -14,9 +14,6 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.67"
 #forced-target = "wasm32-unknown-unknown"
-
-[patch.crates-io]
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
 
 [profile.release]
 lto = true
@@ -41,8 +38,8 @@ yewdux-middleware = { version = "0.1" }
 strum = { version = "0.23" }
 serde = "1"
 embedded-svc = { version = "0.25", default-features = false, features = ["std"] }
-edge-frame = { version = "0.5", default-features = false }
-ruwm = { version = "0.2", path = "../ruwm", default-features = false }
+edge-frame = { version = "0.6", default-features = false }
+ruwm = { version = "0.3", path = "../ruwm", default-features = false }
 
 # middleware-local
 embassy-sync = { version = "0.2", optional = true }
