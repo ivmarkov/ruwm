@@ -23,12 +23,6 @@ use crate::valve::*;
 mod battery;
 mod valve;
 
-#[cfg(all(feature = "middleware-ws", feature = "middleware-local"))]
-compile_error!("Only one of the features `middleware-ws` and `middleware-local` can be enabled.");
-
-#[cfg(not(any(feature = "middleware-ws", feature = "middleware-local")))]
-compile_error!("One of the features `middleware-ws` or `middleware-local` must be enabled.");
-
 #[derive(Debug, Routable, Copy, Clone, PartialEq, Eq, Hash)]
 enum Routes {
     #[at("/wifi")]
@@ -41,31 +35,28 @@ enum Routes {
 
 #[derive(Default, Properties, Clone, PartialEq)]
 pub struct AppProps {
-    #[prop_or("/ws".to_owned())]
-    pub endpoint: String,
+    #[prop_or_default]
+    pub endpoint: Option<String>,
 }
 
 #[function_component(App)]
 pub fn app(props: &AppProps) -> Html {
     let endpoint = props.endpoint.clone();
 
-    use_effect_with_deps(
-        move |_| {
-            init_middleware(endpoint);
+    use_effect_with((), move |_| {
+        init_middleware(endpoint.as_deref());
 
-            move || ()
-        },
-        (),
-    );
+        move || ()
+    });
 
     html! {
         <BrowserRouter>
-            <Switch<Routes> render={Switch::render(render)}/>
+            <Switch<Routes> render={render}/>
         </BrowserRouter>
     }
 }
 
-fn render(route: &Routes) -> Html {
+fn render(route: Routes) -> Html {
     html! {
         <Frame
             app_title="RUWM"
@@ -109,17 +100,7 @@ fn render(route: &Routes) -> Html {
     }
 }
 
-fn init_middleware(_endpoint: String) {
-    #[cfg(feature = "middleware-ws")]
-    let (sender, receiver) =
-        middleware::open(&_endpoint).unwrap_or_else(|_| panic!("Failed to open websocket"));
-
-    #[cfg(feature = "middleware-local")]
-    let (sender, receiver) = (comm::REQUEST_QUEUE.sender(), comm::EVENT_QUEUE.receiver());
-
-    // Dispatch WebRequest messages => send to backend
-    dispatch::register(middleware::send::<WebRequest>(sender));
-
+fn init_middleware(endpoint: Option<&str>) {
     // Dispatch WebEvent messages => redispatch as BatteryMsg, ValveMsg, RoleState or WifiConf messages
     dispatch::register::<WebEvent, _>(|event| {
         match event {
@@ -144,8 +125,24 @@ fn init_middleware(_endpoint: String) {
     dispatch::register(log::<BatteryStore, BatteryMsg>(dispatch::store));
     dispatch::register(log::<ValveStore, ValveMsg>(dispatch::store));
 
-    // Receive from backend => dispatch WebEvent messages
-    middleware::receive::<WebEvent>(receiver);
+    if let Some(endpoint) = endpoint {
+        let (sender, receiver) =
+            middleware::open(endpoint).unwrap_or_else(|_| panic!("Failed to open websocket"));
+
+        // Dispatch WebRequest messages => send to backend
+        dispatch::register(middleware::send::<WebRequest>(sender));
+
+        // Receive from backend => dispatch WebEvent messages
+        middleware::receive::<WebEvent>(receiver);
+    } else {
+        let (sender, receiver) = (comm::REQUEST_QUEUE.sender(), comm::EVENT_QUEUE.receiver());
+
+        // Dispatch WebRequest messages => send to backend
+        dispatch::register(middleware::send_local::<WebRequest>(sender));
+
+        // Receive from backend => dispatch WebEvent messages
+        middleware::receive_local::<WebEvent>(receiver);
+    }
 }
 
 fn log<S, M>(dispatch: impl MiddlewareDispatch<M> + Clone) -> impl MiddlewareDispatch<M>
@@ -175,7 +172,6 @@ fn role_as_request(msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>)
     dispatch.invoke(msg);
 }
 
-#[cfg(feature = "middleware-local")]
 pub mod comm {
     use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
 

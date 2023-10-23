@@ -1,7 +1,9 @@
 #![no_std]
-#![feature(cfg_version)]
-#![feature(type_alias_impl_trait)]
-#![cfg_attr(version("1.70"), feature(impl_trait_in_assoc_type))]
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![feature(async_fn_in_trait)]
+#![allow(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
 
 #[cfg(feature = "system")]
 pub mod battery;

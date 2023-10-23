@@ -4,8 +4,8 @@ use embedded_graphics_core::prelude::{IntoStorage, Size};
 use hal_sim::adc::*;
 use hal_sim::display::*;
 use hal_sim::gpio::*;
+use hal_sim::io;
 use hal_sim::peripherals::*;
-use hal_sim::web;
 
 use ruwm::battery::BatteryState;
 
@@ -13,7 +13,6 @@ use ruwm::battery::BatteryState;
 pub const DISPLAY_SIZE: Size = Size::new(128, 128);
 
 pub struct SystemPeripherals {
-    pub shared: SharedPeripherals,
     pub pulse: Pin<Input>,
     pub valve: ValvePeripherals,
     pub battery: BatteryPeripherals,
@@ -23,10 +22,9 @@ pub struct SystemPeripherals {
 
 impl SystemPeripherals {
     pub fn take() -> Self {
-        let mut peripherals = Peripherals::take(web::peripherals_callback).unwrap();
+        let mut peripherals = Peripherals::take(io::peripherals_callback).unwrap();
 
         SystemPeripherals {
-            shared: peripherals.shared(),
             pulse: peripherals
                 .pins
                 .input_click("Pulse", "Pulse Counter", false),

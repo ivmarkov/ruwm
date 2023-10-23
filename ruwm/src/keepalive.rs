@@ -60,7 +60,9 @@ pub async fn process() {
         }
 
         if quit_time.map(|quit_time| now >= quit_time).unwrap_or(false) {
-            quit::QUIT.notify();
+            for notification in &quit::QUIT {
+                notification.notify();
+            }
         }
     }
 }

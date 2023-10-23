@@ -1,17 +1,15 @@
 use embuild::*;
 
 fn main() -> anyhow::Result<()> {
-    let cfg = build::CfgArgs::try_from_env("ESP_IDF")?;
+    embuild::espidf::sysenv::output();
 
     #[cfg(feature = "ulp")]
     {
+        let cfg = embuild::espidf::sysenv::cfg_args().unwrap();
         if cfg.get("esp32").is_some() || cfg.get("esp32s2").is_some() {
             build_ulp()?;
         }
     }
-
-    cfg.output();
-    build::LinkArgs::output_propagated("ESP_IDF")?;
 
     edge_frame::assets::prepare::run(
         "RUWM_WEB",

@@ -5,13 +5,14 @@ name = "ruwm-sim"
 version = "0.2.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
+resolver = "2"
 categories = ["embedded", "hardware-support", "ui"]
 keywords = ["embedded", "hardware-support", "ui"]
 description = "An all-in-one Web simulator for the Rust Water Meter."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.67"
+rust-version = "1.71"
 #forced-target = "wasm32-unknown-unknown"
 
 [profile.release]
@@ -21,6 +22,13 @@ opt-level = 'z'
 #[profile.dev]
 #opt-level = 0
 
+[patch.crates-io]
+yewdux-middleware = { git = "https://github.com/ivmarkov/yewdux-middleware" }
+hal-sim = { git = "https://github.com/ivmarkov/hal-sim" }
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+gfx-xtra = { git = "https://github.com/ivmarkov/gfx-xtra" }
+channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
+
 [dependencies]
 anyhow = "1"
 log = "0.4"
@@ -29,20 +37,24 @@ futures = "0.3"
 derive_more = "0.99"
 wasm-logger = "0.2"
 web-sys = { version = "0.3", features = ["console"] }
-yew = { version = "0.19", default-features = false }
-strum = { version = "0.23" }
+wasm-bindgen-futures = "0.4"
+yew = { version = "0.21", default-features = false, features = ["csr"] }
+strum = { version = "0.25" }
 serde = "1"
-embassy-sync = "0.2"
+embassy-sync = "0.3"
 embassy-time = { version = "0.1", features = ["wasm", "generic-queue"] }
-embedded-hal = { version = "0.2", features = ["unproven"] }
-embedded-svc = { version = "0.25", default-features = false, features = ["std"] }
-edge-frame = { version = "0.6", default-features = false, features = ["middleware-local"] }
+embedded-hal = "1.0.0-rc.1"
+embedded-hal-async = "1.0.0-rc.1"
+embedded-hal02 = { package = "embedded-hal", version = "0.2", features = ["unproven"] }
+nb01 = { package = "nb", version = "0.1" }
+embedded-svc = { version = "0.26", default-features = false, features = ["std"] }
+edge-frame = { version = "0.6", default-features = false }
 ruwm = { version = "0.3", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
-ruwm-web = { version = "0.2", path = "../ruwm-web", default-features = false, features = ["middleware-local"] }
-hal-sim = { version = "0.3", default-features = false, features = ["nightly", "web", "ui", "middleware-local"] }
-embedded-graphics-core = "0.3"
+ruwm-web = { version = "0.2", path = "../ruwm-web", default-features = false }
+hal-sim = { version = "0.3", default-features = false, features = ["nightly", "io", "ui"] }
+embedded-graphics-core = "0.4"
 gfx-xtra = "0.1"
-edge-executor = { version = "0.3", features = ["wasm"] }
-channel-bridge = { version = "0.3", features = ["nightly"]}
+edge-executor = "0.4"
+channel-bridge = { version = "0.5", features = ["nightly"]}
 static_cell = "1"
-critical-section = { version = "1.1.1", features = ["std"] }
+critical-section = { version = "1", features = ["std"] }

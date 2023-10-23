@@ -7,8 +7,8 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 
-use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::delay::DelayUs;
+use embedded_hal::digital::OutputPin;
 
 use channel_bridge::notification::Notification;
 
@@ -43,7 +43,7 @@ pub fn emergency_close(
     power_pin: &mut impl OutputPin<Error = impl Debug>,
     open_pin: &mut impl OutputPin<Error = impl Debug>,
     close_pin: &mut impl OutputPin<Error = impl Debug>,
-    delay: &mut impl DelayMs<u32>,
+    delay: &mut impl DelayUs,
 ) {
     log::error!("Start: emergency closing valve due to ULP wakeup...");
 

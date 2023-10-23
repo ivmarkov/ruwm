@@ -1,5 +1,6 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
+use core::future::Future;
 use core::mem;
 
 extern crate alloc;
@@ -9,32 +10,35 @@ use edge_frame::assets::serve::AssetMetadata;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
-use embedded_hal::digital::v2::OutputPin as EHOutputPin;
+use embedded_hal::digital::OutputPin as EHOutputPin;
+use embedded_hal_async::digital::Wait;
 
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::utils::asyncify::Asyncify;
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi};
+use embedded_svc::wifi::asynch::Wifi;
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use embedded_svc::ws::asynch::server::Acceptor;
 
-use esp_idf_hal::delay;
-use esp_idf_hal::delay::FreeRtos;
-use esp_idf_hal::gpio::*;
-use esp_idf_hal::modem::WifiModemPeripheral;
-use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_hal::prelude::*;
-use esp_idf_hal::reset::WakeupReason;
-use esp_idf_hal::spi::*;
-use esp_idf_hal::task::embassy_sync::EspRawMutex;
-
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::delay;
+use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::hal::gpio::*;
+use esp_idf_svc::hal::modem::WifiModemPeripheral;
+use esp_idf_svc::hal::peripheral::Peripheral;
+use esp_idf_svc::hal::prelude::*;
+use esp_idf_svc::hal::reset::WakeupReason;
+use esp_idf_svc::hal::spi::*;
+use esp_idf_svc::hal::task::embassy_sync::EspRawMutex;
+
 use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::wifi::{BlockingWifi, EspWifi, WifiEvent};
+use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi, WifiEvent};
 
-use esp_idf_sys::EspError;
+use esp_idf_svc::sys::EspError;
 
 use gfx_xtra::draw_target::{Flushable, OwnedDrawTargetExt};
 
@@ -42,10 +46,8 @@ use edge_frame::assets;
 
 use edge_executor::*;
 
-use channel_bridge::{asynch::pubsub, asynch::*, notification::Notification};
-
 use ruwm::button::PressedLevel;
-use ruwm::mqtt::{MessageParser, MqttCommand};
+use ruwm::mqtt::{CommandConnection, MessageParser};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::Color;
@@ -85,21 +87,14 @@ pub static mut RTC_MEMORY: RtcMemory = RtcMemory::new();
 pub fn valve_pins(
     peripherals: ValvePeripherals,
     wakeup_reason: WakeupReason,
-) -> Result<
-    (
-        impl EHOutputPin<Error = impl Debug>,
-        impl EHOutputPin<Error = impl Debug>,
-        impl EHOutputPin<Error = impl Debug>,
-    ),
-    EspError,
-> {
-    let mut power = PinDriver::input_output(peripherals.power)?;
-    let mut open = PinDriver::input_output(peripherals.open)?;
-    let mut close = PinDriver::input_output(peripherals.close)?;
+) -> Result<(impl EHOutputPin, impl EHOutputPin, impl EHOutputPin), EspError> {
+    let mut power = PinDriver::output(peripherals.power)?;
+    let mut open = PinDriver::output(peripherals.open)?;
+    let mut close = PinDriver::output(peripherals.close)?;
 
-    power.set_pull(Pull::Floating)?;
-    open.set_pull(Pull::Floating)?;
-    close.set_pull(Pull::Floating)?;
+    // power.set_pull(Pull::Floating)?;
+    // open.set_pull(Pull::Floating)?;
+    // close.set_pull(Pull::Floating)?;
 
     if wakeup_reason == WakeupReason::ULP {
         valve::emergency_close(&mut power, &mut open, &mut close, &mut FreeRtos);
@@ -165,14 +160,11 @@ pub fn storage(
 
 #[cfg(not(feature = "ulp"))]
 pub fn pulse(
-    peripherals: PulseCounterPeripherals<impl RTCPin + InputPin + OutputPin>,
+    peripherals: PulseCounterPeripherals<impl InputPin>,
 ) -> Result<(impl PulseCounter, impl PulseWakeup), InitError> {
-    static PULSE_SIGNAL: Notification = Notification::new();
-
     let pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
-        subscribe_pin(peripherals.pulse, || PULSE_SIGNAL.notify())?,
+        PinDriver::input(peripherals.pulse)?,
         PressedLevel::Low,
-        &PULSE_SIGNAL,
         Some(Duration::from_millis(50)),
     );
 
@@ -181,11 +173,11 @@ pub fn pulse(
 
 #[cfg(feature = "ulp")]
 pub fn pulse(
-    peripherals: PulseCounterPeripherals<impl RTCPin + InputPin + OutputPin>,
+    peripherals: PulseCounterPeripherals<impl RTCPin>,
     wakeup_reason: WakeupReason,
 ) -> Result<(impl PulseCounter, impl PulseWakeup), InitError> {
     let mut pulse_counter = ulp_pulse_counter::UlpPulseCounter::new(
-        esp_idf_hal::ulp::UlpDriver::new(ulp)?,
+        esp_idf_svc::hal::ulp::UlpDriver::new(ulp)?,
         peripherals.pulse,
         wakeup_reason == WakeupReason::Unknown,
     )?;
@@ -195,11 +187,11 @@ pub fn pulse(
     Ok((pulse_counter, ()))
 }
 
-pub fn button<'d, P: InputPin + OutputPin>(
+pub fn button<'d, P: InputPin>(
     pin: impl Peripheral<P = P> + 'd,
-    notification: &'static Notification,
-) -> Result<impl embedded_hal::digital::v2::InputPin<Error = impl Debug + 'd> + 'd, InitError> {
-    subscribe_pin(pin, move || notification.notify())
+) -> Result<impl embedded_hal::digital::InputPin + embedded_hal_async::digital::Wait + 'd, InitError>
+{
+    Ok(PinDriver::input(pin)?)
 }
 
 pub fn display(
@@ -284,44 +276,46 @@ pub fn display(
 // TODO: Make it async
 pub fn wifi<'d>(
     modem: impl Peripheral<P = impl WifiModemPeripheral + 'd> + 'd,
-    mut sysloop: EspSystemEventLoop,
+    sysloop: EspSystemEventLoop,
+    timer_service: EspTaskTimerService,
     partition: Option<EspDefaultNvsPartition>,
-) -> Result<(impl Wifi + 'd, impl Receiver<Data = WifiEvent>), InitError> {
-    let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
+) -> Result<impl Wifi + 'd, InitError> {
+    let mut wifi = AsyncWifi::wrap(
+        EspWifi::new(modem, sysloop.clone(), partition)?,
+        sysloop,
+        timer_service,
+    )?;
 
-    if PASS.is_empty() {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            auth_method: AuthMethod::None,
-            ..Default::default()
-        }))?;
-    } else {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            password: PASS.into(),
-            ..Default::default()
-        }))?;
-    }
+    // if PASS.is_empty() {
+    //     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+    //         ssid: SSID.into(),
+    //         auth_method: AuthMethod::None,
+    //         ..Default::default()
+    //     }))?;
+    // } else {
+    //     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+    //         ssid: SSID.into(),
+    //         password: PASS.into(),
+    //         ..Default::default()
+    //     }))?;
+    // }
 
-    let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
+    // let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
 
-    bwifi.start()?;
+    // bwifi.start()?;
 
-    bwifi.connect()?;
+    // bwifi.connect()?;
 
     // if !PASS.is_empty() {
     //     wait.wait(|| wifi.is_connected().unwrap());
     // }
 
-    bwifi.wait_netif_up()?;
+    // bwifi.wait_netif_up()?;
 
-    Ok((
-        wifi,
-        pubsub::SvcReceiver::new(sysloop.as_async().subscribe()?),
-    ))
+    Ok(wifi)
 }
 
-pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
+pub fn httpd<'a>() -> Result<(EspHttpServer<'a>, impl Acceptor), InitError> {
     let (ws_processor, ws_acceptor) =
         EspHttpWsProcessor::<{ ws::WS_MAX_CONNECTIONS }, { ws::WS_MAX_FRAME_LEN }>::new(());
 
@@ -353,14 +347,7 @@ pub fn httpd() -> Result<(EspHttpServer, impl Acceptor), InitError> {
     Ok((httpd, ws_acceptor))
 }
 
-pub fn mqtt() -> Result<
-    (
-        &'static str,
-        impl Client + Publish,
-        impl Connection<Message = Option<MqttCommand>>,
-    ),
-    InitError,
-> {
+pub fn mqtt() -> Result<(&'static str, impl Client + Publish, impl CommandConnection), InitError> {
     let client_id = "water-meter-demo";
     let mut mqtt_parser = MessageParser::new();
 
@@ -378,41 +365,22 @@ pub fn mqtt() -> Result<
     Ok((client_id, mqtt_client, mqtt_conn))
 }
 
-fn subscribe_pin<'d, P: InputPin + OutputPin>(
-    pin: impl Peripheral<P = P> + 'd,
-    notify: impl Fn() + Send + 'static,
-) -> Result<impl embedded_hal::digital::v2::InputPin<Error = impl Debug + 'd> + 'd, InitError> {
-    let mut pin = PinDriver::input(pin)?;
-
-    pin.set_interrupt_type(InterruptType::NegEdge)?;
-
-    unsafe {
-        pin.subscribe(notify)?;
-    }
-
-    Ok(pin)
-}
-
-pub fn schedule<'a, const C: usize, M>(
+pub fn schedule<'a, const C: usize>(
     stack_size: usize,
-    spawner: impl FnOnce() -> Result<(Executor<'a, C, M, Local>, heapless::Vec<Task<()>, C>), SpawnError>
-        + Send
-        + 'static,
-) -> std::thread::JoinHandle<()>
-where
-    M: Monitor + Wait + Default,
-{
+    run: impl Future + Send,
+    spawner: impl FnOnce() -> LocalExecutor<'a, C> + Send + 'static,
+) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .stack_size(stack_size)
         .spawn(move || {
-            let (mut executor, tasks) = spawner().unwrap();
+            let mut executor = spawner();
 
             // info!(
             //     "Tasks on thread {:?} scheduled, about to run the executor now",
             //     "TODO"
             // );
 
-            ruwm::spawn::run(&mut executor, tasks);
+            block_on(executor.run(run));
         })
         .unwrap()
 }

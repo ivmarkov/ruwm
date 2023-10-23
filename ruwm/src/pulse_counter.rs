@@ -1,23 +1,17 @@
 use core::convert::Infallible;
 use core::fmt::Debug;
-use core::future::Future;
 
-use embedded_hal::digital::v2::InputPin;
+use embedded_hal::digital::{ErrorType, InputPin};
+use embedded_hal_async::digital::Wait;
 
 use embassy_time::Duration;
-
-use channel_bridge::notification::Notification;
 
 use crate::button::{self, PressedLevel};
 
 pub trait PulseCounter {
     type Error: Debug;
 
-    type TakePulsesFuture<'a>: Future<Output = Result<u64, Self::Error>>
-    where
-        Self: 'a;
-
-    fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_>;
+    async fn take_pulses(&mut self) -> Result<u64, Self::Error>;
 }
 
 impl<T> PulseCounter for &mut T
@@ -26,10 +20,8 @@ where
 {
     type Error = T::Error;
 
-    type TakePulsesFuture<'a> = T::TakePulsesFuture<'a> where Self: 'a;
-
-    fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_> {
-        (*self).take_pulses()
+    async fn take_pulses(&mut self) -> Result<u64, Self::Error> {
+        (*self).take_pulses().await
     }
 }
 
@@ -50,54 +42,44 @@ where
     }
 }
 
-pub struct CpuPulseCounter<'a, P> {
+pub struct CpuPulseCounter<P> {
     pin: P,
     pressed_level: PressedLevel,
-    pin_edge: &'a Notification,
     debounce_duration: Option<Duration>,
 }
 
-impl<'a, P> CpuPulseCounter<'a, P> {
+impl<P> CpuPulseCounter<P> {
     pub const fn new(
         pin: P,
         pressed_level: PressedLevel,
-        pin_edge: &'a Notification,
         debounce_duration: Option<Duration>,
     ) -> Self {
         Self {
             pin,
             pressed_level,
-            pin_edge,
             debounce_duration,
         }
     }
 }
 
-impl<'a, P> PulseCounter for CpuPulseCounter<'a, P>
+impl<P> PulseCounter for CpuPulseCounter<P>
 where
-    P: InputPin,
+    P: InputPin + Wait,
 {
-    type Error = Infallible;
+    type Error = P::Error;
 
-    type TakePulsesFuture<'b> = impl Future<Output = Result<u64, Self::Error>> + 'b where Self: 'b;
+    async fn take_pulses(&mut self) -> Result<u64, Self::Error> {
+        button::wait_press(&mut self.pin, self.pressed_level, self.debounce_duration).await?;
 
-    fn take_pulses(&mut self) -> Self::TakePulsesFuture<'_> {
-        async move {
-            button::wait_press(
-                &mut self.pin,
-                self.pressed_level,
-                &mut self.pin_edge,
-                self.debounce_duration,
-            )
-            .await;
-
-            Ok(1)
-        }
+        Ok(1)
     }
 }
 
-impl<'a, P> PulseWakeup for CpuPulseCounter<'a, P> {
-    type Error = Infallible;
+impl<P> PulseWakeup for CpuPulseCounter<P>
+where
+    P: ErrorType,
+{
+    type Error = P::Error;
 
     fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
         Ok(())

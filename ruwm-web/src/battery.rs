@@ -12,10 +12,10 @@ pub struct BatteryStore(pub BatteryState);
 pub struct BatteryMsg(pub BatteryState);
 
 impl Reducer<BatteryStore> for BatteryMsg {
-    fn apply(&self, mut store: Rc<BatteryStore>) -> Rc<BatteryStore> {
+    fn apply(self, mut store: Rc<BatteryStore>) -> Rc<BatteryStore> {
         let state = Rc::make_mut(&mut store);
 
-        state.0 = self.0.clone();
+        state.0 = self.0;
 
         store
     }

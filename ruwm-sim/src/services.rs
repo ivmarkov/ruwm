@@ -6,9 +6,8 @@ use embedded_graphics_core::pixelcolor::Rgb888;
 
 use gfx_xtra::draw_target::{buffer_size, Flushable, OwnedDrawTargetExt};
 
-use embedded_hal::digital::v2::{InputPin, OutputPin};
-
-use channel_bridge::notification::Notification;
+use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal_async::digital::Wait;
 
 use static_cell::*;
 
@@ -114,23 +113,17 @@ pub fn storage(
 }
 
 pub fn pulse(pulse: Pin<Input>) -> (impl PulseCounter, impl PulseWakeup) {
-    static PULSE_SIGNAL: Notification = Notification::new();
-
     let pulse_counter = ruwm::pulse_counter::CpuPulseCounter::new(
-        subscribe_pin(pulse, || PULSE_SIGNAL.notify()),
+        pulse,
         PressedLevel::Low,
-        &PULSE_SIGNAL,
         Some(Duration::from_millis(50)),
     );
 
     (pulse_counter, ())
 }
 
-pub fn button(
-    pin: Pin<Input>,
-    notification: &'static Notification,
-) -> impl InputPin<Error = impl Debug> {
-    subscribe_pin(pin, move || notification.notify())
+pub fn button(pin: Pin<Input>) -> impl InputPin<Error = impl Debug> + Wait {
+    pin
 }
 
 pub fn display(
@@ -174,12 +167,3 @@ pub fn display(
 
 //     Ok((client_id, mqtt_client, mqtt_conn))
 // }
-
-fn subscribe_pin(
-    mut pin: Pin<Input>,
-    notify: impl Fn() + Send + 'static,
-) -> impl InputPin<Error = impl Debug> {
-    pin.subscribe(notify);
-
-    pin
-}

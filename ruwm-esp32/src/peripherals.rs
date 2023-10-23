@@ -1,8 +1,8 @@
-use esp_idf_hal::adc::*;
-use esp_idf_hal::gpio::*;
-use esp_idf_hal::modem::Modem;
-use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::spi::*;
+use esp_idf_svc::hal::adc::*;
+use esp_idf_svc::hal::gpio::*;
+use esp_idf_svc::hal::modem::Modem;
+use esp_idf_svc::hal::peripherals::Peripherals;
+use esp_idf_svc::hal::spi::*;
 
 pub struct SystemPeripherals<P, ADC, V, B1, B2, B3, SPI> {
     pub pulse_counter: PulseCounterPeripherals<P>,
@@ -140,13 +140,13 @@ impl SystemPeripherals<Gpio1, ADC1, Gpio0, Gpio2, Gpio3, Gpio4, SPI2> {
 pub struct PulseCounterPeripherals<P> {
     pub pulse: P,
     #[cfg(feature = "ulp")]
-    pub ulp: esp_idf_hal::ulp::ULP,
+    pub ulp: esp_idf_svc::hal::ulp::ULP,
 }
 
 pub struct ValvePeripherals {
-    pub power: AnyIOPin,
-    pub open: AnyIOPin,
-    pub close: AnyIOPin,
+    pub power: AnyOutputPin,
+    pub open: AnyOutputPin,
+    pub close: AnyOutputPin,
 }
 
 pub struct BatteryPeripherals<ADC, V> {

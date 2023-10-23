@@ -1,9 +1,12 @@
-#![feature(cfg_version)]
-#![cfg_attr(not(version("1.65")), feature(generic_associated_types))]
-#![feature(type_alias_impl_trait)]
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![feature(async_fn_in_trait)]
+#![allow(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
 
 extern crate alloc;
 
+use edge_executor::LocalExecutor;
 #[cfg(feature = "nvs")]
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
@@ -11,18 +14,21 @@ use embassy_time::Duration;
 #[cfg(feature = "nvs")]
 use embedded_svc::storage::Storage;
 
-use esp_idf_hal::adc::*;
-use esp_idf_hal::gpio::*;
-use esp_idf_hal::reset::WakeupReason;
-use esp_idf_hal::task::executor::EspExecutor;
-use esp_idf_hal::task::thread::ThreadSpawnConfiguration;
+use esp_idf_svc::hal::adc::*;
+use esp_idf_svc::hal::gpio::*;
+use esp_idf_svc::hal::reset::WakeupReason;
+use esp_idf_svc::hal::task::block_on;
+use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
-use esp_idf_sys::esp;
+use esp_idf_svc::sys::esp;
+use esp_idf_svc::sys::EspError;
+use esp_idf_svc::timer::EspTaskTimerService;
 
 use ruwm::button;
+use ruwm::quit;
 use ruwm::spawn;
 use ruwm::wm::WaterMeterState;
 
@@ -43,11 +49,11 @@ const MQTT_MAX_TOPIC_LEN: usize = 64;
 
 // Make sure that the firmware will contain
 // up-to-date build time and package info coming from the binary crate
-esp_idf_sys::esp_app_desc!();
+esp_idf_svc::sys::esp_app_desc!();
 
 fn main() -> Result<(), InitError> {
-    esp_idf_hal::task::critical_section::link();
-    esp_idf_svc::timer::embassy_time::queue::link();
+    esp_idf_svc::hal::task::critical_section::link();
+    esp_idf_svc::timer::embassy_time::driver::link();
 
     let wakeup_reason = WakeupReason::get();
 
@@ -63,14 +69,14 @@ fn main() -> Result<(), InitError> {
 }
 
 fn init() -> Result<(), InitError> {
-    esp_idf_sys::link_patches();
+    esp_idf_svc::sys::link_patches();
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
     esp!(unsafe {
         #[allow(clippy::needless_update)]
-        esp_idf_sys::esp_vfs_eventfd_register(&esp_idf_sys::esp_vfs_eventfd_config_t {
+        esp_idf_svc::sys::esp_vfs_eventfd_register(&esp_idf_svc::sys::esp_vfs_eventfd_config_t {
             max_fds: 5,
             ..Default::default()
         })
@@ -82,16 +88,18 @@ fn init() -> Result<(), InitError> {
 fn sleep() -> Result<(), InitError> {
     unsafe {
         #[cfg(feature = "ulp")]
-        esp!(esp_idf_sys::esp_sleep_enable_ulp_wakeup())?;
+        esp!(esp_idf_svc::sys::esp_sleep_enable_ulp_wakeup())?;
 
-        esp!(esp_idf_sys::esp_sleep_enable_timer_wakeup(
+        esp!(esp_idf_svc::sys::esp_sleep_enable_timer_wakeup(
             SLEEP_TIME.as_micros() as u64
         ))?;
 
         log::info!("Going to sleep");
 
-        esp_idf_sys::esp_deep_sleep_start();
+        esp_idf_svc::sys::esp_deep_sleep_start();
     }
+
+    Ok(())
 }
 
 fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
@@ -110,6 +118,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let nvs_default_partition = EspDefaultNvsPartition::take()?;
     let sysloop = EspSystemEventLoop::take()?;
+    let timer_service = EspTaskTimerService::new()?;
 
     // Storage
 
@@ -150,9 +159,10 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // Wifi
 
-    let (wifi, wifi_notif) = services::wifi(
+    let wifi = services::wifi(
         peripherals.modem,
         sysloop.clone(),
+        timer_service,
         Some(nvs_default_partition.clone()),
     )?;
 
@@ -166,12 +176,32 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // High-prio tasks
 
-    let mut high_prio_executor = EspExecutor::<16, _>::new();
-    let mut high_prio_tasks = heapless::Vec::<_, 16>::new();
+    let high_prio_executor = LocalExecutor::<16>::new();
 
+    struct Adc0<'d, ADC, V>
+    where
+        ADC: Adc,
+        V: ADCPin<Adc = ADC>,
+    {
+        driver: AdcDriver<'d, ADC>,
+        channel_driver: AdcChannelDriver<'d, { attenuation::NONE }, V>,
+    }
+
+    impl<'d, ADC, V> ruwm::battery::Adc for Adc0<'d, ADC, V>
+    where
+        ADC: Adc,
+        V: ADCPin<Adc = ADC>,
+    {
+        type Error = nb01::Error<EspError>;
+
+        async fn read(&mut self) -> Result<u16, Self::Error> {
+            todo!()
+        }
+    }
+
+    // TODO: Move off the main thread, as it has a fixed, low priority (1)
     spawn::high_prio(
-        &mut high_prio_executor,
-        &mut high_prio_tasks,
+        &high_prio_executor,
         valve_power_pin,
         valve_open_pin,
         valve_close_pin,
@@ -186,14 +216,16 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         |state| unsafe {
             services::RTC_MEMORY.wm_stats = state;
         },
-        AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
-        AdcChannelDriver::<_, Atten0dB<_>>::new(peripherals.battery.voltage)?,
+        Adc0 {
+            driver: AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
+            channel_driver: AdcChannelDriver::new(peripherals.battery.voltage)?,
+        },
         PinDriver::input(peripherals.battery.power)?,
         false,
-        services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE)?,
-        services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE)?,
-        services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE)?,
-    )?;
+        services::button(peripherals.buttons.button1)?,
+        services::button(peripherals.buttons.button2)?,
+        services::button(peripherals.buttons.button3)?,
+    );
 
     // Mid-prio tasks
 
@@ -208,25 +240,23 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = services::schedule::<8, _>(50000, move || {
-        let mut executor = EspExecutor::new();
-        let mut tasks = heapless::Vec::new();
+    let mid_prio_execution = services::schedule::<8>(50000, quit::QUIT[1].wait(), move || {
+        let executor = LocalExecutor::new();
 
         spawn::mid_prio(
-            &mut executor,
-            &mut tasks,
+            &executor,
             services::display(display_peripherals).unwrap(),
             move |_new_state| {
                 #[cfg(feature = "nvs")]
                 flash_wm_state(storage, _new_state);
             },
-        )?;
+        );
 
-        spawn::wifi(&mut executor, &mut tasks, wifi, wifi_notif)?;
+        spawn::wifi(&executor, wifi, wifi_notif);
 
-        spawn::mqtt_receive(&mut executor, &mut tasks, mqtt_conn)?;
+        spawn::mqtt_receive(&executor, mqtt_conn);
 
-        Ok((executor, tasks))
+        executor
     });
 
     // Low-prio tasks
@@ -240,27 +270,21 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = services::schedule::<4, _>(50000, move || {
-        let mut executor = EspExecutor::new();
-        let mut tasks = heapless::Vec::new();
+    let low_prio_execution = services::schedule::<4>(50000, quit::QUIT[2].wait(), move || {
+        let executor = LocalExecutor::new();
 
-        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _>(
-            &mut executor,
-            &mut tasks,
-            mqtt_topic_prefix,
-            mqtt_client,
-        )?;
+        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4>(&executor, mqtt_topic_prefix, mqtt_client);
 
-        spawn::ws(&mut executor, &mut tasks, ws_acceptor)?;
+        spawn::ws(&executor, ws_acceptor);
 
-        Ok((executor, tasks))
+        executor
     });
 
     // Start main execution
 
     log::info!("Starting high-prio executor");
 
-    spawn::run(&mut high_prio_executor, high_prio_tasks);
+    block_on(high_prio_executor.run(quit::QUIT[0].wait()));
 
     log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
 
@@ -313,15 +337,15 @@ fn mark_wakeup_pins(
         }
 
         #[cfg(any(esp32, esp32s2, esp32s3))]
-        esp!(esp_idf_sys::esp_sleep_enable_ext1_wakeup(
+        esp!(esp_idf_svc::sys::esp_sleep_enable_ext1_wakeup(
             mask,
-            esp_idf_sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
+            esp_idf_svc::sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ALL_LOW,
         ))?;
 
         #[cfg(not(any(esp32, esp32s2, esp32s3)))]
-        esp!(esp_idf_sys::esp_deep_sleep_enable_gpio_wakeup(
+        esp!(esp_idf_svc::sys::esp_deep_sleep_enable_gpio_wakeup(
             mask,
-            esp_idf_sys::esp_deepsleep_gpio_wake_up_mode_t_ESP_GPIO_WAKEUP_GPIO_LOW,
+            esp_idf_svc::sys::esp_deepsleep_gpio_wake_up_mode_t_ESP_GPIO_WAKEUP_GPIO_LOW,
         ))?;
     }
 

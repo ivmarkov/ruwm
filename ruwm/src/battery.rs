@@ -1,11 +1,18 @@
+use core::fmt::Debug;
+
 use embassy_time::{Duration, Timer};
 
-use embedded_hal::adc;
-use embedded_hal::digital::v2::InputPin;
+use embedded_hal::digital::InputPin;
 
 use crate::state::State;
 
 pub use crate::dto::battery::*;
+
+pub trait Adc {
+    type Error: Debug;
+
+    async fn read(&mut self) -> Result<u16, Self::Error>;
+}
 
 pub static STATE: State<BatteryState> = State::new(
     "BATTERY",
@@ -19,20 +26,15 @@ pub static STATE: State<BatteryState> = State::new(
     ],
 );
 
-pub async fn process<ADC, BP>(
-    mut one_shot: impl adc::OneShot<ADC, u16, BP>,
-    mut battery_pin: BP,
-    power_pin: impl InputPin,
-) where
-    BP: adc::Channel<ADC>,
-{
+pub async fn process(mut battery_adc: impl Adc, power_pin: impl InputPin) {
     const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
     loop {
         Timer::after(Duration::from_secs(2)).await;
 
-        let voltage = one_shot
-            .read(&mut battery_pin)
+        let voltage = battery_adc
+            .read()
+            .await
             .ok()
             .map(|voltage| voltage / ROUND_UP * ROUND_UP);
 

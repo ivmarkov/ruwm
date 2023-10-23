@@ -9,8 +9,11 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
-#socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
-#polling = { git = "https://github.com/esp-rs-compat/polling" }
+yewdux-middleware = { git = "https://github.com/ivmarkov/yewdux-middleware" }
+hal-sim = { git = "https://github.com/ivmarkov/hal-sim" }
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+gfx-xtra = { git = "https://github.com/ivmarkov/gfx-xtra" }
+ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
 
 [profile.release]
 opt-level = "s"

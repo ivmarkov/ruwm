@@ -1,5 +1,5 @@
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
 
-    yew::start_app::<ruwm_web::App>();
+    yew::Renderer::<ruwm_web::App>::new().render();
 }

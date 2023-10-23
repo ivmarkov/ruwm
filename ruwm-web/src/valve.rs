@@ -12,10 +12,10 @@ pub struct ValveStore(pub Option<ValveState>);
 pub struct ValveMsg(pub Option<ValveState>);
 
 impl Reducer<ValveStore> for ValveMsg {
-    fn apply(&self, mut store: Rc<ValveStore>) -> Rc<ValveStore> {
+    fn apply(self, mut store: Rc<ValveStore>) -> Rc<ValveStore> {
         let state = Rc::make_mut(&mut store);
 
-        state.0 = self.0.clone();
+        state.0 = self.0;
 
         store
     }

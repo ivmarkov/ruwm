@@ -1,15 +1,19 @@
 #![recursion_limit = "1024"]
 
-use channel_bridge::asynch::Mapper;
+use core::convert::Infallible;
 
-use edge_executor::{Executor, Local, SpawnError, WasmMonitor};
+use hal_sim::{adc::Adc, gpio::Pin};
+
+use embedded_hal02::adc::OneShot;
+
+use edge_executor::LocalExecutor;
 
 use log::info;
 use static_cell::StaticCell;
 
 use yew::prelude::*;
 
-use ruwm::{button, spawn};
+use ruwm::spawn;
 
 mod peripherals;
 mod services;
@@ -26,19 +30,17 @@ pub fn app() -> Html {
     }
 }
 
-fn main() -> Result<(), SpawnError> {
+fn main() {
     wasm_logger::init(wasm_logger::Config::default());
 
-    yew::start_app::<App>();
+    yew::Renderer::<App>::new().render();
 
-    start()?;
-
-    Ok(())
+    start();
 }
 
-static EXECUTOR: StaticCell<Executor<32, WasmMonitor, Local>> = StaticCell::new();
+static EXECUTOR: StaticCell<LocalExecutor<'static, 32>> = StaticCell::new();
 
-fn start() -> Result<(), SpawnError> {
+fn start() {
     info!("Initializing services & peripherals");
 
     let peripherals = peripherals::SystemPeripherals::take();
@@ -86,16 +88,27 @@ fn start() -> Result<(), SpawnError> {
 
     // let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
 
+    struct Adc0<const ID: u8> {
+        adc: Adc<ID>,
+        pin: Pin<Adc<ID>>,
+    }
+
+    impl<const ID: u8> ruwm::battery::Adc for Adc0<ID> {
+        type Error = nb01::Error<Infallible>;
+
+        async fn read(&mut self) -> Result<u16, Self::Error> {
+            self.adc.read(&mut self.pin)
+        }
+    }
+
     // Executor
 
-    let executor = EXECUTOR.init(Executor::<32, WasmMonitor, _>::new());
-    let mut tasks = heapless::Vec::<_, 32>::new();
+    let executor = &*EXECUTOR.init(Default::default());
 
     // High-prio tasks
 
     spawn::high_prio(
         executor,
-        &mut tasks,
         valve_power_pin,
         valve_open_pin,
         valve_close_pin,
@@ -110,28 +123,25 @@ fn start() -> Result<(), SpawnError> {
         |state| unsafe {
             services::RTC_MEMORY.wm_stats = state;
         },
-        peripherals.battery.adc,
-        peripherals.battery.voltage,
+        Adc0 {
+            adc: peripherals.battery.adc,
+            pin: peripherals.battery.voltage,
+        },
         peripherals.battery.power,
         false,
-        services::button(peripherals.buttons.button1, &button::BUTTON1_PIN_EDGE),
-        services::button(peripherals.buttons.button2, &button::BUTTON2_PIN_EDGE),
-        services::button(peripherals.buttons.button3, &button::BUTTON3_PIN_EDGE),
-    )?;
+        services::button(peripherals.buttons.button1),
+        services::button(peripherals.buttons.button2),
+        services::button(peripherals.buttons.button3),
+    );
 
     // Mid-prio tasks
 
     let display = peripherals.display;
 
-    spawn::mid_prio(
-        executor,
-        &mut tasks,
-        services::display(display),
-        move |_new_state| {
-            #[cfg(feature = "nvs")]
-            flash_wm_state(storage, _new_state);
-        },
-    )?;
+    spawn::mid_prio(executor, services::display(display), move |_new_state| {
+        #[cfg(feature = "nvs")]
+        flash_wm_state(storage, _new_state);
+    });
 
     // Low-prio tasks
 
@@ -139,40 +149,17 @@ fn start() -> Result<(), SpawnError> {
     // MQTT
     // spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _, _>(
     //     &mut executor,
-    //     &mut tasks,
     //     mqtt_topic_prefix,
     //     mqtt_client,
-    // )?;
-
-    // Web
-    spawn::web(
-        executor,
-        &mut tasks,
-        ruwm_web::comm::sender(),
-        Mapper::new(ruwm_web::comm::receiver(), |data| Some(Some(data))),
-    )?;
-
-    // Hal Simulator Web
-    executor.spawn_local_collect(
-        hal_sim::web::process(
-            hal_sim::ui::comm::sender(),
-            Mapper::new(hal_sim::ui::comm::receiver(), |data| Some(Some(data))),
-            peripherals.shared,
-        ),
-        &mut tasks,
-    )?;
+    // );
 
     // Start execution
 
     log::info!("Starting executor");
 
-    spawn::start(executor, tasks, move || {
-        log::info!("Execution finished");
-    });
+    wasm_bindgen_futures::spawn_local(executor.run(core::future::pending::<()>()));
 
     log::info!("All started");
-
-    Ok(())
 }
 
 #[cfg(feature = "nvs")]
