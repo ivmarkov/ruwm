@@ -11,8 +11,8 @@ use embassy_futures::select::{select4, Either4};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 
-use embedded_svc::mqtt::client::asynch::{Client, Event, Message, Publish, QoS};
-use embedded_svc::mqtt::client::{Details, ErrorType};
+use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Publish, QoS};
+use embedded_svc::mqtt::client::Details;
 
 use channel_bridge::notification::Notification;
 use wm::WaterMeterState;
@@ -21,10 +21,6 @@ use crate::battery::{self, BatteryState};
 use crate::valve::{ValveCommand, ValveState};
 use crate::wm::WaterMeterCommand;
 use crate::{error, valve, wm};
-
-pub trait CommandConnection: ErrorType {
-    async fn next(&mut self) -> Option<Result<Event<Option<MqttCommand>>, Self::Error>>;
-}
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct MqttConfiguration {
@@ -299,7 +295,9 @@ async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS
     }
 }
 
-pub async fn receive(mut connection: impl CommandConnection) {
+pub async fn receive(
+    mut connection: impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
+) {
     loop {
         let message = connection.next().await;
 

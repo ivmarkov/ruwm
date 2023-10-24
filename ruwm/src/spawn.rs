@@ -3,8 +3,8 @@ use core::fmt::Debug;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::digital::Wait;
 
-use embedded_svc::mqtt::client::asynch::{Client, Publish};
-use embedded_svc::wifi::Wifi as WifiTrait;
+use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
+use embedded_svc::wifi::asynch::Wifi;
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use gfx_xtra::draw_target::Flushable;
@@ -18,7 +18,7 @@ use wm_stats::WaterMeterStatsState;
 
 use crate::battery::Adc;
 use crate::button::{self, PressedLevel};
-use crate::mqtt::CommandConnection;
+use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::Color;
 use crate::web::{self, WebEvent, WebRequest};
@@ -109,14 +109,8 @@ pub fn mid_prio<'a, const C: usize, D>(
     executor.spawn(wm::flash(wm_flash)).detach();
 }
 
-pub fn wifi<'a, const C: usize, D>(
-    executor: &LocalExecutor<'a, C>,
-    wifi: impl WifiTrait + 'a,
-    wifi_notif: impl Receiver<Data = D> + 'a,
-) where
-    D: 'a,
-{
-    executor.spawn(wifi::process(wifi, wifi_notif)).detach();
+pub fn wifi<'a, const C: usize>(executor: &LocalExecutor<'a, C>, wifi: impl Wifi + 'a) {
+    executor.spawn(wifi::process(wifi)).detach();
 }
 
 pub fn mqtt_send<'a, const L: usize, const C: usize>(
@@ -129,9 +123,9 @@ pub fn mqtt_send<'a, const L: usize, const C: usize>(
         .detach();
 }
 
-pub fn mqtt_receive<'a, const C: usize>(
-    executor: &LocalExecutor<'a, C>,
-    mqtt_conn: impl CommandConnection + 'a,
+pub fn mqtt_receive<const C: usize>(
+    executor: &LocalExecutor<'_, C>,
+    mqtt_conn: impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
 ) {
     executor.spawn(mqtt::receive(mqtt_conn)).detach();
 }

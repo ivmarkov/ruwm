@@ -11,7 +11,6 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
 
 use embedded_hal::digital::OutputPin as EHOutputPin;
-use embedded_hal_async::digital::Wait;
 
 use embedded_svc::http::server::Method;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
@@ -21,6 +20,7 @@ use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use embedded_svc::ws::asynch::server::Acceptor;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::adc::{Adc, AdcChannelDriver, AdcConfig, AdcDriver};
 use esp_idf_svc::hal::delay;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::*;
@@ -36,9 +36,9 @@ use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::timer::EspTaskTimerService;
-use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi, WifiEvent};
+use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi};
 
-use esp_idf_svc::sys::EspError;
+use esp_idf_svc::sys::{adc_atten_t, EspError};
 
 use gfx_xtra::draw_target::{Flushable, OwnedDrawTargetExt};
 
@@ -47,7 +47,7 @@ use edge_frame::assets;
 use edge_executor::*;
 
 use ruwm::button::PressedLevel;
-use ruwm::mqtt::{CommandConnection, MessageParser};
+use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::Color;
@@ -92,6 +92,7 @@ pub fn valve_pins(
     let mut open = PinDriver::output(peripherals.open)?;
     let mut close = PinDriver::output(peripherals.close)?;
 
+    // TODO: Do we need this?
     // power.set_pull(Pull::Floating)?;
     // open.set_pull(Pull::Floating)?;
     // close.set_pull(Pull::Floating)?;
@@ -194,6 +195,53 @@ pub fn button<'d, P: InputPin>(
     Ok(PinDriver::input(pin)?)
 }
 
+pub fn adc<'d, const A: adc_atten_t, ADC: Adc + 'd, P: ADCPin<Adc = ADC>>(
+    adc: impl Peripheral<P = ADC> + 'd,
+    pin: impl Peripheral<P = P> + 'd,
+) -> Result<impl ruwm::battery::Adc + 'd, InitError> {
+    struct AdcImpl<'d, const A: adc_atten_t, ADC, V>
+    where
+        ADC: Adc,
+        V: ADCPin<Adc = ADC>,
+    {
+        driver: AdcDriver<'d, ADC>,
+        channel_driver: AdcChannelDriver<'d, A, V>,
+    }
+
+    impl<'d, const A: adc_atten_t, ADC, V> AdcImpl<'d, A, ADC, V>
+    where
+        ADC: Adc,
+        V: ADCPin<Adc = ADC>,
+    {
+        pub const fn new(
+            driver: AdcDriver<'d, ADC>,
+            channel_driver: AdcChannelDriver<'d, A, V>,
+        ) -> Self {
+            Self {
+                driver,
+                channel_driver,
+            }
+        }
+    }
+
+    impl<'d, const A: adc_atten_t, ADC, V> ruwm::battery::Adc for AdcImpl<'d, A, ADC, V>
+    where
+        ADC: Adc,
+        V: ADCPin<Adc = ADC>,
+    {
+        type Error = EspError;
+
+        async fn read(&mut self) -> Result<u16, Self::Error> {
+            self.driver.read(&mut self.channel_driver)
+        }
+    }
+
+    Ok(AdcImpl::new(
+        AdcDriver::new(adc, &AdcConfig::new().calibration(true))?,
+        AdcChannelDriver::<{ A }, _>::new(pin)?,
+    ))
+}
+
 pub fn display(
     peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
 ) -> Result<impl Flushable<Color = Color, Error = impl Debug + 'static> + 'static, InitError> {
@@ -280,37 +328,31 @@ pub fn wifi<'d>(
     timer_service: EspTaskTimerService,
     partition: Option<EspDefaultNvsPartition>,
 ) -> Result<impl Wifi + 'd, InitError> {
-    let mut wifi = AsyncWifi::wrap(
-        EspWifi::new(modem, sysloop.clone(), partition)?,
-        sysloop,
-        timer_service,
-    )?;
+    let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
 
-    // if PASS.is_empty() {
-    //     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-    //         ssid: SSID.into(),
-    //         auth_method: AuthMethod::None,
-    //         ..Default::default()
-    //     }))?;
-    // } else {
-    //     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-    //         ssid: SSID.into(),
-    //         password: PASS.into(),
-    //         ..Default::default()
-    //     }))?;
-    // }
+    if PASS.is_empty() {
+        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+            ssid: SSID.into(),
+            auth_method: AuthMethod::None,
+            ..Default::default()
+        }))?;
+    } else {
+        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+            ssid: SSID.into(),
+            password: PASS.into(),
+            ..Default::default()
+        }))?;
+    }
 
-    // let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
+    let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
 
-    // bwifi.start()?;
+    bwifi.start()?;
 
-    // bwifi.connect()?;
+    bwifi.connect()?;
 
-    // if !PASS.is_empty() {
-    //     wait.wait(|| wifi.is_connected().unwrap());
-    // }
+    bwifi.wait_netif_up()?;
 
-    // bwifi.wait_netif_up()?;
+    let wifi = AsyncWifi::wrap(wifi, sysloop, timer_service)?;
 
     Ok(wifi)
 }
@@ -347,7 +389,14 @@ pub fn httpd<'a>() -> Result<(EspHttpServer<'a>, impl Acceptor), InitError> {
     Ok((httpd, ws_acceptor))
 }
 
-pub fn mqtt() -> Result<(&'static str, impl Client + Publish, impl CommandConnection), InitError> {
+pub fn mqtt() -> Result<
+    (
+        &'static str,
+        impl Client + Publish,
+        impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
+    ),
+    InitError,
+> {
     let client_id = "water-meter-demo";
     let mut mqtt_parser = MessageParser::new();
 
@@ -367,13 +416,13 @@ pub fn mqtt() -> Result<(&'static str, impl Client + Publish, impl CommandConnec
 
 pub fn schedule<'a, const C: usize>(
     stack_size: usize,
-    run: impl Future + Send,
+    run: impl Future + Send + 'static,
     spawner: impl FnOnce() -> LocalExecutor<'a, C> + Send + 'static,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .stack_size(stack_size)
         .spawn(move || {
-            let mut executor = spawner();
+            let executor = spawner();
 
             // info!(
             //     "Tasks on thread {:?} scheduled, about to run the executor now",

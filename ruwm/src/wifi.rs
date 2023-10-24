@@ -2,14 +2,7 @@ use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
 
-use embassy_futures::select::{select, Either};
-
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
-
-use embedded_svc::wifi::{Configuration, Wifi as WifiTrait};
-
-use channel_bridge::asynch::Receiver;
+use embedded_svc::wifi::{asynch::Wifi, Configuration};
 
 use crate::state::State;
 
@@ -29,20 +22,18 @@ pub static STATE: State<Option<bool>> = State::new(
     ],
 );
 
-pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
+//pub(crate) static COMMAND: Signal<CriticalSectionRawMutex, WifiCommand> = Signal::new();
 
-pub async fn process<D>(
-    mut wifi: impl WifiTrait,
-    mut state_changed_source: impl Receiver<Data = D>,
-) {
-    loop {
-        match select(state_changed_source.recv(), COMMAND.wait()).await {
-            Either::First(_) => {
-                STATE.update(Some(wifi.is_connected().unwrap()));
-            }
-            Either::Second(command) => match command {
-                WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),
-            },
-        }
-    }
+pub async fn process(_wifi: impl Wifi) {
+    // TODO
+    // loop {
+    //     match select(state_changed_source.recv(), COMMAND.wait()).await {
+    //         Either::First(_) => {
+    //             STATE.update(Some(wifi.is_connected().unwrap()));
+    //         }
+    //         Either::Second(command) => match command {
+    //             WifiCommand::SetConfiguration(conf) => wifi.set_configuration(&conf).unwrap(),
+    //         },
+    //     }
+    // }
 }

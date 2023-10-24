@@ -14,7 +14,7 @@ use embassy_time::Duration;
 #[cfg(feature = "nvs")]
 use embedded_svc::storage::Storage;
 
-use esp_idf_svc::hal::adc::*;
+use esp_idf_svc::hal::adc::attenuation;
 use esp_idf_svc::hal::gpio::*;
 use esp_idf_svc::hal::reset::WakeupReason;
 use esp_idf_svc::hal::task::block_on;
@@ -24,10 +24,8 @@ use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
 use esp_idf_svc::sys::esp;
-use esp_idf_svc::sys::EspError;
 use esp_idf_svc::timer::EspTaskTimerService;
 
-use ruwm::button;
 use ruwm::quit;
 use ruwm::spawn;
 use ruwm::wm::WaterMeterState;
@@ -98,8 +96,6 @@ fn sleep() -> Result<(), InitError> {
 
         esp_idf_svc::sys::esp_deep_sleep_start();
     }
-
-    Ok(())
 }
 
 fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
@@ -178,27 +174,6 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let high_prio_executor = LocalExecutor::<16>::new();
 
-    struct Adc0<'d, ADC, V>
-    where
-        ADC: Adc,
-        V: ADCPin<Adc = ADC>,
-    {
-        driver: AdcDriver<'d, ADC>,
-        channel_driver: AdcChannelDriver<'d, { attenuation::NONE }, V>,
-    }
-
-    impl<'d, ADC, V> ruwm::battery::Adc for Adc0<'d, ADC, V>
-    where
-        ADC: Adc,
-        V: ADCPin<Adc = ADC>,
-    {
-        type Error = nb01::Error<EspError>;
-
-        async fn read(&mut self) -> Result<u16, Self::Error> {
-            todo!()
-        }
-    }
-
     // TODO: Move off the main thread, as it has a fixed, low priority (1)
     spawn::high_prio(
         &high_prio_executor,
@@ -216,10 +191,10 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
         |state| unsafe {
             services::RTC_MEMORY.wm_stats = state;
         },
-        Adc0 {
-            driver: AdcDriver::new(peripherals.battery.adc, &AdcConfig::new().calibration(true))?,
-            channel_driver: AdcChannelDriver::new(peripherals.battery.voltage)?,
-        },
+        services::adc::<{ attenuation::NONE }, _, _>(
+            peripherals.battery.adc,
+            peripherals.battery.voltage,
+        )?,
         PinDriver::input(peripherals.battery.power)?,
         false,
         services::button(peripherals.buttons.button1)?,
@@ -252,7 +227,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
             },
         );
 
-        spawn::wifi(&executor, wifi, wifi_notif);
+        spawn::wifi(&executor, wifi);
 
         spawn::mqtt_receive(&executor, mqtt_conn);
 
