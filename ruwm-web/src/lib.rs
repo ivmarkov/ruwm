@@ -4,24 +4,32 @@ use core::fmt::Debug;
 
 use std::rc::Rc;
 
-use edge_frame::middleware;
 use log::Level;
-use ruwm::dto::web::WebEvent;
-use ruwm::dto::web::WebRequest;
+
 use yew::prelude::*;
 use yew_router::prelude::*;
 use yewdux_middleware::*;
 
 use edge_frame::frame::*;
-use edge_frame::middleware::*;
+use edge_frame::middleware::{self, *};
 use edge_frame::role::*;
 use edge_frame::wifi::*;
+
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
+use embassy_sync::channel::{DynamicSender, DynamicReceiver};
+
+use ruwm::dto::web::*;
 
 use crate::battery::*;
 use crate::valve::*;
 
 mod battery;
 mod valve;
+
+static REQUEST_QUEUE: channel::Channel<CriticalSectionRawMutex, WebRequest, 1> =
+    channel::Channel::new();
+static EVENT_QUEUE: channel::Channel<CriticalSectionRawMutex, WebEvent, 1> =
+    channel::Channel::new();
 
 #[derive(Debug, Routable, Copy, Clone, PartialEq, Eq, Hash)]
 enum Routes {
@@ -135,7 +143,7 @@ fn init_middleware(endpoint: Option<&str>) {
         // Receive from backend => dispatch WebEvent messages
         middleware::receive::<WebEvent>(receiver);
     } else {
-        let (sender, receiver) = (comm::REQUEST_QUEUE.sender(), comm::EVENT_QUEUE.receiver());
+        let (sender, receiver) = (REQUEST_QUEUE.sender(), EVENT_QUEUE.receiver());
 
         // Dispatch WebRequest messages => send to backend
         dispatch::register(middleware::send_local::<WebRequest>(sender));
@@ -143,6 +151,13 @@ fn init_middleware(endpoint: Option<&str>) {
         // Receive from backend => dispatch WebEvent messages
         middleware::receive_local::<WebEvent>(receiver);
     }
+}
+
+pub fn local_queue() -> (
+    DynamicSender<'static, WebEvent>,
+    DynamicReceiver<'static, WebRequest>,
+) {
+    (EVENT_QUEUE.sender().into(), REQUEST_QUEUE.receiver().into())
 }
 
 fn log<S, M>(dispatch: impl MiddlewareDispatch<M> + Clone) -> impl MiddlewareDispatch<M>
@@ -170,23 +185,4 @@ fn role_as_request(msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>)
     }
 
     dispatch.invoke(msg);
-}
-
-pub mod comm {
-    use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
-
-    use ruwm::dto::web::*;
-
-    pub(crate) static REQUEST_QUEUE: channel::Channel<CriticalSectionRawMutex, WebRequest, 1> =
-        channel::Channel::new();
-    pub(crate) static EVENT_QUEUE: channel::Channel<CriticalSectionRawMutex, WebEvent, 1> =
-        channel::Channel::new();
-
-    pub fn sender() -> channel::DynamicSender<'static, WebEvent> {
-        EVENT_QUEUE.sender().into()
-    }
-
-    pub fn receiver() -> channel::DynamicReceiver<'static, WebRequest> {
-        REQUEST_QUEUE.receiver().into()
-    }
 }

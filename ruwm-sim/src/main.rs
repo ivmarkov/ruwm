@@ -7,6 +7,8 @@
 
 use edge_executor::LocalExecutor;
 
+use channel_bridge::asynch::Mapper;
+
 use log::info;
 use static_cell::StaticCell;
 
@@ -135,6 +137,14 @@ fn start() {
     //     mqtt_topic_prefix,
     //     mqtt_client,
     // );
+
+    let (sender, receiver) = ruwm_web::local_queue();
+
+    spawn::web(
+        &executor,
+        sender,
+        Mapper::new(receiver, |data| Some(Some(data))),
+    );
 
     // Start execution
 
