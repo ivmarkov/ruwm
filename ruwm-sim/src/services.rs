@@ -1,3 +1,4 @@
+use core::convert::Infallible;
 use core::fmt::Debug;
 
 use embassy_time::Duration;
@@ -7,10 +8,12 @@ use embedded_graphics_core::pixelcolor::Rgb888;
 use gfx_xtra::draw_target::{buffer_size, Flushable, OwnedDrawTargetExt};
 
 use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal02::adc::OneShot;
 use embedded_hal_async::digital::Wait;
 
 use static_cell::*;
 
+use hal_sim::adc::Adc;
 use hal_sim::display::Display;
 use hal_sim::gpio::{Input, Pin};
 
@@ -124,6 +127,23 @@ pub fn pulse(pulse: Pin<Input>) -> (impl PulseCounter, impl PulseWakeup) {
 
 pub fn button(pin: Pin<Input>) -> impl InputPin<Error = impl Debug> + Wait {
     pin
+}
+
+pub fn adc<const ID: u8>(adc: Adc<ID>, pin: Pin<Adc<ID>>) -> impl ruwm::battery::Adc {
+    struct AdcImpl<const ID: u8> {
+        adc: Adc<ID>,
+        pin: Pin<Adc<ID>>,
+    }
+
+    impl<const ID: u8> ruwm::battery::Adc for AdcImpl<ID> {
+        type Error = nb01::Error<Infallible>;
+
+        async fn read(&mut self) -> Result<u16, Self::Error> {
+            self.adc.read(&mut self.pin)
+        }
+    }
+
+    AdcImpl { adc, pin }
 }
 
 pub fn display(

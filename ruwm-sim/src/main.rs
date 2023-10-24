@@ -1,10 +1,9 @@
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![feature(async_fn_in_trait)]
+#![allow(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
 #![recursion_limit = "1024"]
-
-use core::convert::Infallible;
-
-use hal_sim::{adc::Adc, gpio::Pin};
-
-use embedded_hal02::adc::OneShot;
 
 use edge_executor::LocalExecutor;
 
@@ -88,19 +87,6 @@ fn start() {
 
     // let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
 
-    struct Adc0<const ID: u8> {
-        adc: Adc<ID>,
-        pin: Pin<Adc<ID>>,
-    }
-
-    impl<const ID: u8> ruwm::battery::Adc for Adc0<ID> {
-        type Error = nb01::Error<Infallible>;
-
-        async fn read(&mut self) -> Result<u16, Self::Error> {
-            self.adc.read(&mut self.pin)
-        }
-    }
-
     // Executor
 
     let executor = &*EXECUTOR.init(Default::default());
@@ -123,10 +109,7 @@ fn start() {
         |state| unsafe {
             services::RTC_MEMORY.wm_stats = state;
         },
-        Adc0 {
-            adc: peripherals.battery.adc,
-            pin: peripherals.battery.voltage,
-        },
+        services::adc(peripherals.battery.adc, peripherals.battery.voltage),
         peripherals.battery.power,
         false,
         services::button(peripherals.buttons.button1),

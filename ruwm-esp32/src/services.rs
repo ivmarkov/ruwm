@@ -208,22 +208,6 @@ pub fn adc<'d, const A: adc_atten_t, ADC: Adc + 'd, P: ADCPin<Adc = ADC>>(
         channel_driver: AdcChannelDriver<'d, A, V>,
     }
 
-    impl<'d, const A: adc_atten_t, ADC, V> AdcImpl<'d, A, ADC, V>
-    where
-        ADC: Adc,
-        V: ADCPin<Adc = ADC>,
-    {
-        pub const fn new(
-            driver: AdcDriver<'d, ADC>,
-            channel_driver: AdcChannelDriver<'d, A, V>,
-        ) -> Self {
-            Self {
-                driver,
-                channel_driver,
-            }
-        }
-    }
-
     impl<'d, const A: adc_atten_t, ADC, V> ruwm::battery::Adc for AdcImpl<'d, A, ADC, V>
     where
         ADC: Adc,
@@ -236,10 +220,10 @@ pub fn adc<'d, const A: adc_atten_t, ADC: Adc + 'd, P: ADCPin<Adc = ADC>>(
         }
     }
 
-    Ok(AdcImpl::new(
-        AdcDriver::new(adc, &AdcConfig::new().calibration(true))?,
-        AdcChannelDriver::<{ A }, _>::new(pin)?,
-    ))
+    Ok(AdcImpl {
+        driver: AdcDriver::new(adc, &AdcConfig::new().calibration(true))?,
+        channel_driver: AdcChannelDriver::<{ A }, _>::new(pin)?,
+    })
 }
 
 pub fn display(
