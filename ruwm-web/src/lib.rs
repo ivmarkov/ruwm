@@ -15,8 +15,8 @@ use edge_frame::middleware::{self, *};
 use edge_frame::role::*;
 use edge_frame::wifi::*;
 
+use embassy_sync::channel::{DynamicReceiver, DynamicSender};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
-use embassy_sync::channel::{DynamicSender, DynamicReceiver};
 
 use ruwm::dto::web::*;
 
