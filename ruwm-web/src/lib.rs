@@ -13,7 +13,7 @@ use yewdux_middleware::*;
 use edge_frame::frame::*;
 use edge_frame::middleware::{self, *};
 use edge_frame::role::*;
-use edge_frame::wifi::*;
+use edge_frame::wifi_setup::*;
 
 use embassy_sync::channel::{DynamicReceiver, DynamicSender};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
@@ -98,7 +98,7 @@ fn render(route: Routes) -> Html {
                         },
                         Routes::Wifi => html! {
                             <Role role={RoleDto::Admin} auth=true>
-                                <Wifi/>
+                                <WifiSetup/>
                             </Role>
                         },
                     }
@@ -129,7 +129,7 @@ fn init_middleware(endpoint: Option<&str>) {
     dispatch::register(log::<RoleStore, RoleState>(
         dispatch::store.fuse(role_as_request),
     ));
-    dispatch::register(log::<WifiConfStore, WifiConfState>(dispatch::store));
+    dispatch::register(log::<WifiConfStore, WifiConf>(dispatch::store));
     dispatch::register(log::<BatteryStore, BatteryMsg>(dispatch::store));
     dispatch::register(log::<ValveStore, ValveMsg>(dispatch::store));
 
