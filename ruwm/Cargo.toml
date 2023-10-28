@@ -1,6 +1,6 @@
 [package]
 name = "ruwm"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["ivmarkov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -26,12 +26,12 @@ futures = {version = "0.3", optional = true, features = ["async-await"] }
 embedded-hal = { version = "1.0.0-rc.1", optional = true }
 embedded-hal-async = { version = "1.0.0-rc.1", optional = true }
 embedded-svc = { version = "0.26", optional = true, features = ["nightly", "experimental"] }
-edge-frame = { version = "0.6", default-features = false, features = ["dto"] }
+edge-frame = { version = "0.7", default-features = false, features = ["dto"] }
 embassy-futures = { version = "0.1", optional = true }
 embassy-sync = { version = "0.3", optional = true }
 embassy-time = { version = "0.1", optional = true }
 embedded-graphics = { version = "0.8", optional = true }
 profont = { version = "0.7", optional = true }
-gfx-xtra = { version = "0.1", optional = true }
+gfx-xtra = { version = "0.2", optional = true }
 edge-executor = { version = "0.4", optional = true }
-channel-bridge = { version = "0.5", default-features = false, features = ["nightly", "embedded-svc"], optional = true }
+channel-bridge = { version = "0.6", default-features = false, features = ["nightly", "embedded-svc"], optional = true }

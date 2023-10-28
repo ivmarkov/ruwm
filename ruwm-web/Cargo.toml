@@ -1,13 +1,8 @@
 #cargo-features = ["per-package-target"]
 
-[patch.crates-io]
-yewdux-middleware = { git = "https://github.com/ivmarkov/yewdux-middleware" }
-hal-sim = { git = "https://github.com/ivmarkov/hal-sim" }
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-
 [package]
 name = "ruwm-web"
-version = "0.2.0"
+version = "0.4.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -34,12 +29,12 @@ web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.21", default-features = false, features = ["csr"] }
 yew-router = { version = "0.18" }
 yewdux = "0.9"
-yewdux-middleware = { version = "0.1" }
+yewdux-middleware = { version = "0.2" }
 strum = "0.25"
 serde = "1"
 embedded-svc = { version = "0.26", default-features = false, features = ["std"] }
-edge-frame = { version = "0.6", default-features = false, features = ["web"] }
-ruwm = { version = "0.3", path = "../ruwm", default-features = false }
+edge-frame = { version = "0.7", default-features = false, features = ["web"] }
+ruwm = { version = "0.4", path = "../ruwm", default-features = false }
 embassy-sync = "0.3"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
