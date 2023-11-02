@@ -9,6 +9,7 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
+edge-executor = { git = "https://github.com/ivmarkov/edge-executor" }
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
 
 [profile.release]
