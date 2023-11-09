@@ -38,7 +38,7 @@ esp-idf-svc = { version = "0.47", features = ["nightly", "critical-section", "em
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.3", features = ["std"] }
 embassy-time = { version = "0.1", features = ["generic-queue"] }
-static_cell = { version = "1" }
+static_cell = { version = "2" }
 edge-frame = { version = "0.7", default-features = false, features = ["assets-serve"] }
 edge-executor = { version = "0.4" }
 embedded-graphics = "0.8"

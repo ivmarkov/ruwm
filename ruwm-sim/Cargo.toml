@@ -49,5 +49,5 @@ embedded-graphics-core = "0.4"
 gfx-xtra = "0.2"
 edge-executor = "0.4"
 channel-bridge = { version = "0.6", features = ["nightly"]}
-static_cell = "1"
+static_cell = "2"
 critical-section = { version = "1", features = ["std"] }

@@ -9,10 +9,6 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
-edge-executor = { git = "https://github.com/ivmarkov/edge-executor" }
-crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam" }
-heapless = { git = "https://github.com/rust-embedded/heapless" }
-static_cell = { git = "https://github.com/ivmarkov/static-cell" }
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
 
 [profile.release]
