@@ -9,6 +9,7 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
+crossbeam-utils = { git = "https://github.com/crossbeam-rs" }
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
 
 [profile.release]
