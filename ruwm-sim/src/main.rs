@@ -1,8 +1,4 @@
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
 #![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
 #![recursion_limit = "1024"]
 
 use edge_executor::LocalExecutor;
@@ -141,7 +137,7 @@ fn start() {
     let (sender, receiver) = ruwm_web::local_queue();
 
     spawn::web(
-        &executor,
+        executor,
         sender,
         Mapper::new(receiver, |data| Some(Some(data))),
     );
