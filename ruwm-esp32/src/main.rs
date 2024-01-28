@@ -1,8 +1,4 @@
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
 #![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
 
 extern crate alloc;
 
@@ -68,17 +64,8 @@ fn main() -> Result<(), InitError> {
 
 fn init() -> Result<(), InitError> {
     esp_idf_svc::sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-
-    esp!(unsafe {
-        #[allow(clippy::needless_update)]
-        esp_idf_svc::sys::esp_vfs_eventfd_register(&esp_idf_svc::sys::esp_vfs_eventfd_config_t {
-            max_fds: 5,
-            ..Default::default()
-        })
-    })?;
+    esp_idf_svc::io::vfs::init_eventfd(5);
 
     Ok(())
 }
