@@ -32,6 +32,7 @@ postcard = "1"
 embedded-hal = "1"
 embedded-hal-async = "1"
 embedded-hal02 = { package = "embedded-hal", version = "0.2", features = ["unproven"] }
+embedded-io-async = "0.6"
 nb01 = { package = "nb", version = "0.1" }
 embedded-svc = "0.27"
 esp-idf-svc = { version = "0.48", features = ["critical-section", "embassy-time-driver"] }
@@ -39,6 +40,11 @@ embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.5", features = ["std"] }
 embassy-time = { version = "0.3", features = ["generic-queue"] }
 static_cell = { version = "2" }
+edge-http = { version = "0.1", features = ["embedded-svc"] }
+edge-ws = { version = "0.1", features = ["embedded-svc"] }
+embedded-nal-async = "0.7"
+embedded-nal-async-xtra = "0.1"
+edge-std-nal-async = "0.1"
 edge-frame = { version = "0.7", default-features = false, features = ["assets-serve"] }
 edge-executor = { version = "0.4" }
 embedded-graphics = "0.8"
@@ -53,4 +59,4 @@ ruwm = { version = "0.4", path = "../ruwm", features = ["edge-executor"] }
 [build-dependencies]
 anyhow = "1"
 embuild = { version = "0.31", features = ["espidf", "elf"] }
-edge-frame = { version = "0.6", default-features = false, features = ["assets-prepare"] }
+edge-frame = { version = "0.7", default-features = false, features = ["assets-prepare"] }

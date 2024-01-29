@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use yew::prelude::*;
-use yewdux_middleware::*;
+use yewdux::prelude::*;
 
 use ruwm::dto::valve::ValveState;
 

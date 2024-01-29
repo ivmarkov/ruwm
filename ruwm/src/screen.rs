@@ -1,7 +1,6 @@
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use embedded_svc::utils::asyncify::Unblocker;
 use serde::{Deserialize, Serialize};
 
 use log::trace;
@@ -226,21 +225,21 @@ pub async fn process() {
     }
 }
 
-pub async fn unblock_run_draw<U, D>(unblocker: U, mut display: D)
-where
-    U: Unblocker,
-    D: Flushable<Color = Color> + Send + 'static,
-    D::Error: Debug + Send + 'static,
-{
-    loop {
-        let screen_state = wait_change().await;
+// pub async fn unblock_run_draw<U, D>(unblocker: U, mut display: D)
+// where
+//     U: Unblocker,
+//     D: Flushable<Color = Color> + Send + 'static,
+//     D::Error: Debug + Send + 'static,
+// {
+//     loop {
+//         let screen_state = wait_change().await;
 
-        display = unblocker
-            .unblock(move || draw(display, screen_state))
-            .await
-            .unwrap();
-    }
-}
+//         display = unblocker
+//             .unblock(move || draw(display, screen_state))
+//             .await
+//             .unwrap();
+//     }
+// }
 
 pub async fn run_draw<D>(mut display: D)
 where

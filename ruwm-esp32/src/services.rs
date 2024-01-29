@@ -1,23 +1,27 @@
-use core::cell::RefCell;
 use core::fmt::Debug;
-use core::future::Future;
 use core::mem;
 
 extern crate alloc;
 
-use edge_frame::assets::serve::AssetMetadata;
+use channel_bridge::asynch::ws::WsError;
 
-use embassy_sync::blocking_mutex::Mutex;
+use edge_frame::assets::{self, serve::Asset};
+use edge_http::io::{self, server::DefaultServer};
+use edge_http::Method;
+use edge_ws::io::WsConnection;
+
 use embassy_time::Duration;
+
+use embedded_nal_async::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use embedded_nal_async_xtra::{TcpListen, TcpSplittableConnection};
 
 use embedded_hal::digital::OutputPin as EHOutputPin;
 
-use embedded_svc::http::server::Method;
+use embedded_io_async::{Read, Write};
+use embedded_svc::http::server::asynch::Request;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
-use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::asynch::Wifi;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
-use embedded_svc::ws::asynch::server::Acceptor;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::adc::{Adc, AdcChannelDriver, AdcConfig, AdcDriver};
@@ -29,11 +33,8 @@ use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::hal::reset::WakeupReason;
 use esp_idf_svc::hal::spi::*;
-use esp_idf_svc::hal::task::embassy_sync::EspRawMutex;
 
-use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
-use esp_idf_svc::http::server::EspHttpServer;
-use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
+use esp_idf_svc::mqtt::client::{EspAsyncMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi};
@@ -42,19 +43,13 @@ use esp_idf_svc::sys::{adc_atten_t, EspError};
 
 use gfx_xtra::draw_target::{Flushable, OwnedDrawTargetExt};
 
-use edge_frame::assets;
-
-use edge_executor::*;
-
 use ruwm::button::PressedLevel;
-use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::Color;
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
-use ruwm::ws;
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
@@ -316,14 +311,14 @@ pub fn wifi<'d>(
 
     if PASS.is_empty() {
         wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
+            ssid: SSID.try_into().unwrap(),
             auth_method: AuthMethod::None,
             ..Default::default()
         }))?;
     } else {
         wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            password: PASS.into(),
+            ssid: SSID.try_into().unwrap(),
+            password: PASS.try_into().unwrap(),
             ..Default::default()
         }))?;
     }
@@ -341,79 +336,148 @@ pub fn wifi<'d>(
     Ok(wifi)
 }
 
-pub fn httpd<'a>() -> Result<(EspHttpServer<'a>, impl Acceptor), InitError> {
-    let (ws_processor, ws_acceptor) =
-        EspHttpWsProcessor::<{ ws::WS_MAX_CONNECTIONS }, { ws::WS_MAX_FRAME_LEN }>::new(());
+#[derive(Debug)]
+enum HttpdError<T> {
+    Http(io::Error<T>),
+    Ws(WsError<T>),
+}
 
-    let ws_processor = Mutex::<EspRawMutex, _>::new(RefCell::new(ws_processor));
+impl<T> From<io::Error<T>> for HttpdError<T> {
+    fn from(err: io::Error<T>) -> Self {
+        Self::Http(err)
+    }
+}
 
-    let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
+impl<T> From<WsError<T>> for HttpdError<T> {
+    fn from(err: WsError<T>) -> Self {
+        Self::Ws(err)
+    }
+}
 
-    let mut assets = ASSETS
-        .iter()
-        .filter(|asset| !asset.0.is_empty())
-        .collect::<heapless::Vec<_, { assets::MAX_ASSETS }>>();
+struct HttpdHandler<'a>(&'a [Asset]);
 
-    assets.sort_by_key(|asset| AssetMetadata::derive(asset.0).uri);
-
-    for asset in assets.iter().rev() {
-        let asset = **asset;
-
-        let metadata = AssetMetadata::derive(asset.0);
-
-        httpd.fn_handler(metadata.uri, Method::Get, move |req| {
-            assets::serve::serve(req, asset)
-        })?;
+impl<'a> HttpdHandler<'a> {
+    fn new(assets: &'a [Asset]) -> Self {
+        Self(assets)
     }
 
-    httpd.ws_handler("/ws", move |connection| {
-        ws_processor.lock(|ws_processor| ws_processor.borrow_mut().process(connection))
-    })?;
+    async fn handle<'b, T, const N: usize>(
+        &self,
+        handler_id: usize,
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), HttpdError<T::Error>>
+    where
+        T: Read + Write + TcpSplittableConnection,
+    {
+        if matches!(con.headers().unwrap().method, Some(Method::Get)) {
+            if matches!(con.headers()?.path, Some("/ws")) {
+                self.handle_ws(handler_id, con).await?;
+            } else {
+                self.handle_assets(con).await?;
+            }
+        } else {
+            con.initiate_response(405, None, &[]).await?;
+        }
 
-    Ok((httpd, ws_acceptor))
+        Ok(())
+    }
+
+    async fn handle_ws<'b, T, const N: usize>(
+        &self,
+        handler_id: usize,
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), HttpdError<T::Error>>
+    where
+        T: Read + Write + TcpSplittableConnection,
+    {
+        if con.is_ws_upgrade_request()? {
+            con.initiate_ws_upgrade_response().await?;
+            con.complete().await?;
+
+            let socket = con.unbind()?;
+
+            let (read, write) = socket.split().map_err(io::Error::Io)?;
+
+            let sender = WsConnection::new(write, || None);
+            let receiver = WsConnection::new(read, || Option::<()>::None);
+
+            ruwm::ws::handle(sender, receiver, handler_id)
+                .await
+                .unwrap(); // TODO
+        } else {
+            con.initiate_response(200, None, &[]).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_assets<'b, T, const N: usize>(
+        &self,
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), io::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
+        let asset = self
+            .0
+            .iter()
+            .find(|asset| Some(Some(asset.0)) == con.headers().ok().map(|headers| headers.path));
+
+        if let Some(asset) = asset {
+            assets::serve::asynch::serve(Request::wrap(con), *asset).await
+        } else {
+            con.initiate_response(404, None, &[]).await
+        }
+    }
+}
+
+impl<'a, 'b, T, const N: usize> io::server::TaskHandler<'a, T, N> for HttpdHandler<'b>
+where
+    T: Read + Write + TcpSplittableConnection,
+{
+    type Error = HttpdError<T::Error>;
+
+    async fn handle(
+        &self,
+        handler_id: usize,
+        con: &mut io::server::Connection<'a, T, N>,
+    ) -> Result<(), Self::Error> {
+        HttpdHandler::handle(self, handler_id, con).await
+    }
+}
+
+pub async fn run_httpd(server: &mut DefaultServer) -> Result<(), InitError> {
+    let stack = edge_std_nal_async::Stack::new();
+
+    let acceptor = stack
+        .listen(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 80)))
+        .await
+        .unwrap(); // TODO
+
+    server
+        .run_with_task_id(acceptor, HttpdHandler::new(&ASSETS))
+        .await
+        .unwrap(); // TODO
+
+    Ok(())
 }
 
 pub fn mqtt() -> Result<
     (
         &'static str,
         impl Client + Publish,
-        impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
+        impl Connection + 'static,
     ),
     InitError,
 > {
     let client_id = "water-meter-demo";
-    let mut mqtt_parser = MessageParser::new();
-
-    let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
+    let (mqtt_client, mqtt_conn) = EspAsyncMqttClient::new(
         "mqtt://broker.emqx.io:1883",
         &MqttClientConfiguration {
             client_id: Some(client_id),
             ..Default::default()
         },
-        move |event| mqtt_parser.convert(event),
     )?;
 
-    let mqtt_client = mqtt_client.into_async();
-
     Ok((client_id, mqtt_client, mqtt_conn))
-}
-
-pub fn schedule<'a, const C: usize>(
-    stack_size: usize,
-    run: impl Future + Send + 'static,
-    spawner: impl FnOnce() -> LocalExecutor<'a, C> + Send + 'static,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .stack_size(stack_size)
-        .spawn(move || {
-            let executor = spawner();
-
-            // info!(
-            //     "Tasks on thread {:?} scheduled, about to run the executor now",
-            //     "TODO"
-            // );
-
-            block_on(executor.run(run));
-        })
-        .unwrap()
 }

@@ -26,7 +26,7 @@ pub static STATE: State<BatteryState> = State::new(
     ],
 );
 
-pub async fn process(mut battery_adc: impl Adc, power_pin: impl InputPin) {
+pub async fn process(mut battery_adc: impl Adc, mut power_pin: impl InputPin) {
     const ROUND_UP: u16 = 50; // TODO: Make it smaller once ADC is connected
 
     loop {

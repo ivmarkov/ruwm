@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use edge_executor::LocalExecutor;
+use edge_http::io::server::DefaultServer;
 #[cfg(feature = "nvs")]
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
@@ -47,7 +48,7 @@ esp_idf_svc::sys::esp_app_desc!();
 
 fn main() -> Result<(), InitError> {
     esp_idf_svc::hal::task::critical_section::link();
-    esp_idf_svc::timer::embassy_time::driver::link();
+    esp_idf_svc::timer::embassy_time_driver::link();
 
     let wakeup_reason = WakeupReason::get();
 
@@ -65,7 +66,7 @@ fn main() -> Result<(), InitError> {
 fn init() -> Result<(), InitError> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    esp_idf_svc::io::vfs::init_eventfd(5);
+    esp_idf_svc::io::vfs::initialize_eventfd(5)?;
 
     Ok(())
 }
@@ -151,7 +152,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // Httpd
 
-    let (_httpd, ws_acceptor) = services::httpd()?;
+    let mut httpd = DefaultServer::new();
 
     // Mqtt
 
@@ -202,24 +203,27 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = services::schedule::<8>(50000, quit::QUIT[1].wait(), move || {
-        let executor = LocalExecutor::new();
+    let mid_prio_execution = std::thread::Builder::new()
+        .stack_size(50000)
+        .spawn(move || {
+            let executor = LocalExecutor::<8>::new();
 
-        spawn::mid_prio(
-            &executor,
-            services::display(display_peripherals).unwrap(),
-            move |_new_state| {
-                #[cfg(feature = "nvs")]
-                flash_wm_state(storage, _new_state);
-            },
-        );
+            spawn::mid_prio(
+                &executor,
+                services::display(display_peripherals).unwrap(),
+                move |_new_state| {
+                    #[cfg(feature = "nvs")]
+                    flash_wm_state(storage, _new_state);
+                },
+            );
 
-        spawn::wifi(&executor, wifi);
+            spawn::wifi(&executor, wifi);
 
-        spawn::mqtt_receive(&executor, mqtt_conn);
+            spawn::mqtt_receive(&executor, mqtt_conn);
 
-        executor
-    });
+            block_on(executor.run(quit::QUIT[1].wait()));
+        })
+        .unwrap();
 
     // Low-prio tasks
 
@@ -232,15 +236,18 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = services::schedule::<4>(50000, quit::QUIT[2].wait(), move || {
-        let executor = LocalExecutor::new();
+    let low_prio_execution = std::thread::Builder::new()
+        .stack_size(50000)
+        .spawn(move || {
+            let executor = LocalExecutor::<4>::new();
 
-        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4>(&executor, mqtt_topic_prefix, mqtt_client);
+            spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4>(&executor, mqtt_topic_prefix, mqtt_client);
 
-        spawn::ws(&executor, ws_acceptor);
+            executor.spawn(services::run_httpd(&mut httpd)).detach();
 
-        executor
-    });
+            block_on(executor.run(quit::QUIT[2].wait()));
+        })
+        .unwrap();
 
     // Start main execution
 

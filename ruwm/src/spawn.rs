@@ -18,7 +18,6 @@ use wm_stats::WaterMeterStatsState;
 
 use crate::battery::Adc;
 use crate::button::{self, PressedLevel};
-use crate::mqtt::MqttCommand;
 use crate::pulse_counter::{PulseCounter, PulseWakeup};
 use crate::screen::Color;
 use crate::web::{self, WebEvent, WebRequest};
@@ -125,7 +124,7 @@ pub fn mqtt_send<'a, const L: usize, const C: usize>(
 
 pub fn mqtt_receive<const C: usize>(
     executor: &LocalExecutor<'_, C>,
-    mqtt_conn: impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
+    mqtt_conn: impl Connection + 'static,
 ) {
     executor.spawn(mqtt::receive(mqtt_conn)).detach();
 }

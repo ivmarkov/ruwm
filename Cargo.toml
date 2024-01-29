@@ -9,8 +9,13 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
-crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam" }
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
+edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
+#edge-http = { git = "https://github.com/ivmarkov/edge-net" }
+edge-http = { path = "../edge-net/edge-http" }
+#edge-std-nal-async = { git = "https://github.com/ivmarkov/edge-net" }
+edge-std-nal-async = { path = "../edge-net/edge-std-nal-async" }
+embedded-nal-async-xtra = { path = "../edge-net/embedded-nal-async-xtra" }
 
 [profile.release]
 opt-level = "s"

@@ -66,6 +66,21 @@ pub async fn process<A: Acceptor>(acceptor: A) {
     ws::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler).await;
 }
 
+pub async fn handle<S, R>(sender: S, receiver: R, index: usize) -> Result<(), ws::WsError<S::Error>>
+where
+    S: embedded_svc::ws::asynch::Sender,
+    R: embedded_svc::ws::asynch::Receiver<Error = S::Error>,
+{
+    web::handle(
+        ws::WsSvcSender::<WS_MAX_FRAME_LEN, _, _>::new(sender),
+        ws::WsSvcReceiver::<WS_MAX_FRAME_LEN, _, _>::new(receiver),
+        &HANDLERS_VALVE_STATE_NOTIF[index],
+        &HANDLERS_WM_STATE_NOTIF[index],
+        &HANDLERS_WM_STATS_STATE_NOTIF[index],
+    )
+    .await
+}
+
 pub async fn broadcast() {
     loop {
         let targets = match select_array([

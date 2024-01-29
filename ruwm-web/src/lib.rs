@@ -50,9 +50,10 @@ pub struct AppProps {
 #[function_component(App)]
 pub fn app(props: &AppProps) -> Html {
     let endpoint = props.endpoint.clone();
+    let mcx = use_mcx();
 
     use_effect_with((), move |_| {
-        init_middleware(endpoint.as_deref());
+        init_middleware(&mcx, endpoint.as_deref());
 
         move || ()
     });
@@ -108,48 +109,48 @@ fn render(route: Routes) -> Html {
     }
 }
 
-fn init_middleware(endpoint: Option<&str>) {
+fn init_middleware(mcx: &MiddlewareContext, endpoint: Option<&str>) {
     // Dispatch WebEvent messages => redispatch as BatteryMsg, ValveMsg, RoleState or WifiConf messages
-    dispatch::register::<WebEvent, _>(|event| {
+    mcx.register::<WebEvent, _>(|mcx: &MiddlewareContext, event| {
         match event {
             WebEvent::NoPermissions => unreachable!(),
             WebEvent::AuthenticationFailed => {
-                dispatch::invoke(RoleState::AuthenticationFailed(Credentials {
+                mcx.invoke(RoleState::AuthenticationFailed(Credentials {
                     username: "".into(),
                     password: "".into(),
                 }))
             } // TODO
-            WebEvent::RoleState(role) => dispatch::invoke(RoleState::Role(role)),
-            WebEvent::ValveState(valve) => dispatch::invoke(ValveMsg(valve)),
-            WebEvent::BatteryState(battery) => dispatch::invoke(BatteryMsg(battery)),
+            WebEvent::RoleState(role) => mcx.invoke(RoleState::Role(role)),
+            WebEvent::ValveState(valve) => mcx.invoke(ValveMsg(valve)),
+            WebEvent::BatteryState(battery) => mcx.invoke(BatteryMsg(battery)),
             WebEvent::WaterMeterState(_) => (), // TODO
         }
     });
 
-    dispatch::register(log::<RoleStore, RoleState>(
-        dispatch::store.fuse(role_as_request),
+    mcx.register(log::<RoleStore, RoleState>(
+        MiddlewareContext::store.fuse(role_as_request),
     ));
-    dispatch::register(log::<WifiConfStore, WifiConf>(dispatch::store));
-    dispatch::register(log::<BatteryStore, BatteryMsg>(dispatch::store));
-    dispatch::register(log::<ValveStore, ValveMsg>(dispatch::store));
+    mcx.register(log::<WifiConfStore, WifiConf>(MiddlewareContext::store));
+    mcx.register(log::<BatteryStore, BatteryMsg>(MiddlewareContext::store));
+    mcx.register(log::<ValveStore, ValveMsg>(MiddlewareContext::store));
 
     if let Some(endpoint) = endpoint {
         let (sender, receiver) =
             middleware::open(endpoint).unwrap_or_else(|_| panic!("Failed to open websocket"));
 
         // Dispatch WebRequest messages => send to backend
-        dispatch::register(middleware::send::<WebRequest>(sender));
+        mcx.register(middleware::send::<WebRequest>(sender));
 
         // Receive from backend => dispatch WebEvent messages
-        middleware::receive::<WebEvent>(receiver);
+        middleware::receive::<WebEvent>(mcx, receiver);
     } else {
         let (sender, receiver) = (REQUEST_QUEUE.sender(), EVENT_QUEUE.receiver());
 
         // Dispatch WebRequest messages => send to backend
-        dispatch::register(middleware::send_local::<WebRequest>(sender));
+        mcx.register(middleware::send_local::<WebRequest>(sender));
 
         // Receive from backend => dispatch WebEvent messages
-        middleware::receive_local::<WebEvent>(receiver);
+        middleware::receive_local::<WebEvent>(mcx, receiver);
     }
 }
 
@@ -170,19 +171,19 @@ where
         .fuse(Rc::new(log_msg(Level::Trace)))
 }
 
-fn role_as_request(msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>) {
+fn role_as_request(mcx: &MiddlewareContext, msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>) {
     let request = match &msg {
         RoleState::Authenticating(credentials) => Some(WebRequest::Authenticate(
-            credentials.username.as_str().into(),
-            credentials.password.as_str().into(),
+            credentials.username.as_str().try_into().unwrap(),
+            credentials.password.as_str().try_into().unwrap(),
         )),
         RoleState::LoggingOut(_) => Some(WebRequest::Logout),
         _ => None,
     };
 
     if let Some(request) = request {
-        dispatch::invoke(request);
+        mcx.invoke(request);
     }
 
-    dispatch.invoke(msg);
+    dispatch.invoke(mcx, msg);
 }
