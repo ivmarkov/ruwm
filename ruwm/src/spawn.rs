@@ -138,6 +138,14 @@ where
     executor.spawn(web::process(sender, receiver)).detach();
 }
 
-pub fn ws<'a, const C: usize>(executor: &LocalExecutor<'a, C>, acceptor: impl Acceptor + 'a) {
-    executor.spawn(ws::process(acceptor)).detach();
+pub fn ws<'a, const C: usize>(
+    executor: &LocalExecutor<'a, C>,
+    acceptor_svr: &'a mut channel_bridge::asynch::ws::Acceptor<
+        { crate::ws::WS_MAX_CONNECTIONS },
+        { crate::ws::WS_MAX_FRAME_LEN },
+        1,
+    >,
+    acceptor: impl Acceptor + 'a,
+) {
+    executor.spawn(ws::process(acceptor_svr, acceptor)).detach();
 }

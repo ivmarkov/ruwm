@@ -1,13 +1,15 @@
 use core::fmt::Debug;
 use core::mem;
+use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
 
 extern crate alloc;
 
-use channel_bridge::asynch::ws::WsError;
+use channel_bridge::asynch::ws::{WsError, DEFAULT_BUF_SIZE};
 
 use edge_frame::assets::{self, serve::Asset};
-use edge_http::io::{self, server::DefaultServer};
-use edge_http::Method;
+use edge_http::io::{self, server::Server};
+use edge_http::{Method, DEFAULT_MAX_HEADERS_COUNT};
 use edge_ws::io::WsConnection;
 
 use embassy_time::Duration;
@@ -50,6 +52,7 @@ use ruwm::screen::Color;
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
+use ruwm::ws::{WS_MAX_CONNECTIONS, WS_MAX_FRAME_LEN};
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
@@ -339,7 +342,7 @@ pub fn wifi<'d>(
 #[derive(Debug)]
 enum HttpdError<T> {
     Http(io::Error<T>),
-    Ws(WsError<T>),
+    Ws(WsError<edge_ws::io::Error<T>>),
 }
 
 impl<T> From<io::Error<T>> for HttpdError<T> {
@@ -348,22 +351,31 @@ impl<T> From<io::Error<T>> for HttpdError<T> {
     }
 }
 
-impl<T> From<WsError<T>> for HttpdError<T> {
-    fn from(err: WsError<T>) -> Self {
+impl<T> From<WsError<edge_ws::io::Error<T>>> for HttpdError<T> {
+    fn from(err: WsError<edge_ws::io::Error<T>>) -> Self {
         Self::Ws(err)
     }
 }
 
-struct HttpdHandler<'a>(&'a [Asset]);
+struct HttpdHandler<'a> {
+    assets: &'a [Asset],
+    send_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
+    recv_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
+}
 
 impl<'a> HttpdHandler<'a> {
+    #[inline(always)]
     fn new(assets: &'a [Asset]) -> Self {
-        Self(assets)
+        Self {
+            assets,
+            send_bufs: UnsafeCell::new(MaybeUninit::uninit()),
+            recv_bufs: UnsafeCell::new(MaybeUninit::uninit()),
+        }
     }
 
     async fn handle<'b, T, const N: usize>(
         &self,
-        handler_id: usize,
+        task_id: usize,
         con: &mut io::server::Connection<'b, T, N>,
     ) -> Result<(), HttpdError<T::Error>>
     where
@@ -371,7 +383,14 @@ impl<'a> HttpdHandler<'a> {
     {
         if matches!(con.headers().unwrap().method, Some(Method::Get)) {
             if matches!(con.headers()?.path, Some("/ws")) {
-                self.handle_ws(handler_id, con).await?;
+                let send_buf = &mut unsafe {
+                    self.send_bufs.get().as_mut().unwrap().assume_init_mut()[task_id]
+                };
+                let recv_buf = &mut unsafe {
+                    self.recv_bufs.get().as_mut().unwrap().assume_init_mut()[task_id]
+                };
+
+                self.handle_ws(task_id, send_buf, recv_buf, con).await?;
             } else {
                 self.handle_assets(con).await?;
             }
@@ -384,7 +403,9 @@ impl<'a> HttpdHandler<'a> {
 
     async fn handle_ws<'b, T, const N: usize>(
         &self,
-        handler_id: usize,
+        task_id: usize,
+        send_buf: &mut [u8],
+        recv_buf: &mut [u8],
         con: &mut io::server::Connection<'b, T, N>,
     ) -> Result<(), HttpdError<T::Error>>
     where
@@ -401,9 +422,7 @@ impl<'a> HttpdHandler<'a> {
             let sender = WsConnection::new(write, || None);
             let receiver = WsConnection::new(read, || Option::<()>::None);
 
-            ruwm::ws::handle(sender, receiver, handler_id)
-                .await
-                .unwrap(); // TODO
+            ruwm::ws::handle(sender, send_buf, receiver, recv_buf, task_id).await?;
         } else {
             con.initiate_response(200, None, &[]).await?;
         }
@@ -419,7 +438,7 @@ impl<'a> HttpdHandler<'a> {
         T: Read + Write,
     {
         let asset = self
-            .0
+            .assets
             .iter()
             .find(|asset| Some(Some(asset.0)) == con.headers().ok().map(|headers| headers.path));
 
@@ -431,7 +450,7 @@ impl<'a> HttpdHandler<'a> {
     }
 }
 
-impl<'a, 'b, T, const N: usize> io::server::TaskHandler<'a, T, N> for HttpdHandler<'b>
+impl<'a, 'b, T> io::server::TaskHandler<'a, T, { DEFAULT_MAX_HEADERS_COUNT }> for HttpdHandler<'b>
 where
     T: Read + Write + TcpSplittableConnection,
 {
@@ -439,14 +458,17 @@ where
 
     async fn handle(
         &self,
-        handler_id: usize,
-        con: &mut io::server::Connection<'a, T, N>,
+        task_id: usize,
+        con: &mut io::server::Connection<'a, T, { DEFAULT_MAX_HEADERS_COUNT }>,
     ) -> Result<(), Self::Error> {
-        HttpdHandler::handle(self, handler_id, con).await
+        HttpdHandler::handle(self, task_id, con).await
     }
 }
 
-pub async fn run_httpd(server: &mut DefaultServer) -> Result<(), io::Error<std::io::Error>> {
+pub type HttpdServer =
+    Server<{ WS_MAX_CONNECTIONS }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
+
+pub async fn run_httpd(server: &mut HttpdServer) -> Result<(), io::Error<std::io::Error>> {
     let stack = edge_std_nal_async::Stack::new();
 
     let acceptor = stack

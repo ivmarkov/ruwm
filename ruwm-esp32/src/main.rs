@@ -6,7 +6,7 @@ use core::pin::pin;
 extern crate alloc;
 
 use edge_executor::LocalExecutor;
-use edge_http::io::server::DefaultServer;
+
 #[cfg(feature = "nvs")]
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
@@ -32,6 +32,7 @@ use ruwm::wm::WaterMeterState;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
+use crate::services::HttpdServer;
 
 mod errors;
 mod peripherals;
@@ -220,7 +221,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
             // Httpd
 
-            let mut httpd = DefaultServer::new();
+            let mut httpd = HttpdServer::new();
             let httpd = pin!(services::run_httpd(&mut httpd));
 
             executor.spawn(httpd).detach();

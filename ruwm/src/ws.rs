@@ -63,18 +63,27 @@ impl ws::AcceptorHandler for WebHandler {
     }
 }
 
-pub async fn process<A: Acceptor>(acceptor: A) {
-    ws::accept::<WS_MAX_CONNECTIONS, 1, WS_MAX_FRAME_LEN, _, _>(acceptor, WebHandler).await;
+pub async fn process<A: Acceptor>(
+    acceptor_svr: &mut ws::Acceptor<WS_MAX_CONNECTIONS, WS_MAX_FRAME_LEN, 1>,
+    acceptor: A,
+) {
+    acceptor_svr.run(acceptor, WebHandler).await;
 }
 
-pub async fn handle<S, R>(sender: S, receiver: R, index: usize) -> Result<(), ws::WsError<S::Error>>
+pub async fn handle<S, R>(
+    sender: S,
+    send_buf: &mut [u8],
+    receiver: R,
+    recv_buf: &mut [u8],
+    index: usize,
+) -> Result<(), ws::WsError<S::Error>>
 where
     S: embedded_svc::ws::asynch::Sender,
     R: embedded_svc::ws::asynch::Receiver<Error = S::Error>,
 {
     web::handle(
-        ws::WsSvcSender::<WS_MAX_FRAME_LEN, _, _>::new(sender),
-        ws::WsSvcReceiver::<WS_MAX_FRAME_LEN, _, _>::new(receiver),
+        ws::WsSvcSender::new(sender, send_buf),
+        ws::WsSvcReceiver::new(receiver, recv_buf),
         &HANDLERS_VALVE_STATE_NOTIF[index],
         &HANDLERS_WM_STATE_NOTIF[index],
         &HANDLERS_WM_STATS_STATE_NOTIF[index],
