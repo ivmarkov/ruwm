@@ -185,7 +185,7 @@ pub mod util {
         len
     }
 
-    pub fn clear_cropped<'a, T>(target: &'a mut T, padding: u32) -> Result<Cropped<'a, T>, T::Error>
+    pub fn clear_cropped<T>(target: &mut T, padding: u32) -> Result<Cropped<'_, T>, T::Error>
     where
         T: DrawTarget<Color = Color>,
     {

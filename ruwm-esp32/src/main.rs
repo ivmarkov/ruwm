@@ -1,4 +1,7 @@
 #![allow(async_fn_in_trait)]
+#![warn(clippy::large_futures)]
+
+use core::pin::pin;
 
 extern crate alloc;
 
@@ -77,7 +80,7 @@ fn sleep() -> Result<(), InitError> {
         esp!(esp_idf_svc::sys::esp_sleep_enable_ulp_wakeup())?;
 
         esp!(esp_idf_svc::sys::esp_sleep_enable_timer_wakeup(
-            SLEEP_TIME.as_micros() as u64
+            SLEEP_TIME.as_micros()
         ))?;
 
         log::info!("Going to sleep");
@@ -141,23 +144,6 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     #[cfg(not(feature = "ulp"))]
     let (pulse_counter, pulse_wakeup) = services::pulse(peripherals.pulse_counter)?;
 
-    // Wifi
-
-    let wifi = services::wifi(
-        peripherals.modem,
-        sysloop.clone(),
-        timer_service,
-        Some(nvs_default_partition.clone()),
-    )?;
-
-    // Httpd
-
-    let mut httpd = DefaultServer::new();
-
-    // Mqtt
-
-    let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
-
     // High-prio tasks
 
     let high_prio_executor = LocalExecutor::<16>::new();
@@ -204,22 +190,40 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let display_peripherals = peripherals.display;
 
     let mid_prio_execution = std::thread::Builder::new()
-        .stack_size(50000)
+        .stack_size(80000)
         .spawn(move || {
             let executor = LocalExecutor::<8>::new();
 
-            spawn::mid_prio(
+            // Wifi
+
+            let mut wifi = services::wifi(
+                peripherals.modem,
+                sysloop.clone(),
+                timer_service,
+                Some(nvs_default_partition.clone()),
+            )
+            .unwrap();
+
+            spawn::wifi(&executor, &mut wifi);
+
+            // Mqtt
+
+            let (mqtt_topic_prefix, mut mqtt_client, mut mqtt_conn) = services::mqtt().unwrap();
+
+            spawn::mqtt_receive(&executor, &mut mqtt_conn);
+
+            spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 8>(
                 &executor,
-                services::display(display_peripherals).unwrap(),
-                move |_new_state| {
-                    #[cfg(feature = "nvs")]
-                    flash_wm_state(storage, _new_state);
-                },
+                mqtt_topic_prefix,
+                &mut mqtt_client,
             );
 
-            spawn::wifi(&executor, wifi);
+            // Httpd
 
-            spawn::mqtt_receive(&executor, mqtt_conn);
+            let mut httpd = DefaultServer::new();
+            let httpd = pin!(services::run_httpd(&mut httpd));
+
+            executor.spawn(httpd).detach();
 
             block_on(executor.run(quit::QUIT[1].wait()));
         })
@@ -237,13 +241,16 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .unwrap();
 
     let low_prio_execution = std::thread::Builder::new()
-        .stack_size(50000)
+        .stack_size(60000)
         .spawn(move || {
             let executor = LocalExecutor::<4>::new();
 
-            spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4>(&executor, mqtt_topic_prefix, mqtt_client);
+            let mut display = services::display(display_peripherals).unwrap();
 
-            executor.spawn(services::run_httpd(&mut httpd)).detach();
+            spawn::low_prio(&executor, &mut display, move |_new_state| {
+                #[cfg(feature = "nvs")]
+                flash_wm_state(storage, _new_state);
+            });
 
             block_on(executor.run(quit::QUIT[2].wait()));
         })

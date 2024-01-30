@@ -446,18 +446,17 @@ where
     }
 }
 
-pub async fn run_httpd(server: &mut DefaultServer) -> Result<(), InitError> {
+pub async fn run_httpd(server: &mut DefaultServer) -> Result<(), io::Error<std::io::Error>> {
     let stack = edge_std_nal_async::Stack::new();
 
     let acceptor = stack
         .listen(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 80)))
         .await
-        .unwrap(); // TODO
+        .map_err(io::Error::Io)?;
 
     server
-        .run_with_task_id(acceptor, HttpdHandler::new(&ASSETS))
-        .await
-        .unwrap(); // TODO
+        .run_with_task_id(acceptor, &HttpdHandler::new(&ASSETS))
+        .await?;
 
     Ok(())
 }

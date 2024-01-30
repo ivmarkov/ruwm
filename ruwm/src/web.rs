@@ -95,7 +95,7 @@ where
                 &role,
                 &battery::STATE,
                 battery_state_notif,
-                |state| WebEvent::BatteryState(state),
+                WebEvent::BatteryState,
             ),
         ),
     )

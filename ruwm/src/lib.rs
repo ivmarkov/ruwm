@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
+#![warn(clippy::large_futures)]
 
 #[cfg(feature = "system")]
 pub mod battery;

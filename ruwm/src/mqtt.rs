@@ -56,7 +56,7 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
     let mut connected = false;
 
     let topic = |topic_suffix| {
-        String::<L>::from_str(topic_prefix.as_ref())
+        String::<L>::from_str(topic_prefix)
             .and_then(|mut s| s.push_str(topic_suffix).map(|_| s))
             .unwrap_or_else(|_| panic!(""))
     };
@@ -293,7 +293,7 @@ async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS
     }
 }
 
-pub async fn receive(mut connection: impl Connection + 'static) {
+pub async fn receive(mut connection: impl Connection) {
     let mut parser = MessageParser::new();
 
     while let Ok(event) = connection.next().await {

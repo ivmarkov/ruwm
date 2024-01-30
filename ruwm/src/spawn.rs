@@ -25,6 +25,7 @@ use crate::wm::{self, WaterMeterState};
 use crate::{battery, emergency, keepalive, mqtt, screen, wm_stats, ws};
 use crate::{valve, wifi};
 
+#[allow(clippy::too_many_arguments)]
 pub fn high_prio<'a, const C: usize>(
     executor: &LocalExecutor<'a, C>,
     valve_power_pin: impl OutputPin<Error = impl Debug + 'a> + 'a,
@@ -91,9 +92,9 @@ pub fn high_prio<'a, const C: usize>(
     // }
 }
 
-pub fn mid_prio<'a, const C: usize, D>(
+pub fn low_prio<'a, const C: usize, D>(
     executor: &LocalExecutor<'a, C>,
-    display: D,
+    display: &'a mut D,
     wm_flash: impl FnMut(WaterMeterState) + 'a,
 ) where
     D: Flushable<Color = Color> + 'a,
@@ -122,9 +123,9 @@ pub fn mqtt_send<'a, const L: usize, const C: usize>(
         .detach();
 }
 
-pub fn mqtt_receive<const C: usize>(
-    executor: &LocalExecutor<'_, C>,
-    mqtt_conn: impl Connection + 'static,
+pub fn mqtt_receive<'a, const C: usize>(
+    executor: &LocalExecutor<'a, C>,
+    mqtt_conn: impl Connection + 'a,
 ) {
     executor.spawn(mqtt::receive(mqtt_conn)).detach();
 }

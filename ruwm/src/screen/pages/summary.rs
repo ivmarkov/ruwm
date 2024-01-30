@@ -69,7 +69,6 @@ impl Summary {
             padding: 1,
             outline: 1,
             strength: None, //Some(60),
-            ..Default::default()
         };
 
         status_wifi.draw(&mut target.cropped(&Rectangle::new(
@@ -220,7 +219,7 @@ impl Summary {
 
         let Size { width, .. } = bbox.size;
 
-        let (status_font, status_height, status_padding) = if width <= 128 {
+        let (status_font, status_height, _status_padding) = if width <= 128 {
             (profont::PROFONT_9_POINT, 12, 5)
         } else {
             (profont::PROFONT_14_POINT, 20, 2)

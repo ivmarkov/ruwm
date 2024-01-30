@@ -132,8 +132,7 @@ impl ScreenState {
     fn changed<const N: usize>(&self, changes: [DataSource; N]) -> bool {
         changes
             .iter()
-            .find(|data_source| self.changeset.contains(**data_source))
-            .is_some()
+            .any(|data_source| self.changeset.contains(*data_source))
     }
 }
 
@@ -153,7 +152,6 @@ static DRAW_REQUEST_NOTIF: Notification = Notification::new();
 static STATE: Mutex<CriticalSectionRawMutex, RefCell<ScreenState>> =
     Mutex::new(RefCell::new(ScreenState::new()));
 
-#[allow(clippy::too_many_arguments)]
 pub async fn process() {
     loop {
         let (_future, index) = select_array([
@@ -241,7 +239,7 @@ pub async fn process() {
 //     }
 // }
 
-pub async fn run_draw<D>(mut display: D)
+pub async fn run_draw<D>(display: &mut D)
 where
     D: Flushable<Color = Color>,
     D::Error: Debug,
@@ -249,7 +247,7 @@ where
     loop {
         let screen_state = wait_change().await;
 
-        display = draw(display, screen_state).unwrap();
+        draw(display, screen_state).unwrap();
     }
 }
 
@@ -265,7 +263,7 @@ async fn wait_change() -> ScreenState {
     })
 }
 
-fn draw<D>(mut display: D, screen_state: ScreenState) -> Result<D, D::Error>
+fn draw<D>(display: &mut D, screen_state: ScreenState) -> Result<(), D::Error>
 where
     D: Flushable<Color = Color>,
     D::Error: Debug,
@@ -275,28 +273,26 @@ where
     let page_changed = screen_state.changeset.contains(DataSource::Page);
 
     if page_changed {
-        clear(&display.bounding_box(), &mut display)?;
+        clear(&display.bounding_box(), display)?;
     }
 
     match screen_state.active_page {
         Page::Summary => Summary::draw(
-            &mut display,
+            display,
             page_changed,
             screen_state.valve().as_ref(),
             screen_state.wm().as_ref(),
             screen_state.battery().as_ref(),
             screen_state.remaining_time().as_ref(),
         )?,
-        Page::Battery => {
-            Battery::draw(&mut display, page_changed, screen_state.battery().as_ref())?
-        }
+        Page::Battery => Battery::draw(display, page_changed, screen_state.battery().as_ref())?,
     }
 
     if let Some((actions, action)) = screen_state.page_actions {
-        pages::actions::draw(&mut display, actions, action)?;
+        pages::actions::draw(display, actions, action)?;
     }
 
     display.flush()?;
 
-    Ok(display)
+    Ok(())
 }

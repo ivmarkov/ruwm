@@ -25,6 +25,7 @@ pub const WS_MAX_CONNECTIONS: usize = 16;
 
 pub const WS_MAX_FRAME_LEN: usize = 512;
 
+#[allow(clippy::declare_interior_mutable_const)]
 const NOTIF: Notification = Notification::new();
 
 static HANDLERS_VALVE_STATE_NOTIF: [Notification; WS_MAX_CONNECTIONS] = [NOTIF; WS_MAX_CONNECTIONS];

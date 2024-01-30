@@ -102,10 +102,9 @@ where
             if matches!(
                 select(pin.wait_for_any_edge(), Timer::after(debounce_duration)).await,
                 Either::Second(_)
-            ) {
-                if has_level(pin)? {
-                    break;
-                }
+            ) && has_level(pin)?
+            {
+                break;
             }
         }
     }
