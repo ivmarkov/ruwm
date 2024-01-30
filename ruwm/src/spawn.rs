@@ -100,11 +100,31 @@ pub fn low_prio<'a, const C: usize, D>(
     D: Flushable<Color = Color> + 'a,
     D::Error: Debug,
 {
+    low_prio_common(executor, wm_flash);
+
+    executor.spawn(screen::run_draw(display)).detach();
+}
+
+pub fn low_prio_owned<'a, const C: usize, D>(
+    executor: &LocalExecutor<'a, C>,
+    display: D,
+    wm_flash: impl FnMut(WaterMeterState) + 'a,
+) where
+    D: Flushable<Color = Color> + 'a,
+    D::Error: Debug,
+{
+    low_prio_common(executor, wm_flash);
+
+    executor.spawn(screen::run_draw_owned(display)).detach();
+}
+
+fn low_prio_common<'a, const C: usize>(
+    executor: &LocalExecutor<'a, C>,
+    wm_flash: impl FnMut(WaterMeterState) + 'a,
+) {
     executor.spawn(wm_stats::process()).detach();
 
     executor.spawn(screen::process()).detach();
-
-    executor.spawn(screen::run_draw(display)).detach();
 
     executor.spawn(wm::flash(wm_flash)).detach();
 }

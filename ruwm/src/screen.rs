@@ -251,6 +251,18 @@ where
     }
 }
 
+pub async fn run_draw_owned<D>(mut display: D)
+where
+    D: Flushable<Color = Color>,
+    D::Error: Debug,
+{
+    loop {
+        let screen_state = wait_change().await;
+
+        draw(&mut display, screen_state).unwrap();
+    }
+}
+
 async fn wait_change() -> ScreenState {
     DRAW_REQUEST_NOTIF.wait().await;
 

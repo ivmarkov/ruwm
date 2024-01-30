@@ -117,15 +117,6 @@ fn start() {
 
     // Mid-prio tasks
 
-    let display = peripherals.display;
-
-    spawn::mid_prio(executor, services::display(display), move |_new_state| {
-        #[cfg(feature = "nvs")]
-        flash_wm_state(storage, _new_state);
-    });
-
-    // Low-prio tasks
-
     // TODO
     // MQTT
     // spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _, _>(
@@ -133,6 +124,15 @@ fn start() {
     //     mqtt_topic_prefix,
     //     mqtt_client,
     // );
+
+    // Low-prio tasks
+
+    let display = peripherals.display;
+
+    spawn::low_prio_owned(executor, services::display(display), move |_new_state| {
+        #[cfg(feature = "nvs")]
+        flash_wm_state(storage, _new_state);
+    });
 
     let (sender, receiver) = ruwm_web::local_queue();
 
