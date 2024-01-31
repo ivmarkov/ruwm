@@ -1,4 +1,3 @@
-use core::cmp::max;
 use core::fmt::Debug;
 
 use embassy_futures::select::{select, Either};
