@@ -7,21 +7,24 @@ use channel_bridge::notification::Notification;
 
 use crate::web::{self, *};
 
-#[cfg(any(
-    feature = "ws-max-connections-2",
-    not(any(
-        feature = "ws-max-connections-4",
-        feature = "ws-max-connections-8",
-        feature = "ws-max-connections-16"
-    ))
-))]
-pub const WS_MAX_CONNECTIONS: usize = 2;
-#[cfg(feature = "ws-max-connections-4")]
-pub const WS_MAX_CONNECTIONS: usize = 4;
-#[cfg(feature = "ws-max-connections-8")]
-pub const WS_MAX_CONNECTIONS: usize = 8;
 #[cfg(feature = "ws-max-connections-16")]
 pub const WS_MAX_CONNECTIONS: usize = 16;
+#[cfg(all(
+    feature = "ws-max-connections-8",
+    not(feature = "ws-max-connections-16")
+))]
+pub const WS_MAX_CONNECTIONS: usize = 8;
+#[cfg(all(
+    feature = "ws-max-connections-4",
+    not(any(feature = "ws-max-connections-16", feature = "ws-max-connections-8"))
+))]
+pub const WS_MAX_CONNECTIONS: usize = 4;
+#[cfg(not(any(
+    feature = "ws-max-connections-16",
+    feature = "ws-max-connections-8",
+    feature = "ws-max-connections-4"
+)))]
+pub const WS_MAX_CONNECTIONS: usize = 2;
 
 pub const WS_MAX_FRAME_LEN: usize = 512;
 
