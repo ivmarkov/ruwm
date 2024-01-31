@@ -2,6 +2,7 @@
 #![warn(clippy::large_futures)]
 
 use core::pin::pin;
+use std::thread::Scope;
 
 extern crate alloc;
 
@@ -28,11 +29,11 @@ use esp_idf_svc::timer::EspTaskTimerService;
 
 use ruwm::quit;
 use ruwm::spawn;
+use ruwm::wifi;
 use ruwm::wm::WaterMeterState;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
-use crate::services::HttpdServer;
 
 mod errors;
 mod peripherals;
@@ -42,6 +43,9 @@ mod ulp_pulse_counter;
 
 #[cfg(all(feature = "ulp", not(any(esp32, esp32s2, esp32s3))))]
 compile_error!("Feature `ulp` is supported only on esp32, esp32s2 and esp32s3");
+
+const SSID: &str = env!("RUWM_WIFI_SSID");
+const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 const MQTT_MAX_TOPIC_LEN: usize = 64;
@@ -60,7 +64,19 @@ fn main() -> Result<(), InitError> {
 
     log::info!("Wakeup reason: {:?}", wakeup_reason);
 
-    run(wakeup_reason)?;
+    // TODO: Persist the Wifi configuration in NVS, and start with an open AP,
+    // or whatever configuration the user has set via the UI
+    wifi::COMMAND.signal(wifi::WifiCommand::SetConfiguration(
+        embedded_svc::wifi::Configuration::Client(embedded_svc::wifi::ClientConfiguration {
+            ssid: SSID.try_into().unwrap(),
+            password: PASS.try_into().unwrap(),
+            ..Default::default()
+        }),
+    ));
+
+    std::thread::scope(|scope| run(scope, wakeup_reason))?;
+
+    log::info!("Going to sleep now");
 
     sleep()?;
 
@@ -90,7 +106,7 @@ fn sleep() -> Result<(), InitError> {
     }
 }
 
-fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
+fn run<'s>(scope: &'s Scope<'s, '_>, wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let peripherals = peripherals::SystemPeripherals::take();
 
     // Valve pins
@@ -147,35 +163,53 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     // High-prio tasks
 
-    let high_prio_executor = LocalExecutor::<16>::new();
+    log::info!("Starting high-prio executor");
 
-    // TODO: Move off the main thread, as it has a fixed, low priority (1)
-    spawn::high_prio(
-        &high_prio_executor,
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-        |state| unsafe {
-            services::RTC_MEMORY.valve = state;
-        },
-        pulse_counter,
-        pulse_wakeup,
-        |state| unsafe {
-            services::RTC_MEMORY.wm = state;
-        },
-        |state| unsafe {
-            services::RTC_MEMORY.wm_stats = state;
-        },
-        services::adc::<{ attenuation::NONE }, _, _>(
-            peripherals.battery.adc,
-            peripherals.battery.voltage,
-        )?,
-        PinDriver::input(peripherals.battery.power)?,
-        false,
-        services::button(peripherals.buttons.button1)?,
-        services::button(peripherals.buttons.button2)?,
-        services::button(peripherals.buttons.button3)?,
-    );
+    ThreadSpawnConfiguration {
+        name: Some(b"async-exec-mid\0"),
+        priority: 7,
+        ..Default::default()
+    }
+    .set()
+    .unwrap();
+
+    let high_prio_execution = std::thread::Builder::new()
+        .stack_size(10000)
+        .spawn_scoped(scope, move || {
+            let executor = LocalExecutor::<16>::new();
+
+            spawn::high_prio(
+                &executor,
+                valve_power_pin,
+                valve_open_pin,
+                valve_close_pin,
+                |state| unsafe {
+                    services::RTC_MEMORY.valve = state;
+                },
+                pulse_counter,
+                pulse_wakeup,
+                |state| unsafe {
+                    services::RTC_MEMORY.wm = state;
+                },
+                |state| unsafe {
+                    services::RTC_MEMORY.wm_stats = state;
+                },
+                services::adc::<{ attenuation::NONE }, _, _>(
+                    peripherals.battery.adc,
+                    peripherals.battery.voltage,
+                )?,
+                PinDriver::input(peripherals.battery.power)?,
+                false,
+                services::button(peripherals.buttons.button1)?,
+                services::button(peripherals.buttons.button2)?,
+                services::button(peripherals.buttons.button3)?,
+            );
+
+            block_on(executor.run(quit::QUIT[0].wait()));
+
+            Ok(())
+        })
+        .unwrap();
 
     // Mid-prio tasks
 
@@ -191,8 +225,8 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let display_peripherals = peripherals.display;
 
     let mid_prio_execution = std::thread::Builder::new()
-        .stack_size(80000)
-        .spawn(move || {
+        .stack_size(40000)
+        .spawn_scoped(scope, move || {
             let executor = LocalExecutor::<8>::new();
 
             // Wifi
@@ -202,14 +236,13 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
                 sysloop.clone(),
                 timer_service,
                 Some(nvs_default_partition.clone()),
-            )
-            .unwrap();
+            )?;
 
             spawn::wifi(&executor, &mut wifi);
 
             // Mqtt
 
-            let (mqtt_topic_prefix, mut mqtt_client, mut mqtt_conn) = services::mqtt().unwrap();
+            let (mqtt_topic_prefix, mut mqtt_client, mut mqtt_conn) = services::mqtt()?;
 
             spawn::mqtt_receive(&executor, &mut mqtt_conn);
 
@@ -221,12 +254,16 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
             // Httpd
 
-            let mut httpd = HttpdServer::new();
-            let httpd = pin!(services::run_httpd(&mut httpd));
+            let mut httpd = services::httpd()?;
+            let handler = services::httpd_handler()?;
+
+            let httpd = pin!(services::run_httpd(&mut httpd, &handler));
 
             executor.spawn(httpd).detach();
 
             block_on(executor.run(quit::QUIT[1].wait()));
+
+            Ok(())
         })
         .unwrap();
 
@@ -236,43 +273,45 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-low\0"),
+        priority: 4,
         ..Default::default()
     }
     .set()
     .unwrap();
 
-    // let low_prio_execution = std::thread::Builder::new()
-    //     .stack_size(60000)
-    //     .spawn(move || {
-    //         let executor = LocalExecutor::<4>::new();
+    let low_prio_execution = std::thread::Builder::new()
+        .stack_size(10000)
+        .spawn_scoped(scope, move || {
+            let executor = LocalExecutor::<4>::new();
 
-    //         let mut display = services::display(display_peripherals).unwrap();
+            let mut display = services::display(display_peripherals)?;
 
-    //         spawn::low_prio(&executor, &mut display, move |_new_state| {
-    //             #[cfg(feature = "nvs")]
-    //             flash_wm_state(storage, _new_state);
-    //         });
+            spawn::low_prio(&executor, &mut display, move |_new_state| {
+                #[cfg(feature = "nvs")]
+                flash_wm_state(storage, _new_state);
+            });
 
-    //         block_on(executor.run(quit::QUIT[2].wait()));
-    //     })
-    //     .unwrap();
+            block_on(executor.run(quit::QUIT[2].wait()));
 
-    // Start main execution
+            Ok(())
+        })
+        .unwrap();
 
-    log::info!("Starting high-prio executor");
+    let result1 = high_prio_execution.join().unwrap();
+    let result2 = mid_prio_execution.join().unwrap();
+    let result3 = low_prio_execution.join().unwrap();
 
-    block_on(high_prio_executor.run(quit::QUIT[0].wait()));
+    log::info!("Finished execution: {result1:?} / {result2:?} / {result3:?}");
 
-    log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
-
-    std::thread::sleep(core::time::Duration::from_millis(2000));
-
-    mid_prio_execution.join().unwrap();
-    // low_prio_execution.join().unwrap();
-
-    log::info!("Finished execution");
-
-    Ok(())
+    if result1.is_err() {
+        result1
+    } else if result2.is_err() {
+        result2
+    } else if result3.is_err() {
+        result3
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "nvs")]

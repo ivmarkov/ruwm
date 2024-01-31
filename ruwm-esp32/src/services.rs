@@ -11,6 +11,7 @@ use edge_frame::assets::serve::AssetMetadata;
 use edge_frame::assets::{self, serve::Asset};
 use edge_http::io::{self, server::Server};
 use edge_http::{Method, DEFAULT_MAX_HEADERS_COUNT};
+use edge_std_nal_async::StdTcpConnection;
 use edge_ws::io::WsConnection;
 
 use embassy_time::Duration;
@@ -24,7 +25,6 @@ use embedded_io_async::{Read, Write};
 use embedded_svc::http::server::asynch::Request;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
 use embedded_svc::wifi::asynch::Wifi;
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::adc::{Adc, AdcChannelDriver, AdcConfig, AdcDriver};
@@ -40,7 +40,7 @@ use esp_idf_svc::hal::spi::*;
 use esp_idf_svc::mqtt::client::{EspAsyncMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::timer::EspTaskTimerService;
-use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi};
+use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 
 use esp_idf_svc::sys::{adc_atten_t, EspError};
 
@@ -57,9 +57,6 @@ use ruwm::ws::{WS_MAX_CONNECTIONS, WS_MAX_FRAME_LEN};
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
-
-const SSID: &str = env!("RUWM_WIFI_SSID");
-const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: assets::serve::Assets = edge_frame::assets!("RUWM_WEB");
 
@@ -225,6 +222,7 @@ pub fn adc<'d, const A: adc_atten_t, ADC: Adc + 'd, P: ADCPin<Adc = ADC>>(
     })
 }
 
+#[inline(always)]
 pub fn display(
     peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
 ) -> Result<impl Flushable<Color = Color, Error = impl Debug + 'static> + 'static, InitError> {
@@ -304,44 +302,22 @@ pub fn display(
     Ok(display)
 }
 
-// TODO: Make it async
+#[inline(always)]
 pub fn wifi<'d>(
     modem: impl Peripheral<P = impl WifiModemPeripheral + 'd> + 'd,
     sysloop: EspSystemEventLoop,
     timer_service: EspTaskTimerService,
     partition: Option<EspDefaultNvsPartition>,
 ) -> Result<impl Wifi + 'd, InitError> {
-    let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
-
-    if PASS.is_empty() {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.try_into().unwrap(),
-            auth_method: AuthMethod::None,
-            ..Default::default()
-        }))?;
-    } else {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.try_into().unwrap(),
-            password: PASS.try_into().unwrap(),
-            ..Default::default()
-        }))?;
-    }
-
-    let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
-
-    bwifi.start()?;
-
-    bwifi.connect()?;
-
-    bwifi.wait_netif_up()?;
-
-    let wifi = AsyncWifi::wrap(wifi, sysloop, timer_service)?;
-
-    Ok(wifi)
+    Ok(AsyncWifi::wrap(
+        EspWifi::new(modem, sysloop.clone(), partition)?,
+        sysloop,
+        timer_service,
+    )?)
 }
 
 #[derive(Debug)]
-enum HttpdError<T> {
+pub enum HttpdError<T> {
     Http(io::Error<T>),
     Ws(WsError<edge_ws::io::Error<T>>),
 }
@@ -358,7 +334,7 @@ impl<T> From<WsError<edge_ws::io::Error<T>>> for HttpdError<T> {
     }
 }
 
-struct HttpdHandler<'a> {
+pub struct HttpdHandler<'a> {
     assets: &'a [Asset],
     send_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
     recv_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
@@ -366,7 +342,7 @@ struct HttpdHandler<'a> {
 
 impl<'a> HttpdHandler<'a> {
     #[inline(always)]
-    fn new(assets: &'a [Asset]) -> Self {
+    pub fn new(assets: &'a [Asset]) -> Self {
         Self {
             assets,
             send_bufs: UnsafeCell::new(MaybeUninit::uninit()),
@@ -471,7 +447,23 @@ where
 pub type HttpdServer =
     Server<{ WS_MAX_CONNECTIONS }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
 
-pub async fn run_httpd(server: &mut HttpdServer) -> Result<(), io::Error<std::io::Error>> {
+#[inline(always)]
+pub fn httpd() -> Result<HttpdServer, InitError> {
+    Ok(HttpdServer::new())
+}
+
+#[inline(always)]
+pub fn httpd_handler() -> Result<HttpdHandler<'static>, InitError> {
+    Ok(HttpdHandler::new(&ASSETS))
+}
+
+pub async fn run_httpd<H>(
+    server: &mut HttpdServer,
+    handler: H,
+) -> Result<(), io::Error<std::io::Error>>
+where
+    H: for<'b> io::server::TaskHandler<'b, &'b mut StdTcpConnection, { DEFAULT_MAX_HEADERS_COUNT }>,
+{
     let stack = edge_std_nal_async::Stack::new();
 
     let acceptor = stack
@@ -479,13 +471,12 @@ pub async fn run_httpd(server: &mut HttpdServer) -> Result<(), io::Error<std::io
         .await
         .map_err(io::Error::Io)?;
 
-    server
-        .run_with_task_id(acceptor, &HttpdHandler::new(&ASSETS), None)
-        .await?;
+    server.run_with_task_id(acceptor, handler, None).await?;
 
     Ok(())
 }
 
+#[inline(always)]
 pub fn mqtt() -> Result<
     (
         &'static str,
@@ -494,6 +485,9 @@ pub fn mqtt() -> Result<
     ),
     InitError,
 > {
+    // TODO: Persist the MQRTT configuration in NVS, and start with disabled MQTT,
+    // or whatever configuration the user has set via the UI
+
     let client_id = "water-meter-demo";
     let (mqtt_client, mqtt_conn) = EspAsyncMqttClient::new(
         "mqtt://broker.emqx.io:1883",

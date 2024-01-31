@@ -23,7 +23,7 @@ channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 
 [profile.dev]
 debug = true
