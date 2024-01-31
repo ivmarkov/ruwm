@@ -16,6 +16,10 @@ rust-version = "1.75"
 default = ["std", "edge-executor", "system"] # Note that edge-executor requires alloc
 std = ["channel-bridge?/std"]
 system = ["log", "futures", "embedded-hal", "embedded-hal-async", "embedded-svc", "embassy-futures", "embassy-sync", "embassy-time", "embedded-graphics", "profont", "gfx-xtra", "channel-bridge"]
+max-ws-connections-16 = []
+max-ws-connections-8 = []
+max-ws-connections-4 = []
+max-ws-connections-2 = []
 
 [dependencies]
 heapless = { version = "0.8", features = ["serde"] }

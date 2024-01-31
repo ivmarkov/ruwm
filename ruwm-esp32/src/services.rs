@@ -7,6 +7,7 @@ extern crate alloc;
 
 use channel_bridge::asynch::ws::{WsError, DEFAULT_BUF_SIZE};
 
+use edge_frame::assets::serve::AssetMetadata;
 use edge_frame::assets::{self, serve::Asset};
 use edge_http::io::{self, server::Server};
 use edge_http::{Method, DEFAULT_MAX_HEADERS_COUNT};
@@ -437,13 +438,15 @@ impl<'a> HttpdHandler<'a> {
     where
         T: Read + Write,
     {
-        let asset = self
-            .assets
-            .iter()
-            .find(|asset| Some(Some(asset.0)) == con.headers().ok().map(|headers| headers.path));
+        let asset = self.assets.iter().find_map(|asset| {
+            let metadata = AssetMetadata::derive(asset.0);
 
-        if let Some(asset) = asset {
-            assets::serve::asynch::serve(Request::wrap(con), *asset).await
+            (Some(Some(metadata.uri)) == con.headers().ok().map(|headers| headers.path))
+                .then(|| (metadata, asset.1))
+        });
+
+        if let Some((metadata, data)) = asset {
+            assets::serve::asynch::serve_asset_data(Request::wrap(con), metadata, data).await
         } else {
             con.initiate_response(404, None, &[]).await
         }
@@ -477,7 +480,7 @@ pub async fn run_httpd(server: &mut HttpdServer) -> Result<(), io::Error<std::io
         .map_err(io::Error::Io)?;
 
     server
-        .run_with_task_id(acceptor, &HttpdHandler::new(&ASSETS))
+        .run_with_task_id(acceptor, &HttpdHandler::new(&ASSETS), None)
         .await?;
 
     Ok(())

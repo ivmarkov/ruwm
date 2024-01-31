@@ -19,7 +19,7 @@ rust-version = "1.75"
 yewdux-middleware = {git = "https://github.com/ivmarkov/yewdux-middleware" }
 edge-frame = {git = "https://github.com/ivmarkov/edge-frame" }
 hal-sim = {git = "https://github.com/ivmarkov/hal-sim" }
-channel-bridge = { path = "../../channel-bridge" }
+channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
 
 [profile.release]
 lto = true

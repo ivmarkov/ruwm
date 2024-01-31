@@ -241,21 +241,21 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     .set()
     .unwrap();
 
-    let low_prio_execution = std::thread::Builder::new()
-        .stack_size(60000)
-        .spawn(move || {
-            let executor = LocalExecutor::<4>::new();
+    // let low_prio_execution = std::thread::Builder::new()
+    //     .stack_size(60000)
+    //     .spawn(move || {
+    //         let executor = LocalExecutor::<4>::new();
 
-            let mut display = services::display(display_peripherals).unwrap();
+    //         let mut display = services::display(display_peripherals).unwrap();
 
-            spawn::low_prio(&executor, &mut display, move |_new_state| {
-                #[cfg(feature = "nvs")]
-                flash_wm_state(storage, _new_state);
-            });
+    //         spawn::low_prio(&executor, &mut display, move |_new_state| {
+    //             #[cfg(feature = "nvs")]
+    //             flash_wm_state(storage, _new_state);
+    //         });
 
-            block_on(executor.run(quit::QUIT[2].wait()));
-        })
-        .unwrap();
+    //         block_on(executor.run(quit::QUIT[2].wait()));
+    //     })
+    //     .unwrap();
 
     // Start main execution
 
@@ -268,7 +268,7 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     std::thread::sleep(core::time::Duration::from_millis(2000));
 
     mid_prio_execution.join().unwrap();
-    low_prio_execution.join().unwrap();
+    // low_prio_execution.join().unwrap();
 
     log::info!("Finished execution");
 
