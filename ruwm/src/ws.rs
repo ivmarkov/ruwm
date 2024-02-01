@@ -106,10 +106,7 @@ pub async fn broadcast() {
     ];
 
     loop {
-        let targets = match select_slice(&mut notifs)
-        .await
-        .1
-        {
+        let targets = match select_slice(&mut notifs).await.1 {
             0 => &HANDLERS_VALVE_STATE_NOTIF,
             1 => &HANDLERS_WM_STATE_NOTIF,
             2 => &HANDLERS_WM_STATS_STATE_NOTIF,
