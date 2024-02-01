@@ -270,7 +270,7 @@ fn run<'s>(scope: &'s Scope<'s, '_>, wakeup_reason: WakeupReason) -> Result<(), 
             // WS
 
             executor.spawn(ws::broadcast()).detach();
-            
+
             block_on(executor.run(quit::QUIT[1].wait()));
 
             Ok(())
