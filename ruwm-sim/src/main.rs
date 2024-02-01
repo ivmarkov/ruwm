@@ -1,8 +1,4 @@
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
 #![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
 #![recursion_limit = "1024"]
 
 use edge_executor::LocalExecutor;
@@ -121,15 +117,6 @@ fn start() {
 
     // Mid-prio tasks
 
-    let display = peripherals.display;
-
-    spawn::mid_prio(executor, services::display(display), move |_new_state| {
-        #[cfg(feature = "nvs")]
-        flash_wm_state(storage, _new_state);
-    });
-
-    // Low-prio tasks
-
     // TODO
     // MQTT
     // spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4, _, _>(
@@ -138,10 +125,19 @@ fn start() {
     //     mqtt_client,
     // );
 
+    // Low-prio tasks
+
+    let display = peripherals.display;
+
+    spawn::low_prio_owned(executor, services::display(display), move |_new_state| {
+        #[cfg(feature = "nvs")]
+        flash_wm_state(storage, _new_state);
+    });
+
     let (sender, receiver) = ruwm_web::local_queue();
 
     spawn::web(
-        &executor,
+        executor,
         sender,
         Mapper::new(receiver, |data| Some(Some(data))),
     );

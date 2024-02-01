@@ -2,7 +2,7 @@
 
 [package]
 name = "ruwm-sim"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -12,7 +12,7 @@ description = "An all-in-one Web simulator for the Rust Water Meter."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.71"
+rust-version = "1.75"
 #forced-target = "wasm32-unknown-unknown"
 
 [profile.release]
@@ -25,29 +25,29 @@ opt-level = 'z'
 [dependencies]
 anyhow = "1"
 log = "0.4"
-heapless = "0.7"
+heapless = "0.8"
 futures = "0.3"
 derive_more = "0.99"
 wasm-logger = "0.2"
 web-sys = { version = "0.3", features = ["console"] }
 wasm-bindgen-futures = "0.4"
 yew = { version = "0.21", default-features = false, features = ["csr"] }
-strum = { version = "0.25" }
+strum = "0.25"
 serde = "1"
-embassy-sync = "0.3"
-embassy-time = { version = "0.1", features = ["wasm", "generic-queue"] }
-embedded-hal = "1.0.0-rc.1"
-embedded-hal-async = "1.0.0-rc.1"
+embassy-sync = "0.5"
+embassy-time = { version = "0.3", features = ["wasm", "generic-queue"] }
+embedded-hal = "1"
+embedded-hal-async = "1"
 embedded-hal02 = { package = "embedded-hal", version = "0.2", features = ["unproven"] }
 nb01 = { package = "nb", version = "0.1" }
-embedded-svc = { version = "0.26", default-features = false, features = ["std"] }
-edge-frame = { version = "0.7", default-features = false }
-ruwm = { version = "0.4", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
-ruwm-web = { version = "0.4", path = "../ruwm-web", default-features = false }
-hal-sim = { version = "0.4", default-features = false, features = ["nightly", "io", "ui"] }
+embedded-svc = { version = "0.27", default-features = false, features = ["std"] }
+edge-frame = { version = "0.8", default-features = false }
+ruwm = { version = "0.5", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
+ruwm-web = { version = "0.5", path = "../ruwm-web", default-features = false, features = ["sim"] }
+hal-sim = { version = "0.5", default-features = false, features = ["io", "ui"] }
 embedded-graphics-core = "0.4"
 gfx-xtra = "0.2"
 edge-executor = "0.4"
-channel-bridge = { version = "0.6", features = ["nightly"]}
+channel-bridge = "0.8"
 static_cell = "2"
 critical-section = { version = "1", features = ["std"] }

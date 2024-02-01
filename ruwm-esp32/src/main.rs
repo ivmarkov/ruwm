@@ -1,12 +1,13 @@
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
 #![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
+#![warn(clippy::large_futures)]
+
+use core::pin::pin;
+use std::thread::Scope;
 
 extern crate alloc;
 
 use edge_executor::LocalExecutor;
+
 #[cfg(feature = "nvs")]
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
@@ -22,13 +23,15 @@ use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-
 use esp_idf_svc::sys::esp;
 use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::wifi::AuthMethod;
 
 use ruwm::quit;
 use ruwm::spawn;
+use ruwm::wifi;
 use ruwm::wm::WaterMeterState;
+use ruwm::ws;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
@@ -42,6 +45,9 @@ mod ulp_pulse_counter;
 #[cfg(all(feature = "ulp", not(any(esp32, esp32s2, esp32s3))))]
 compile_error!("Feature `ulp` is supported only on esp32, esp32s2 and esp32s3");
 
+const SSID: &str = env!("RUWM_WIFI_SSID");
+const PASS: &str = env!("RUWM_WIFI_PASS");
+
 const SLEEP_TIME: Duration = Duration::from_secs(30);
 const MQTT_MAX_TOPIC_LEN: usize = 64;
 
@@ -51,7 +57,7 @@ esp_idf_svc::sys::esp_app_desc!();
 
 fn main() -> Result<(), InitError> {
     esp_idf_svc::hal::task::critical_section::link();
-    esp_idf_svc::timer::embassy_time::driver::link();
+    esp_idf_svc::timer::embassy_time_driver::link();
 
     let wakeup_reason = WakeupReason::get();
 
@@ -59,7 +65,24 @@ fn main() -> Result<(), InitError> {
 
     log::info!("Wakeup reason: {:?}", wakeup_reason);
 
-    run(wakeup_reason)?;
+    // TODO: Persist the Wifi configuration in NVS, and start with an open AP,
+    // or whatever configuration the user has set via the UI
+    wifi::COMMAND.signal(wifi::WifiCommand::SetConfiguration(
+        embedded_svc::wifi::Configuration::Client(embedded_svc::wifi::ClientConfiguration {
+            ssid: SSID.try_into().unwrap(),
+            password: PASS.try_into().unwrap(),
+            auth_method: if PASS.is_empty() {
+                AuthMethod::None
+            } else {
+                Default::default()
+            },
+            ..Default::default()
+        }),
+    ));
+
+    std::thread::scope(|scope| run(scope, wakeup_reason))?;
+
+    log::info!("Going to sleep now");
 
     sleep()?;
 
@@ -68,17 +91,8 @@ fn main() -> Result<(), InitError> {
 
 fn init() -> Result<(), InitError> {
     esp_idf_svc::sys::link_patches();
-
-    // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-
-    esp!(unsafe {
-        #[allow(clippy::needless_update)]
-        esp_idf_svc::sys::esp_vfs_eventfd_register(&esp_idf_svc::sys::esp_vfs_eventfd_config_t {
-            max_fds: 5,
-            ..Default::default()
-        })
-    })?;
+    esp_idf_svc::io::vfs::initialize_eventfd(5)?;
 
     Ok(())
 }
@@ -89,7 +103,7 @@ fn sleep() -> Result<(), InitError> {
         esp!(esp_idf_svc::sys::esp_sleep_enable_ulp_wakeup())?;
 
         esp!(esp_idf_svc::sys::esp_sleep_enable_timer_wakeup(
-            SLEEP_TIME.as_micros() as u64
+            SLEEP_TIME.as_micros()
         ))?;
 
         log::info!("Going to sleep");
@@ -98,7 +112,7 @@ fn sleep() -> Result<(), InitError> {
     }
 }
 
-fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
+fn run<'s>(scope: &'s Scope<'s, '_>, wakeup_reason: WakeupReason) -> Result<(), InitError> {
     let peripherals = peripherals::SystemPeripherals::take();
 
     // Valve pins
@@ -153,54 +167,55 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
     #[cfg(not(feature = "ulp"))]
     let (pulse_counter, pulse_wakeup) = services::pulse(peripherals.pulse_counter)?;
 
-    // Wifi
-
-    let wifi = services::wifi(
-        peripherals.modem,
-        sysloop.clone(),
-        timer_service,
-        Some(nvs_default_partition.clone()),
-    )?;
-
-    // Httpd
-
-    let (_httpd, ws_acceptor) = services::httpd()?;
-
-    // Mqtt
-
-    let (mqtt_topic_prefix, mqtt_client, mqtt_conn) = services::mqtt()?;
-
     // High-prio tasks
 
-    let high_prio_executor = LocalExecutor::<16>::new();
+    log::info!("Starting high-prio executor");
 
-    // TODO: Move off the main thread, as it has a fixed, low priority (1)
-    spawn::high_prio(
-        &high_prio_executor,
-        valve_power_pin,
-        valve_open_pin,
-        valve_close_pin,
-        |state| unsafe {
-            services::RTC_MEMORY.valve = state;
-        },
-        pulse_counter,
-        pulse_wakeup,
-        |state| unsafe {
-            services::RTC_MEMORY.wm = state;
-        },
-        |state| unsafe {
-            services::RTC_MEMORY.wm_stats = state;
-        },
-        services::adc::<{ attenuation::NONE }, _, _>(
-            peripherals.battery.adc,
-            peripherals.battery.voltage,
-        )?,
-        PinDriver::input(peripherals.battery.power)?,
-        false,
-        services::button(peripherals.buttons.button1)?,
-        services::button(peripherals.buttons.button2)?,
-        services::button(peripherals.buttons.button3)?,
-    );
+    ThreadSpawnConfiguration {
+        name: Some(b"async-exec-mid\0"),
+        priority: 7,
+        ..Default::default()
+    }
+    .set()
+    .unwrap();
+
+    let high_prio_execution = std::thread::Builder::new()
+        .stack_size(10000)
+        .spawn_scoped(scope, move || {
+            let executor = LocalExecutor::<16>::new();
+
+            spawn::high_prio(
+                &executor,
+                valve_power_pin,
+                valve_open_pin,
+                valve_close_pin,
+                |state| unsafe {
+                    services::RTC_MEMORY.valve = state;
+                },
+                pulse_counter,
+                pulse_wakeup,
+                |state| unsafe {
+                    services::RTC_MEMORY.wm = state;
+                },
+                |state| unsafe {
+                    services::RTC_MEMORY.wm_stats = state;
+                },
+                services::adc::<{ attenuation::NONE }, _, _>(
+                    peripherals.battery.adc,
+                    peripherals.battery.voltage,
+                )?,
+                PinDriver::input(peripherals.battery.power)?,
+                false,
+                services::button(peripherals.buttons.button1)?,
+                services::button(peripherals.buttons.button2)?,
+                services::button(peripherals.buttons.button3)?,
+            );
+
+            block_on(executor.run(quit::QUIT[0].wait()));
+
+            Ok(())
+        })
+        .unwrap();
 
     // Mid-prio tasks
 
@@ -215,24 +230,52 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     let display_peripherals = peripherals.display;
 
-    let mid_prio_execution = services::schedule::<8>(50000, quit::QUIT[1].wait(), move || {
-        let executor = LocalExecutor::new();
+    let mid_prio_execution = std::thread::Builder::new()
+        .stack_size(60000)
+        .spawn_scoped(scope, move || {
+            let executor = LocalExecutor::<8>::new();
 
-        spawn::mid_prio(
-            &executor,
-            services::display(display_peripherals).unwrap(),
-            move |_new_state| {
-                #[cfg(feature = "nvs")]
-                flash_wm_state(storage, _new_state);
-            },
-        );
+            // Wifi
 
-        spawn::wifi(&executor, wifi);
+            let mut wifi = services::wifi(
+                peripherals.modem,
+                sysloop.clone(),
+                timer_service,
+                Some(nvs_default_partition.clone()),
+            )?;
 
-        spawn::mqtt_receive(&executor, mqtt_conn);
+            spawn::wifi(&executor, &mut wifi);
 
-        executor
-    });
+            // Mqtt
+
+            let (mqtt_topic_prefix, mut mqtt_client, mut mqtt_conn) = services::mqtt()?;
+
+            spawn::mqtt_receive(&executor, &mut mqtt_conn);
+
+            spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 8>(
+                &executor,
+                mqtt_topic_prefix,
+                &mut mqtt_client,
+            );
+
+            // Httpd
+
+            let mut httpd = services::httpd()?;
+            let handler = services::httpd_handler()?;
+
+            let httpd = pin!(services::run_httpd(&mut httpd, &handler));
+
+            executor.spawn(httpd).detach();
+
+            // WS
+
+            executor.spawn(ws::broadcast()).detach();
+            
+            block_on(executor.run(quit::QUIT[1].wait()));
+
+            Ok(())
+        })
+        .unwrap();
 
     // Low-prio tasks
 
@@ -240,37 +283,45 @@ fn run(wakeup_reason: WakeupReason) -> Result<(), InitError> {
 
     ThreadSpawnConfiguration {
         name: Some(b"async-exec-low\0"),
+        priority: 4,
         ..Default::default()
     }
     .set()
     .unwrap();
 
-    let low_prio_execution = services::schedule::<4>(50000, quit::QUIT[2].wait(), move || {
-        let executor = LocalExecutor::new();
+    let low_prio_execution = std::thread::Builder::new()
+        .stack_size(10000)
+        .spawn_scoped(scope, move || {
+            let executor = LocalExecutor::<4>::new();
 
-        spawn::mqtt_send::<MQTT_MAX_TOPIC_LEN, 4>(&executor, mqtt_topic_prefix, mqtt_client);
+            let mut display = services::display(display_peripherals)?;
 
-        spawn::ws(&executor, ws_acceptor);
+            spawn::low_prio(&executor, &mut display, move |_new_state| {
+                #[cfg(feature = "nvs")]
+                flash_wm_state(storage, _new_state);
+            });
 
-        executor
-    });
+            block_on(executor.run(quit::QUIT[2].wait()));
 
-    // Start main execution
+            Ok(())
+        })
+        .unwrap();
 
-    log::info!("Starting high-prio executor");
+    let result1 = high_prio_execution.join().unwrap();
+    let result2 = mid_prio_execution.join().unwrap();
+    let result3 = low_prio_execution.join().unwrap();
 
-    block_on(high_prio_executor.run(quit::QUIT[0].wait()));
+    log::info!("Finished execution: {result1:?} / {result2:?} / {result3:?}");
 
-    log::info!("Execution finished, waiting for 2s to workaround a STD/ESP-IDF pthread (?) bug");
-
-    std::thread::sleep(core::time::Duration::from_millis(2000));
-
-    mid_prio_execution.join().unwrap();
-    low_prio_execution.join().unwrap();
-
-    log::info!("Finished execution");
-
-    Ok(())
+    if result1.is_err() {
+        result1
+    } else if result2.is_err() {
+        result2
+    } else if result3.is_err() {
+        result3
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "nvs")]

@@ -9,8 +9,9 @@ members = [
 exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
-crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam" }
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
+esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
+#esp-idf-svc = { path = "../esp-idf-svc" }
 
 [profile.release]
 opt-level = "s"

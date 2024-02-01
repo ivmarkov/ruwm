@@ -1,23 +1,31 @@
-use core::cell::RefCell;
 use core::fmt::Debug;
-use core::future::Future;
 use core::mem;
+use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
 
 extern crate alloc;
 
-use edge_frame::assets::serve::AssetMetadata;
+use channel_bridge::asynch::ws::{WsError, DEFAULT_BUF_SIZE};
 
-use embassy_sync::blocking_mutex::Mutex;
+use edge_frame::assets::serve::AssetMetadata;
+use edge_frame::assets::{self, serve::Asset};
+use edge_http::io::{self, server::Server};
+use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
+use edge_http::{Method, DEFAULT_MAX_HEADERS_COUNT};
+use edge_std_nal_async::StdTcpConnection;
+use edge_ws::io::WsConnection;
+
 use embassy_time::Duration;
+
+use embedded_nal_async::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use embedded_nal_async_xtra::{TcpListen, TcpSplittableConnection};
 
 use embedded_hal::digital::OutputPin as EHOutputPin;
 
-use embedded_svc::http::server::Method;
+use embedded_io_async::{Read, Write};
+use embedded_svc::http::server::asynch::Request;
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish};
-use embedded_svc::utils::asyncify::Asyncify;
 use embedded_svc::wifi::asynch::Wifi;
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
-use embedded_svc::ws::asynch::server::Acceptor;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::adc::{Adc, AdcChannelDriver, AdcConfig, AdcDriver};
@@ -29,38 +37,27 @@ use esp_idf_svc::hal::peripheral::Peripheral;
 use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::hal::reset::WakeupReason;
 use esp_idf_svc::hal::spi::*;
-use esp_idf_svc::hal::task::embassy_sync::EspRawMutex;
 
-use esp_idf_svc::http::server::ws::EspHttpWsProcessor;
-use esp_idf_svc::http::server::EspHttpServer;
-use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
+use esp_idf_svc::mqtt::client::{EspAsyncMqttClient, MqttClientConfiguration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::timer::EspTaskTimerService;
-use esp_idf_svc::wifi::{AsyncWifi, BlockingWifi, EspWifi};
+use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 
 use esp_idf_svc::sys::{adc_atten_t, EspError};
 
 use gfx_xtra::draw_target::{Flushable, OwnedDrawTargetExt};
 
-use edge_frame::assets;
-
-use edge_executor::*;
-
 use ruwm::button::PressedLevel;
-use ruwm::mqtt::{MessageParser, MqttCommand};
 use ruwm::pulse_counter::PulseCounter;
 use ruwm::pulse_counter::PulseWakeup;
 use ruwm::screen::Color;
 use ruwm::valve::{self, ValveState};
 use ruwm::wm::WaterMeterState;
 use ruwm::wm_stats::WaterMeterStatsState;
-use ruwm::ws;
+use ruwm::ws::{WS_MAX_CONNECTIONS, WS_MAX_FRAME_LEN};
 
 use crate::errors::*;
 use crate::peripherals::{DisplaySpiPeripherals, PulseCounterPeripherals, ValvePeripherals};
-
-const SSID: &str = env!("RUWM_WIFI_SSID");
-const PASS: &str = env!("RUWM_WIFI_PASS");
 
 const ASSETS: assets::serve::Assets = edge_frame::assets!("RUWM_WEB");
 
@@ -226,6 +223,7 @@ pub fn adc<'d, const A: adc_atten_t, ADC: Adc + 'd, P: ADCPin<Adc = ADC>>(
     })
 }
 
+#[inline(always)]
 pub fn display(
     peripherals: DisplaySpiPeripherals<impl Peripheral<P = impl SpiAnyPins + 'static> + 'static>,
 ) -> Result<impl Flushable<Color = Color, Error = impl Debug + 'static> + 'static, InitError> {
@@ -305,115 +303,205 @@ pub fn display(
     Ok(display)
 }
 
-// TODO: Make it async
+#[inline(always)]
 pub fn wifi<'d>(
     modem: impl Peripheral<P = impl WifiModemPeripheral + 'd> + 'd,
     sysloop: EspSystemEventLoop,
     timer_service: EspTaskTimerService,
     partition: Option<EspDefaultNvsPartition>,
 ) -> Result<impl Wifi + 'd, InitError> {
-    let mut wifi = EspWifi::new(modem, sysloop.clone(), partition)?;
-
-    if PASS.is_empty() {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            auth_method: AuthMethod::None,
-            ..Default::default()
-        }))?;
-    } else {
-        wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-            ssid: SSID.into(),
-            password: PASS.into(),
-            ..Default::default()
-        }))?;
-    }
-
-    let mut bwifi = BlockingWifi::wrap(&mut wifi, sysloop.clone())?;
-
-    bwifi.start()?;
-
-    bwifi.connect()?;
-
-    bwifi.wait_netif_up()?;
-
-    let wifi = AsyncWifi::wrap(wifi, sysloop, timer_service)?;
-
-    Ok(wifi)
+    Ok(AsyncWifi::wrap(
+        EspWifi::new(modem, sysloop.clone(), partition)?,
+        sysloop,
+        timer_service,
+    )?)
 }
 
-pub fn httpd<'a>() -> Result<(EspHttpServer<'a>, impl Acceptor), InitError> {
-    let (ws_processor, ws_acceptor) =
-        EspHttpWsProcessor::<{ ws::WS_MAX_CONNECTIONS }, { ws::WS_MAX_FRAME_LEN }>::new(());
-
-    let ws_processor = Mutex::<EspRawMutex, _>::new(RefCell::new(ws_processor));
-
-    let mut httpd = EspHttpServer::new(&Default::default()).unwrap();
-
-    let mut assets = ASSETS
-        .iter()
-        .filter(|asset| !asset.0.is_empty())
-        .collect::<heapless::Vec<_, { assets::MAX_ASSETS }>>();
-
-    assets.sort_by_key(|asset| AssetMetadata::derive(asset.0).uri);
-
-    for asset in assets.iter().rev() {
-        let asset = **asset;
-
-        let metadata = AssetMetadata::derive(asset.0);
-
-        httpd.fn_handler(metadata.uri, Method::Get, move |req| {
-            assets::serve::serve(req, asset)
-        })?;
-    }
-
-    httpd.ws_handler("/ws", move |connection| {
-        ws_processor.lock(|ws_processor| ws_processor.borrow_mut().process(connection))
-    })?;
-
-    Ok((httpd, ws_acceptor))
+#[derive(Debug)]
+pub enum HttpdError<T> {
+    Http(io::Error<T>),
+    Ws(WsError<edge_ws::io::Error<T>>),
 }
 
+impl<T> From<io::Error<T>> for HttpdError<T> {
+    fn from(err: io::Error<T>) -> Self {
+        Self::Http(err)
+    }
+}
+
+impl<T> From<WsError<edge_ws::io::Error<T>>> for HttpdError<T> {
+    fn from(err: WsError<edge_ws::io::Error<T>>) -> Self {
+        Self::Ws(err)
+    }
+}
+
+pub struct HttpdHandler<'a> {
+    assets: &'a [Asset],
+    send_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
+    recv_bufs: UnsafeCell<MaybeUninit<[[u8; WS_MAX_FRAME_LEN]; WS_MAX_CONNECTIONS]>>,
+}
+
+impl<'a> HttpdHandler<'a> {
+    #[inline(always)]
+    pub fn new(assets: &'a [Asset]) -> Self {
+        Self {
+            assets,
+            send_bufs: UnsafeCell::new(MaybeUninit::uninit()),
+            recv_bufs: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    async fn handle<'b, T, const N: usize>(
+        &self,
+        task_id: usize,
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), HttpdError<T::Error>>
+    where
+        T: Read + Write + TcpSplittableConnection,
+    {
+        if matches!(con.headers().unwrap().method, Some(Method::Get)) {
+            if matches!(con.headers()?.path, Some("/ws")) {
+                let send_buf = &mut unsafe {
+                    self.send_bufs.get().as_mut().unwrap().assume_init_mut()[task_id]
+                };
+                let recv_buf = &mut unsafe {
+                    self.recv_bufs.get().as_mut().unwrap().assume_init_mut()[task_id]
+                };
+
+                self.handle_ws(task_id, send_buf, recv_buf, con).await?;
+            } else {
+                self.handle_assets(con).await?;
+            }
+        } else {
+            con.initiate_response(405, None, &[]).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_ws<'b, T, const N: usize>(
+        &self,
+        task_id: usize,
+        send_buf: &mut [u8],
+        recv_buf: &mut [u8],
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), HttpdError<T::Error>>
+    where
+        T: Read + Write + TcpSplittableConnection,
+    {
+        if con.is_ws_upgrade_request()? {
+            let mut buf = send_buf[..MAX_BASE64_KEY_RESPONSE_LEN].try_into().unwrap();
+
+            con.initiate_ws_upgrade_response(&mut buf).await?;
+            con.complete().await?;
+
+            let socket = con.unbind()?;
+
+            let (read, write) = socket.split().map_err(io::Error::Io)?;
+
+            log::info!("Starting WS connection");
+
+            let sender = WsConnection::new(write, || None);
+            let receiver = WsConnection::new(read, || Option::<()>::None);
+
+            ruwm::ws::handle(sender, send_buf, receiver, recv_buf, task_id).await?;
+        } else {
+            con.initiate_response(200, None, &[("Content-Length", "0")])
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_assets<'b, T, const N: usize>(
+        &self,
+        con: &mut io::server::Connection<'b, T, N>,
+    ) -> Result<(), io::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
+        let asset = self.assets.iter().find_map(|asset| {
+            let metadata = AssetMetadata::derive(asset.0);
+
+            (Some(Some(metadata.uri)) == con.headers().ok().map(|headers| headers.path))
+                .then(|| (metadata, asset.1))
+        });
+
+        if let Some((metadata, data)) = asset {
+            assets::serve::asynch::serve_asset_data(Request::wrap(con), metadata, data).await
+        } else {
+            con.initiate_response(404, None, &[]).await
+        }
+    }
+}
+
+impl<'a, 'b, T, const N: usize> io::server::TaskHandler<'a, T, N> for HttpdHandler<'b>
+where
+    T: Read + Write + TcpSplittableConnection,
+{
+    type Error = HttpdError<T::Error>;
+
+    async fn handle(
+        &self,
+        task_id: usize,
+        con: &mut io::server::Connection<'a, T, N>,
+    ) -> Result<(), Self::Error> {
+        HttpdHandler::handle(self, task_id, con).await
+    }
+}
+
+pub type HttpdServer =
+    Server<{ WS_MAX_CONNECTIONS }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
+
+#[inline(always)]
+pub fn httpd() -> Result<HttpdServer, InitError> {
+    Ok(HttpdServer::new())
+}
+
+#[inline(always)]
+pub fn httpd_handler() -> Result<HttpdHandler<'static>, InitError> {
+    Ok(HttpdHandler::new(&ASSETS))
+}
+
+pub async fn run_httpd<H>(
+    server: &mut HttpdServer,
+    handler: H,
+) -> Result<(), io::Error<std::io::Error>>
+where
+    H: for<'b> io::server::TaskHandler<'b, &'b mut StdTcpConnection, { DEFAULT_MAX_HEADERS_COUNT }>,
+{
+    let stack = edge_std_nal_async::Stack::new();
+
+    let acceptor = stack
+        .listen(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 80)))
+        .await
+        .map_err(io::Error::Io)?;
+
+    server.run_with_task_id(acceptor, handler, None).await?;
+
+    Ok(())
+}
+
+#[inline(always)]
 pub fn mqtt() -> Result<
     (
         &'static str,
         impl Client + Publish,
-        impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
+        impl Connection + 'static,
     ),
     InitError,
 > {
-    let client_id = "water-meter-demo";
-    let mut mqtt_parser = MessageParser::new();
+    // TODO: Persist the MQTT configuration in NVS, and start with disabled MQTT,
+    // or whatever configuration the user has set via the UI
 
-    let (mqtt_client, mqtt_conn) = EspMqttClient::new_with_converting_async_conn(
+    let client_id = "water-meter-demo";
+    let (mqtt_client, mqtt_conn) = EspAsyncMqttClient::new(
         "mqtt://broker.emqx.io:1883",
         &MqttClientConfiguration {
             client_id: Some(client_id),
             ..Default::default()
         },
-        move |event| mqtt_parser.convert(event),
     )?;
 
-    let mqtt_client = mqtt_client.into_async();
-
     Ok((client_id, mqtt_client, mqtt_conn))
-}
-
-pub fn schedule<'a, const C: usize>(
-    stack_size: usize,
-    run: impl Future + Send + 'static,
-    spawner: impl FnOnce() -> LocalExecutor<'a, C> + Send + 'static,
-) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
-        .stack_size(stack_size)
-        .spawn(move || {
-            let executor = spawner();
-
-            // info!(
-            //     "Tasks on thread {:?} scheduled, about to run the executor now",
-            //     "TODO"
-            // );
-
-            block_on(executor.run(run));
-        })
-        .unwrap()
 }

@@ -18,10 +18,8 @@ Easiest is to build the demo.
 
 To build:
 * Get [rustup](https://rustup.rs/).
-* Switch to Rust nightly and add the wasm target
+* Add the wasm target
 ```sh
-rustup default nightly
-rustup update nightly
 rustup target add wasm32-unknown-unknown
 ```
 * Install [Trunk](https://github.com/thedodd/trunk)

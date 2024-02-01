@@ -11,7 +11,7 @@ use embassy_futures::select::{select4, Either4};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 
-use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, Message, Publish, QoS};
+use embedded_svc::mqtt::client::asynch::{Client, Connection, Event, EventPayload, Publish, QoS};
 use embedded_svc::mqtt::client::Details;
 
 use channel_bridge::notification::Notification;
@@ -39,8 +39,6 @@ pub enum MqttCommand {
     SystemUpdate,
 }
 
-pub type MqttClientNotification = Result<Event<Option<MqttCommand>>, ()>;
-
 // TODO: Web: connected info at least
 static PUBLISH_NOTIFY: &[&Notification] =
     &[&crate::keepalive::NOTIF, &crate::screen::MQTT_STATE_NOTIF];
@@ -58,7 +56,7 @@ pub async fn send<const L: usize>(topic_prefix: &str, mut mqtt: impl Client + Pu
     let mut connected = false;
 
     let topic = |topic_suffix| {
-        String::<L>::from_str(topic_prefix.as_ref())
+        String::<L>::from_str(topic_prefix)
             .and_then(|mut s| s.push_str(topic_suffix).map(|_| s))
             .unwrap_or_else(|_| panic!(""))
     };
@@ -295,26 +293,32 @@ async fn publish(connected: bool, mqtt: &mut impl Publish, topic: &str, qos: QoS
     }
 }
 
-pub async fn receive(
-    mut connection: impl for<'a> Connection<Message<'a> = Option<MqttCommand>> + 'static,
-) {
-    loop {
-        let message = connection.next().await;
+pub async fn receive(mut connection: impl Connection) {
+    let mut parser = MessageParser::new();
 
-        if let Some(message) = message {
-            info!("[MQTT/CONNECTION]: {:?}", message);
+    while let Ok(event) = connection.next().await {
+        let payload = event.payload();
 
-            if let Ok(Event::Received(Some(cmd))) = &message {
+        info!("[MQTT/CONNECTION]: {:?}", payload);
+
+        if let EventPayload::Received {
+            topic,
+            data,
+            details,
+            ..
+        } = payload
+        {
+            if let Some(cmd) = parser.process(topic, data, &details) {
                 match cmd {
                     MqttCommand::Valve(open) => {
-                        valve::COMMAND.signal(if *open {
+                        valve::COMMAND.signal(if open {
                             ValveCommand::Open
                         } else {
                             ValveCommand::Close
                         });
                     }
                     MqttCommand::FlowWatch(enable) => {
-                        wm::COMMAND.signal(if *enable {
+                        wm::COMMAND.signal(if enable {
                             WaterMeterCommand::Arm
                         } else {
                             WaterMeterCommand::Disarm
@@ -322,23 +326,21 @@ pub async fn receive(
                     }
                     _ => (),
                 }
-            } else if matches!(&message, Ok(Event::Connected(_))) {
-                CONN_SIGNAL.signal(true);
-            } else if matches!(&message, Ok(Event::Disconnected)) {
-                CONN_SIGNAL.signal(false);
             }
+        } else if matches!(payload, EventPayload::Connected(_)) {
+            CONN_SIGNAL.signal(true);
+        } else if matches!(payload, EventPayload::Disconnected) {
+            CONN_SIGNAL.signal(false);
+        }
 
-            for notification in RECEIVE_NOTIFY {
-                notification.notify();
-            }
-        } else {
-            break;
+        for notification in RECEIVE_NOTIFY {
+            notification.notify();
         }
     }
 }
 
 #[derive(Default)]
-pub struct MessageParser {
+struct MessageParser {
     #[allow(clippy::type_complexity)]
     command_parser: Option<fn(&[u8]) -> Option<MqttCommand>>,
     payload_buf: [u8; 16],
@@ -349,47 +351,33 @@ impl MessageParser {
         Default::default()
     }
 
-    pub fn convert<M, E>(
+    pub fn process(
         &mut self,
-        event: &Result<Event<M>, E>,
-    ) -> Result<Event<Option<MqttCommand>>, E>
-    where
-        M: Message,
-        E: Clone,
-    {
-        event
-            .as_ref()
-            .map(|event| event.transform_received(|message| self.process(message)))
-            .map_err(|e| e.clone())
-    }
-
-    fn process<M>(&mut self, message: &M) -> Option<MqttCommand>
-    where
-        M: Message,
-    {
-        match message.details() {
-            Details::Complete => Self::parse_command(message.topic().unwrap())
-                .and_then(|parser| parser(message.data())),
+        topic: Option<&str>,
+        payload: &[u8],
+        details: &Details,
+    ) -> Option<MqttCommand> {
+        match details {
+            Details::Complete => {
+                Self::parse_command(topic.unwrap()).and_then(|parser| parser(payload))
+            }
             Details::InitialChunk(initial_chunk_data) => {
                 if initial_chunk_data.total_data_size > self.payload_buf.len() {
                     self.command_parser = None;
                 } else {
-                    self.command_parser = Self::parse_command(message.topic().unwrap());
-
-                    self.payload_buf[..message.data().len()]
-                        .copy_from_slice(message.data().as_ref());
+                    self.command_parser = Self::parse_command(topic.unwrap());
+                    self.payload_buf[..payload.len()].copy_from_slice(payload);
                 }
 
                 None
             }
             Details::SubsequentChunk(subsequent_chunk_data) => {
                 if let Some(command_parser) = self.command_parser.as_ref() {
-                    self.payload_buf
-                        [subsequent_chunk_data.current_data_offset..message.data().len()]
-                        .copy_from_slice(message.data().as_ref());
+                    self.payload_buf[subsequent_chunk_data.current_data_offset..payload.len()]
+                        .copy_from_slice(payload);
 
                     if subsequent_chunk_data.total_data_size
-                        == subsequent_chunk_data.current_data_offset + message.data().len()
+                        == subsequent_chunk_data.current_data_offset + payload.len()
                     {
                         command_parser(&self.payload_buf[0..subsequent_chunk_data.total_data_size])
                     } else {

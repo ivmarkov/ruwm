@@ -1,4 +1,3 @@
-use core::cmp::max;
 use core::fmt::Debug;
 
 use embassy_futures::select::{select, Either};
@@ -48,7 +47,11 @@ pub async fn process() {
         }
 
         let remaining_time = if let Some(quit_time) = quit_time {
-            RemainingTime::Duration(max(quit_time - now, Duration::from_secs(0)))
+            if quit_time > now {
+                RemainingTime::Duration(quit_time - now)
+            } else {
+                RemainingTime::Duration(Duration::from_secs(0))
+            }
         } else {
             RemainingTime::Indefinite
         };

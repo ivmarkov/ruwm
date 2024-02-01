@@ -1,9 +1,6 @@
 #![no_std]
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
 #![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
+#![warn(clippy::large_futures)]
 
 #[cfg(feature = "system")]
 pub mod battery;
@@ -28,6 +25,8 @@ pub mod screen;
 pub mod spawn;
 #[cfg(feature = "system")]
 pub mod state;
+#[cfg(feature = "system")]
+pub mod utils;
 #[cfg(feature = "system")]
 pub mod valve;
 #[cfg(feature = "system")]
