@@ -24,11 +24,17 @@ mod battery;
 mod valve;
 
 #[cfg(feature = "sim")]
-static REQUEST_QUEUE: embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, WebRequest, 1> =
-    embassy_sync::channel::Channel::new();
+static REQUEST_QUEUE: embassy_sync::channel::Channel<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    WebRequest,
+    1,
+> = embassy_sync::channel::Channel::new();
 #[cfg(feature = "sim")]
-static EVENT_QUEUE: embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, WebEvent, 1> =
-    embassy_sync::channel::Channel::new();
+static EVENT_QUEUE: embassy_sync::channel::Channel<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    WebEvent,
+    1,
+> = embassy_sync::channel::Channel::new();
 
 #[derive(Debug, Routable, Copy, Clone, PartialEq, Eq, Hash)]
 enum Routes {
@@ -171,7 +177,11 @@ where
         .fuse(Rc::new(log_msg(Level::Info)))
 }
 
-fn role_as_request(mcx: &MiddlewareContext, msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>) {
+fn role_as_request(
+    mcx: &MiddlewareContext,
+    msg: RoleState,
+    dispatch: impl MiddlewareDispatch<RoleState>,
+) {
     let request = match &msg {
         RoleState::Authenticating(credentials) => Some(WebRequest::Authenticate(
             credentials.username.as_str().try_into().unwrap(),
