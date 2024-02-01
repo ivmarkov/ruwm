@@ -2,7 +2,7 @@
 
 [package]
 name = "ruwm-sim"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -14,12 +14,6 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.75"
 #forced-target = "wasm32-unknown-unknown"
-
-[patch.crates-io]
-yewdux-middleware = {git = "https://github.com/ivmarkov/yewdux-middleware" }
-edge-frame = {git = "https://github.com/ivmarkov/edge-frame" }
-hal-sim = {git = "https://github.com/ivmarkov/hal-sim" }
-channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
 
 [profile.release]
 lto = true
@@ -47,13 +41,13 @@ embedded-hal-async = "1"
 embedded-hal02 = { package = "embedded-hal", version = "0.2", features = ["unproven"] }
 nb01 = { package = "nb", version = "0.1" }
 embedded-svc = { version = "0.27", default-features = false, features = ["std"] }
-edge-frame = { version = "0.7", default-features = false }
-ruwm = { version = "0.4", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
-ruwm-web = { version = "0.4", path = "../ruwm-web", default-features = false }
-hal-sim = { version = "0.4", default-features = false, features = ["io", "ui"] }
+edge-frame = { version = "0.8", default-features = false }
+ruwm = { version = "0.5", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
+ruwm-web = { version = "0.5", path = "../ruwm-web", default-features = false, features = ["sim"] }
+hal-sim = { version = "0.5", default-features = false, features = ["io", "ui"] }
 embedded-graphics-core = "0.4"
 gfx-xtra = "0.2"
 edge-executor = "0.4"
-channel-bridge = "0.7"
+channel-bridge = "0.8"
 static_cell = "2"
 critical-section = { version = "1", features = ["std"] }

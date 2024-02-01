@@ -23,14 +23,15 @@ use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-
 use esp_idf_svc::sys::esp;
 use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::wifi::AuthMethod;
 
 use ruwm::quit;
 use ruwm::spawn;
 use ruwm::wifi;
 use ruwm::wm::WaterMeterState;
+use ruwm::ws;
 
 use crate::errors::*;
 use crate::peripherals::{ButtonsPeripherals, PulseCounterPeripherals};
@@ -70,6 +71,11 @@ fn main() -> Result<(), InitError> {
         embedded_svc::wifi::Configuration::Client(embedded_svc::wifi::ClientConfiguration {
             ssid: SSID.try_into().unwrap(),
             password: PASS.try_into().unwrap(),
+            auth_method: if PASS.is_empty() {
+                AuthMethod::None
+            } else {
+                Default::default()
+            },
             ..Default::default()
         }),
     ));
@@ -225,7 +231,7 @@ fn run<'s>(scope: &'s Scope<'s, '_>, wakeup_reason: WakeupReason) -> Result<(), 
     let display_peripherals = peripherals.display;
 
     let mid_prio_execution = std::thread::Builder::new()
-        .stack_size(40000)
+        .stack_size(60000)
         .spawn_scoped(scope, move || {
             let executor = LocalExecutor::<8>::new();
 
@@ -261,6 +267,10 @@ fn run<'s>(scope: &'s Scope<'s, '_>, wakeup_reason: WakeupReason) -> Result<(), 
 
             executor.spawn(httpd).detach();
 
+            // WS
+
+            executor.spawn(ws::broadcast()).detach();
+            
             block_on(executor.run(quit::QUIT[1].wait()));
 
             Ok(())

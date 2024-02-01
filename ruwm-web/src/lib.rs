@@ -15,9 +15,6 @@ use edge_frame::middleware::{self, *};
 use edge_frame::role::*;
 use edge_frame::wifi_setup::*;
 
-use embassy_sync::channel::{DynamicReceiver, DynamicSender};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
-
 use ruwm::dto::web::*;
 
 use crate::battery::*;
@@ -26,10 +23,12 @@ use crate::valve::*;
 mod battery;
 mod valve;
 
-static REQUEST_QUEUE: channel::Channel<CriticalSectionRawMutex, WebRequest, 1> =
-    channel::Channel::new();
-static EVENT_QUEUE: channel::Channel<CriticalSectionRawMutex, WebEvent, 1> =
-    channel::Channel::new();
+#[cfg(feature = "sim")]
+static REQUEST_QUEUE: embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, WebRequest, 1> =
+    embassy_sync::channel::Channel::new();
+#[cfg(feature = "sim")]
+static EVENT_QUEUE: embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, WebEvent, 1> =
+    embassy_sync::channel::Channel::new();
 
 #[derive(Debug, Routable, Copy, Clone, PartialEq, Eq, Hash)]
 enum Routes {
@@ -42,18 +41,14 @@ enum Routes {
 }
 
 #[derive(Default, Properties, Clone, PartialEq)]
-pub struct AppProps {
-    #[prop_or_default]
-    pub endpoint: Option<String>,
-}
+pub struct AppProps {}
 
 #[function_component(App)]
-pub fn app(props: &AppProps) -> Html {
-    let endpoint = props.endpoint.clone();
+pub fn app(_props: &AppProps) -> Html {
     let mcx = use_mcx();
 
     use_effect_with((), move |_| {
-        init_middleware(&mcx, endpoint.as_deref());
+        init_middleware(&mcx);
 
         move || ()
     });
@@ -109,7 +104,7 @@ fn render(route: Routes) -> Html {
     }
 }
 
-fn init_middleware(mcx: &MiddlewareContext, endpoint: Option<&str>) {
+fn init_middleware(mcx: &MiddlewareContext) {
     // Dispatch WebEvent messages => redispatch as BatteryMsg, ValveMsg, RoleState or WifiConf messages
     mcx.register::<WebEvent, _>(|mcx: &MiddlewareContext, event| {
         match event {
@@ -134,16 +129,20 @@ fn init_middleware(mcx: &MiddlewareContext, endpoint: Option<&str>) {
     mcx.register(log::<BatteryStore, BatteryMsg>(MiddlewareContext::store));
     mcx.register(log::<ValveStore, ValveMsg>(MiddlewareContext::store));
 
-    if let Some(endpoint) = endpoint {
+    #[cfg(not(feature = "sim"))]
+    {
         let (sender, receiver) =
-            middleware::open(endpoint).unwrap_or_else(|_| panic!("Failed to open websocket"));
+            middleware::open("/ws").unwrap_or_else(|_| panic!("Failed to open websocket"));
 
         // Dispatch WebRequest messages => send to backend
         mcx.register(middleware::send::<WebRequest>(sender));
 
         // Receive from backend => dispatch WebEvent messages
         middleware::receive::<WebEvent>(mcx, receiver);
-    } else {
+    }
+
+    #[cfg(feature = "sim")]
+    {
         let (sender, receiver) = (REQUEST_QUEUE.sender(), EVENT_QUEUE.receiver());
 
         // Dispatch WebRequest messages => send to backend
@@ -154,9 +153,10 @@ fn init_middleware(mcx: &MiddlewareContext, endpoint: Option<&str>) {
     }
 }
 
+#[cfg(feature = "sim")]
 pub fn local_queue() -> (
-    DynamicSender<'static, WebEvent>,
-    DynamicReceiver<'static, WebRequest>,
+    embassy_sync::channel::DynamicSender<'static, WebEvent>,
+    embassy_sync::channel::DynamicReceiver<'static, WebRequest>,
 ) {
     (EVENT_QUEUE.sender().into(), REQUEST_QUEUE.receiver().into())
 }
@@ -167,8 +167,8 @@ where
     M: Reducer<S> + Debug + 'static,
 {
     dispatch
-        .fuse(Rc::new(log_store(Level::Trace)))
-        .fuse(Rc::new(log_msg(Level::Trace)))
+        .fuse(Rc::new(log_store(Level::Info)))
+        .fuse(Rc::new(log_msg(Level::Info)))
 }
 
 fn role_as_request(mcx: &MiddlewareContext, msg: RoleState, dispatch: impl MiddlewareDispatch<RoleState>) {

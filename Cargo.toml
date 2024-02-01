@@ -10,20 +10,11 @@ exclude = ["ruwm-web", "ruwm-sim"]
 
 [patch.crates-io]
 ssd1351 = { git = "https://github.com/ivmarkov/ssd1351" }
-edge-frame = { git = "https://github.com/ivmarkov/edge-frame" }
-edge-http = { git = "https://github.com/ivmarkov/edge-net" }
-#edge-http = { path = "../edge-net/edge-http" }
-edge-std-nal-async = { git = "https://github.com/ivmarkov/edge-net" }
-#edge-std-nal-async = { path = "../edge-net/edge-std-nal-async" }
-embedded-nal-async-xtra = { git = "https://github.com/ivmarkov/edge-net" }
-#embedded-nal-async-xtra = { path = "../edge-net/embedded-nal-async-xtra" }
-channel-bridge = { git = "https://github.com/ivmarkov/channel-bridge" }
-#channel-bridge = { path = "../channel-bridge" }
-#esp-idf-svc = { path = "../esp-idf-svc" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
+#esp-idf-svc = { path = "../esp-idf-svc" }
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
 
 [profile.dev]
 debug = true

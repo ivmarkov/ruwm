@@ -1,6 +1,6 @@
 [package]
 name = "ruwm-esp32"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["ivmarkov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -10,7 +10,7 @@ description = "ESP32 port of the Rust Water Meter backend."
 repository = "https://github.com/ivmarkov/ruwm"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.71"
+rust-version = "1.75"
 
 [features]
 default = ["ssd1351"]
@@ -40,12 +40,12 @@ embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.5", features = ["std"] }
 embassy-time = { version = "0.3", features = ["generic-queue"] }
 static_cell = { version = "2" }
-edge-http = { version = "0.1", features = ["embedded-svc"] }
-edge-ws = { version = "0.1", features = ["embedded-svc"] }
 embedded-nal-async = "0.7"
-embedded-nal-async-xtra = "0.1"
-edge-std-nal-async = "0.1"
-edge-frame = { version = "0.7", default-features = false, features = ["assets-serve"] }
+embedded-nal-async-xtra = "0.2"
+edge-std-nal-async = "0.2"
+edge-http = { version = "0.2", features = ["embedded-svc"] }
+edge-ws = { version = "0.2", features = ["embedded-svc"] }
+edge-frame = { version = "0.8", default-features = false, features = ["assets-serve"] }
 edge-executor = { version = "0.4" }
 embedded-graphics = "0.8"
 display-interface = "0.4"
@@ -53,10 +53,10 @@ display-interface-spi = "0.4"
 gfx-xtra = "0.2"
 mipidsi = { version = "0.5", optional = true }
 ssd1351 = { version = "0.4", optional = true }
-channel-bridge = { version = "0.7", default-features = false, features = ["embedded-svc"] }
-ruwm = { version = "0.4", path = "../ruwm", features = ["edge-executor"] }
+channel-bridge = { version = "0.8", default-features = false, features = ["embedded-svc"] }
+ruwm = { version = "0.5", path = "../ruwm", features = ["edge-executor"] }
 
 [build-dependencies]
 anyhow = "1"
 embuild = { version = "0.31", features = ["espidf", "elf"] }
-edge-frame = { version = "0.7", default-features = false, features = ["assets-prepare"] }
+edge-frame = { version = "0.8", default-features = false, features = ["assets-prepare"] }

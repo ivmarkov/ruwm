@@ -10,6 +10,7 @@ use channel_bridge::asynch::ws::{WsError, DEFAULT_BUF_SIZE};
 use edge_frame::assets::serve::AssetMetadata;
 use edge_frame::assets::{self, serve::Asset};
 use edge_http::io::{self, server::Server};
+use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
 use edge_http::{Method, DEFAULT_MAX_HEADERS_COUNT};
 use edge_std_nal_async::StdTcpConnection;
 use edge_ws::io::WsConnection;
@@ -389,19 +390,24 @@ impl<'a> HttpdHandler<'a> {
         T: Read + Write + TcpSplittableConnection,
     {
         if con.is_ws_upgrade_request()? {
-            con.initiate_ws_upgrade_response().await?;
+            let mut buf = send_buf[..MAX_BASE64_KEY_RESPONSE_LEN].try_into().unwrap();
+
+            con.initiate_ws_upgrade_response(&mut buf).await?;
             con.complete().await?;
 
             let socket = con.unbind()?;
 
             let (read, write) = socket.split().map_err(io::Error::Io)?;
 
+            log::info!("Starting WS connection");
+
             let sender = WsConnection::new(write, || None);
             let receiver = WsConnection::new(read, || Option::<()>::None);
 
             ruwm::ws::handle(sender, send_buf, receiver, recv_buf, task_id).await?;
         } else {
-            con.initiate_response(200, None, &[]).await?;
+            con.initiate_response(200, None, &[("Content-Length", "0")])
+                .await?;
         }
 
         Ok(())
@@ -429,7 +435,7 @@ impl<'a> HttpdHandler<'a> {
     }
 }
 
-impl<'a, 'b, T> io::server::TaskHandler<'a, T, { DEFAULT_MAX_HEADERS_COUNT }> for HttpdHandler<'b>
+impl<'a, 'b, T, const N: usize> io::server::TaskHandler<'a, T, N> for HttpdHandler<'b>
 where
     T: Read + Write + TcpSplittableConnection,
 {
@@ -438,7 +444,7 @@ where
     async fn handle(
         &self,
         task_id: usize,
-        con: &mut io::server::Connection<'a, T, { DEFAULT_MAX_HEADERS_COUNT }>,
+        con: &mut io::server::Connection<'a, T, N>,
     ) -> Result<(), Self::Error> {
         HttpdHandler::handle(self, task_id, con).await
     }
@@ -485,7 +491,7 @@ pub fn mqtt() -> Result<
     ),
     InitError,
 > {
-    // TODO: Persist the MQRTT configuration in NVS, and start with disabled MQTT,
+    // TODO: Persist the MQTT configuration in NVS, and start with disabled MQTT,
     // or whatever configuration the user has set via the UI
 
     let client_id = "water-meter-demo";

@@ -1,4 +1,4 @@
-use embassy_futures::select::select_array;
+use embassy_futures::select::select_slice;
 
 use embedded_svc::ws::asynch::server::Acceptor;
 
@@ -95,16 +95,18 @@ where
 }
 
 pub async fn broadcast() {
+    let mut notifs = [
+        VALVE_STATE_NOTIF.wait(),
+        WM_STATE_NOTIF.wait(),
+        WM_STATS_STATE_NOTIF.wait(),
+        BATTERY_STATE_NOTIF.wait(),
+        REMAINING_TIME_STATE_NOTIF.wait(),
+        MQTT_STATE_NOTIF.wait(),
+        WIFI_STATE_NOTIF.wait(),
+    ];
+
     loop {
-        let targets = match select_array([
-            VALVE_STATE_NOTIF.wait(),
-            WM_STATE_NOTIF.wait(),
-            WM_STATS_STATE_NOTIF.wait(),
-            BATTERY_STATE_NOTIF.wait(),
-            REMAINING_TIME_STATE_NOTIF.wait(),
-            MQTT_STATE_NOTIF.wait(),
-            WIFI_STATE_NOTIF.wait(),
-        ])
+        let targets = match select_slice(&mut notifs)
         .await
         .1
         {

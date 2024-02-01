@@ -7,7 +7,7 @@ use log::trace;
 
 use enumset::{enum_set, EnumSet, EnumSetType};
 
-use embassy_futures::select::select_array;
+use embassy_futures::select::select_slice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 
@@ -153,17 +153,18 @@ static STATE: Mutex<CriticalSectionRawMutex, RefCell<ScreenState>> =
     Mutex::new(RefCell::new(ScreenState::new()));
 
 pub async fn process() {
+    let mut notifs = [
+        BUTTON1_PRESSED_NOTIF.wait(),
+        BUTTON2_PRESSED_NOTIF.wait(),
+        BUTTON3_PRESSED_NOTIF.wait(),
+        VALVE_STATE_NOTIF.wait(),
+        WM_STATE_NOTIF.wait(),
+        BATTERY_STATE_NOTIF.wait(),
+        REMAINING_TIME_NOTIF.wait(),
+    ];
+
     loop {
-        let (_future, index) = select_array([
-            BUTTON1_PRESSED_NOTIF.wait(),
-            BUTTON2_PRESSED_NOTIF.wait(),
-            BUTTON3_PRESSED_NOTIF.wait(),
-            VALVE_STATE_NOTIF.wait(),
-            WM_STATE_NOTIF.wait(),
-            BATTERY_STATE_NOTIF.wait(),
-            REMAINING_TIME_NOTIF.wait(),
-        ])
-        .await;
+        let (_, index) = select_slice(&mut notifs).await;
 
         {
             STATE.lock(|screen_state| {

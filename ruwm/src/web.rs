@@ -1,20 +1,22 @@
 use core::cell::Cell;
 
-use embassy_sync::signal::Signal;
-use log::info;
+use channel_bridge::asynch::*;
+use channel_bridge::notification::Notification;
+
+use edge_frame::dto::Role;
 
 use embassy_futures::select::{select, select4};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex, RawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
+use embassy_sync::signal::Signal;
 
-use edge_frame::dto::Role;
-
-use channel_bridge::asynch::*;
-use channel_bridge::notification::Notification;
+use futures::FutureExt;
+use log::info;
 
 use crate::battery;
 use crate::state::State;
+use crate::utils::select::EitherUnwrap;
 use crate::valve;
 use crate::wm;
 
@@ -97,11 +99,11 @@ where
                 battery_state_notif,
                 WebEvent::BatteryState,
             ),
-        ),
+        )
+        .map(EitherUnwrap::unwrap),
     )
-    .await;
-
-    Ok(())
+    .await
+    .unwrap()
 }
 
 async fn receive<R>(

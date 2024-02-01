@@ -2,7 +2,7 @@
 
 [package]
 name = "ruwm-web"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -15,13 +15,12 @@ readme = "README.md"
 rust-version = "1.75"
 #forced-target = "wasm32-unknown-unknown"
 
-[patch.crates-io]
-yewdux-middleware = {git = "https://github.com/ivmarkov/yewdux-middleware" }
-edge-frame = {git = "https://github.com/ivmarkov/edge-frame" }
-
 [profile.release]
 lto = true
 opt-level = 'z'
+
+[features]
+sim = []
 
 [dependencies]
 anyhow = "1"
@@ -33,12 +32,12 @@ web-sys = { version = "0.3", features = ["console"] }
 yew = { version = "0.21", default-features = false, features = ["csr"] }
 yew-router = "0.18"
 yewdux = "0.10"
-yewdux-middleware = "0.2"
+yewdux-middleware = "0.3"
 strum = "0.25"
 serde = "1"
 embedded-svc = { version = "0.27", default-features = false, features = ["std"] }
-edge-frame = { version = "0.7", default-features = false, features = ["web"] }
-ruwm = { version = "0.4", path = "../ruwm", default-features = false }
+edge-frame = { version = "0.8", default-features = false, features = ["web"] }
+ruwm = { version = "0.5", path = "../ruwm", default-features = false }
 embassy-sync = "0.5"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
