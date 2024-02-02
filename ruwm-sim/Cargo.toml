@@ -19,8 +19,8 @@ rust-version = "1.75"
 lto = true
 opt-level = 'z'
 
-#[profile.dev]
-#opt-level = 0
+[profile.dev]
+opt-level = "s"
 
 [dependencies]
 anyhow = "1"
@@ -44,7 +44,7 @@ embedded-svc = { version = "0.27", default-features = false, features = ["std"] 
 edge-frame = { version = "0.8", default-features = false }
 ruwm = { version = "0.5", path = "../ruwm", default-features = false, features = ["system", "edge-executor"] }
 ruwm-web = { version = "0.5", path = "../ruwm-web", default-features = false, features = ["sim"] }
-hal-sim = { version = "0.5", default-features = false, features = ["io", "ui"] }
+hal-sim = { version = "0.5.1", default-features = false, features = ["io", "ui"] }
 embedded-graphics-core = "0.4"
 gfx-xtra = "0.2"
 edge-executor = "0.4"

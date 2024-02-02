@@ -19,6 +19,9 @@ rust-version = "1.75"
 lto = true
 opt-level = 'z'
 
+[profile.dev]
+opt-level = 's'
+
 [features]
 sim = []
 
